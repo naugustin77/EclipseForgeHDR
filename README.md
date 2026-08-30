@@ -203,21 +203,26 @@ run holds every tier of a 45 MP bracket in RAM at once, so budget roughly
 
 ## Install
 
+Clone it first:
+
+    git clone https://github.com/naugustin77/EclipseForgeHDR.git
+    cd EclipseForgeHDR
+
 Recommended — pipx (isolated, easy to update):
 
-    brew install pipx
+    brew install pipx        # macOS. Linux: your package manager.
+                             # Windows: py -m pip install --user pipx
     pipx ensurepath          # once; then open a new terminal
-    pipx install /path/to/eclipseforgehdr
+    pipx install .
 
-To update to a newer build, unzip over the folder and:
+To update:
 
-    pipx install --force /path/to/eclipseforgehdr
+    git pull
+    pipx install --force .
 
-Alternative — personal Homebrew formula: edit the `url "file://..."` line in
-`formula/eclipseforgehdr.rb` to the folder's real path, make the folder a git
-repo (`git init && git add -A && git commit -m init`), then:
+Alternative — Homebrew, from the clone:
 
-    brew install --formula ./formula/eclipseforgehdr.rb
+    ECLIPSEFORGE_SRC=$PWD brew install --formula ./formula/eclipseforgehdr.rb
 
 Either way you get `eclipseforgehdr` (and the short alias `efhdr`) on PATH.
 

@@ -31,6 +31,12 @@ dependencies = [
   "flask>=3.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/naugustin77/EclipseForgeHDR"
+Repository = "https://github.com/naugustin77/EclipseForgeHDR.git"
+Changelog = "https://github.com/naugustin77/EclipseForgeHDR/blob/main/CHANGELOG.md"
+Issues = "https://github.com/naugustin77/EclipseForgeHDR/issues"
+
 [project.scripts]
 eclipseforgehdr = "eclipseforgehdr.cli:main"
 efhdr = "eclipseforgehdr.cli:main"   # short alias

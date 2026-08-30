@@ -14,11 +14,11 @@ class Eclipseforgehdr < Formula
   include Language::Python::Virtualenv
 
   desc "Corona HDR pipeline for total-solar-eclipse exposure brackets"
-  homepage "https://github.com/USERNAME/eclipseforgehdr"
+  homepage "https://github.com/naugustin77/EclipseForgeHDR"
   url "file://#{ENV["ECLIPSEFORGE_SRC"] || File.expand_path("..", __dir__)}",
       using: :git, branch: "main"
   version "0.10.0"
-  head "https://github.com/USERNAME/eclipseforgehdr.git", branch: "main"
+  head "https://github.com/naugustin77/EclipseForgeHDR.git", branch: "main"
 
   depends_on "python@3.12"
 
