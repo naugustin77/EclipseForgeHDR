@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EclipseForgeHDR — High-Dynamic-Range Solar Eclipse Image Processing</title>
+<style>
+:root{
+  --bg:#0b0d10; --panel:#14171c; --panel2:#191d23; --line:#262b33;
+  --text:#d8dde4; --muted:#8b93a0; --gold:#e8a33d;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,sans-serif}
+body{overflow:hidden}
+.app{display:flex;height:100vh;overflow:hidden}
+.stage{flex:1;display:flex;flex-direction:column;min-width:0;height:100vh}
+.topbar{display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.topbar h1{font-size:16px;font-weight:600;margin:0 12px 0 0;color:var(--gold)}
+.topbar input[type=text]{flex:1;min-width:260px;background:#0e1013;color:var(--text);
+  border:1px solid var(--line);border-radius:4px;padding:7px 10px;font:13px ui-monospace,monospace}
+.topbar .status{color:var(--muted);font:12px ui-monospace,monospace;width:100%}
+.canvaswrap{flex:1;display:flex;align-items:center;justify-content:center;padding:14px;background:#07080a;overflow:hidden}
+canvas{max-width:100%;max-height:calc(100vh - 130px);display:block;box-shadow:0 0 40px rgba(0,0,0,.8);cursor:grab}
+.rail{width:330px;flex:none;background:var(--panel);border-left:1px solid var(--line);height:100vh;overflow-y:auto}
+.railinner{padding:8px 18px 18px}
+.group{padding:12px 0 6px;border-bottom:1px solid var(--line)}
+.group h2{margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--gold)}
+.ctl label{font-size:13px;display:flex;justify-content:space-between;margin-top:6px}
+.ctl label .val{font:12px ui-monospace,monospace;color:var(--muted)}
+input[type=range]{width:100%;appearance:none;height:4px;border-radius:2px;background:#2a303a;outline:none}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--text);border:2px solid var(--gold);cursor:pointer}
+button{font:13px system-ui;font-weight:500;padding:8px 12px;border-radius:4px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer}
+button.primary{background:var(--gold);border-color:var(--gold);color:#151006}
+button:disabled{opacity:.45;cursor:default}
+.log{background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:8px;
+  font:11px ui-monospace,monospace;color:var(--muted);height:110px;overflow-y:auto;white-space:pre-wrap;margin-top:8px}
+.bar{height:5px;background:#2a303a;border-radius:3px;margin-top:8px;overflow:hidden}
+.bar>div{height:100%;background:var(--gold);width:0%}
+.export{display:flex;flex-direction:column;gap:6px}
+.export label.radio{display:flex;gap:8px;align-items:center;font-size:13px}
+.export input[type=text]{background:#0e1013;color:var(--text);border:1px solid var(--line);
+  border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace}
+.hint{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage">
+    <div class="topbar">
+      <h1 title="High-Dynamic-Range Solar Eclipse Image Processing">EclipseForgeHDR</h1>
+      <input type="text" id="folder" placeholder="/path/to/folder/with/RAWs" spellcheck="false">
+      <button id="load">Load folder</button>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
+        Denoise
+        <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="off">Off</option>
+          <option value="fine" selected>Fine</option>
+          <option value="medium">Fine + medium</option>
+          <option value="strong">Strong</option>
+        </select></label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Off by default: earthshine needs long tiers with real headroom over the scattered glare, which most totality brackets do not have.">
+        <input type="checkbox" id="earthshine"> Earthshine</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Map hot/dead photosites on the shortest tier and repair them in every frame.">
+        <input type="checkbox" id="despeckle" checked> Fix hot pixels</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Also write each aligned exposure tier as a 16-bit TIFF into eclipseforge_output/aligned_tiers/, for blending or HDR combining in PixInsight, Photoshop or Affinity. Aligned and demosaiced but not merged or tone mapped; each tier sits at its own real signal level, so the exposure relationship between tiers is preserved. An ICC profile is embedded so no host has to guess.">
+        <input type="checkbox" id="exportTiers"> Export aligned tier TIFFs</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Write the tier TIFFs scene-linear (gamma 1.0) with a linear ICC profile instead of sRGB-encoded. Choose this for PixInsight or for your own HDR combine; leave it off for Photoshop and Affinity, where sRGB-encoded files open looking correct.">
+        <input type="checkbox" id="tierLinear"> &nbsp;&#8627; scene-linear</label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Averaging all frames of a tier gains sqrt(N) in signal-to-noise; using only the sharpest keeps maximum detail. Check the sharpness spread printed per tier: near 1.0 means the frames are equally sharp and averaging is nearly free.">
+        Frames
+        <select id="frames" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="all" selected>All (best SNR)</option>
+          <option value="best50">Best half</option>
+          <option value="best">Best only (max detail)</option>
+        </select></label>
+      <button class="primary" id="start" disabled>Start</button>
+      <span class="status" id="status">choose a folder containing the bracketed raw files · scroll = zoom · drag = pan · double-click = reset</span>
+      <span id="views" style="display:none;gap:6px">
+        <button data-view="composite" class="vbtn primary">Composite</button>
+        <button data-view="mgn" class="vbtn">MGN</button>
+        <button data-view="fnrgf" class="vbtn">FNRGF</button>
+        <button data-view="nafe" class="vbtn">NAFE</button>
+        <button data-view="inner" class="vbtn">Inner</button>
+        <button data-view="pellett" class="vbtn">Pellett</button>
+        <button data-view="prom" class="vbtn">Prom gate</button>
+      </span>
+    </div>
+    <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas></div>
+    <div id="credit" style="position:fixed;right:346px;bottom:8px;color:#8b93a0;
+      font:11px ui-monospace,monospace;opacity:.8;pointer-events:none"></div>
+  </div>
+  <aside class="rail"><div class="railinner">
+    <div class="group"><h2>Pipeline</h2>
+      <div class="bar"><div id="pbar"></div></div>
+      <div class="log" id="log">idle</div>
+    </div>
+    <div class="group"><h2>Structure</h2><div id="g-structure"></div></div>
+    <div class="group"><h2>Inner corona</h2><div id="g-inner"></div></div>
+    <div class="group"><h2>Prominences</h2><div id="g-prom"></div></div>
+    <div class="group"><h2>Color</h2><div id="g-color"></div></div>
+    <div class="group"><h2>Tone</h2><div id="g-tone"></div></div>
+    <div class="group"><h2>Diamond ring</h2>
+      <input type="text" id="ringpath" placeholder="/path/to/contact_frame.RW2" spellcheck="false"
+        style="width:100%;background:#0e1013;color:var(--text);border:1px solid var(--line);
+        border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace">
+      <button id="ringload" style="margin-top:6px" disabled>Load contact frame</button>
+      <div id="g-ring"></div>
+    </div>
+    <div class="group"><h2>Export</h2>
+      <div class="export">
+        <label class="radio"><input type="radio" name="fmt" value="tif16" checked> TIFF · 16-bit (recommended)</label>
+        <label class="radio"><input type="radio" name="fmt" value="tif8"> TIFF · 8-bit</label>
+        <label class="radio"><input type="radio" name="fmt" value="png"> PNG · 16-bit</label>
+        <label class="radio"><input type="radio" name="fmt" value="jpg"> JPG (lossy)</label>
+        <label class="radio"><input type="checkbox" id="exphalf"> Export at 50 % size (2×2 binned, cleaner)</label>
+        <input type="text" id="expname" value="eclipseforge_render" spellcheck="false">
+        <button class="primary" id="export" disabled>Export full resolution</button>
+        <span class="hint">Exports the current view (composite, or the selected detail layer as grayscale).
+        Saved into <code>eclipseforge_output/</code> inside the raw folder, with a .params.json sidecar.</span>
+      </div>
+    </div>
+  </div></aside>
+</div>
+<script>
+const DEFS = [
+ ["radialFlatten","Radial flatten",0,0.9,0.01,"structure"],
+ ["fnMix","FNRGF share (outer)",0,1,0.01,"structure"],
+ ["mgnContrast","MGN contrast (0 = off)",0,2,0.01,"structure"],
+ ["fnCompress","FNRGF strength (0 = off)",0,2.5,0.01,"structure"],
+ ["nafeMix","NAFE-VN mix (0 = off)",0,1,0.01,"structure"],
+ ["clarity","Clarity",0,1,0.01,"structure"],
+ ["smoothing","Grain smoothing",0,1,0.01,"structure"],
+ ["pelGain","Pellett layer",0,1.2,0.01,"structure"],
+ ["detailGain","Detail gain",0.3,2,0.01,"structure"],
+ ["baseLift","Base lift",0,0.5,0.005,"structure"],
+ ["envGamma","Envelope gamma",0.6,1.8,0.01,"structure"],
+ ["innerMix","Short-exposure detail",0,1,0.01,"inner"],
+ ["innerDenoise","Detail denoise",0,1,0.01,"inner"],
+ ["innerDim","Glare dim",0,0.7,0.01,"inner"],
+ ["promGain","Prominence contrast",0,2,0.01,"prom"],
+ ["temp","Warmth (R/B)",0.8,1.3,0.005,"color"],
+ ["tint","Tint (green/magenta)",0.8,1.3,0.005,"color"],
+ ["bgNeutral","Neutralise sky cast",0,1.2,0.01,"color"],
+ ["satur","Saturation",0.5,2,0.01,"color"],
+ ["hlCompress","Highlight compression",0,1,0.01,"color"],
+ ["hlDesat","Highlight desaturation",0,0.8,0.01,"color"],
+ ["outGamma","Output gamma",0.8,1.8,0.01,"tone"],
+ ["bgBlack","Black point",0,0.12,0.001,"tone"],
+ ["discLevel","Moon disc level",0,0.2,0.002,"tone"],
+ ["discTrim","Disc mask trim (px)",-40,40,0.5,"tone"],
+ ["earthShine","Earthshine",0,1.5,0.01,"tone"],
+ ["ringBlend","Ring blend (screen)",0,1,0.01,"ring"],
+ ["ringScale","Ring disc size",0.96,1.04,0.001,"ring"],
+ ["ringDX","Ring offset X (px)",-30,30,0.5,"ring"],
+ ["ringDY","Ring offset Y (px)",-30,30,0.5,"ring"],
+];
+let VIEW = "composite";
+let P = {}, GEO = null, L = {}, ready = false;
+const $ = id => document.getElementById(id);
+
+function buildSliders(defaults){
+  for (const [k,label,min,max,step,grp] of DEFS){
+    P[k] = defaults[k];
+    const div = document.createElement("div"); div.className = "ctl";
+    div.innerHTML = `<label>${label}<span class="val" id="v_${k}">${defaults[k]}</span></label>
+      <input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}" value="${defaults[k]}">`;
+    $("g-"+grp).appendChild(div);
+    const el = div.querySelector("input");
+    el.addEventListener("input", () => {
+      P[k] = parseFloat(el.value); $("v_"+k).textContent = el.value;
+      scheduleRender();
+    });
+  }
+}
+
+async function loadFolder(){
+  const r = await fetch("/api/folder", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({path: $("folder").value})});
+  const j = await r.json();
+  if(!j.ok){ $("status").textContent = j.error; return; }
+  $("status").textContent = `${j.folder} — ${j.raw_count} raw files` +
+    (j.cached ? " · cached pipeline products found (Start reuses them)" : "");
+  $("start").disabled = false;
+  ready = false; $("export").disabled = true;
+}
+
+async function startRun(){
+  $("start").disabled = true;
+  await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({force:false, denoise: $("denoise").value,
+                          earthshine: $("earthshine").checked,
+                          despeckle: $("despeckle").checked,
+                          exportTiers: $("exportTiers").checked,
+                          tierLinear: $("tierLinear").checked,
+                          frames: $("frames").value})});
+  pollProgress();
+}
+
+async function pollProgress(){
+  const r = await fetch("/api/progress"); const j = await r.json();
+  $("log").textContent = j.lines.join("\n") || "…";
+  $("log").scrollTop = 1e9;
+  $("pbar").style.width = (j.frac*100).toFixed(1)+"%";
+  if (j.error){ $("status").textContent = "error — see log"; $("log").textContent += "\n"+j.error;
+    $("start").disabled = false; return; }
+  if (j.done && j.ready){ await loadLayers(); $("start").disabled = false; return; }
+  setTimeout(pollProgress, 800);
+}
+
+function fetchLayer(name){
+  return new Promise(res => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = GEO.W; c.height = GEO.H;
+      const x = c.getContext("2d"); x.drawImage(im, 0, 0);
+      L[name] = x.getImageData(0, 0, GEO.W, GEO.H).data; res();
+    };
+    im.src = "/api/layer/" + name + "?t=" + Date.now();
+  });
+}
+
+// These weights have to be the SAME functions render.py uses, or the sliders
+// are tuned against one image and applied to another on export. Module scope:
+// used both when building L.wf below and in renderNow.
+const _ss = x => { x = x<0?0:x>1?1:x; return x*x*(3-2*x); };
+
+async function loadLayers(){
+  GEO = await (await fetch("/api/geometry")).json();
+  if (Object.keys(P).length === 0) buildSliders(GEO.defaults);
+  cv.width = GEO.W; cv.height = GEO.H;
+  oc.width = GEO.W; oc.height = GEO.H;
+  out = octx.createImageData(GEO.W, GEO.H);
+  $("credit").textContent = `EclipseForgeHDR ${GEO.version || ""} · \u00a9 2026 N. Augustin with ClaudeAI`;
+  const names = ["bg","rprof","mgn","fnrgf","mgn_lo","mgn_sm","fnrgf_lo","fnrgf_sm",
+                 "nafe","nafe_lo","nafe_sm",
+                 "pel","inner","inner0","earth","prom","ratio"];
+  if (GEO.has_contact) names.push("contact");
+  // hide the Earthshine slider unless the layer was actually built
+  const esc = $("s_earthShine");
+  if (esc){
+    const row = esc.closest(".ctl");
+    if (row) row.style.display = GEO.has_earth ? "" : "none";
+    if (!GEO.has_earth){ P.earthShine = 0; esc.value = 0; $("v_earthShine").textContent = "0"; }
+  }
+  await Promise.all(names.map(fetchLayer));
+  // median of the NAFE layer, so its mix is centred like the other two
+  if (L.nafe){
+    let h = new Int32Array(256);
+    for (let i=0;i<L.nafe.length;i+=28) h[L.nafe[i]]++;   // 28 = 7 whole RGBA pixels
+    let tot=0; for (let i=0;i<256;i++) tot+=h[i];
+    let acc=0, mv=128;
+    for (let i=0;i<256;i++){ acc+=h[i]; if (acc>=tot/2){ mv=i; break; } }
+    nafeMed = mv/255;
+  }
+  $("ringload").disabled = false;
+  const N = GEO.W*GEO.H;
+  L.r = new Float32Array(N); L.wf = new Float32Array(N);
+  const LP = GEO.limbProf, LM = GEO.limbMargin || 0;
+  L.rmask = new Float32Array(N);
+  for (let y=0,i=0; y<GEO.H; y++) for (let x=0; x<GEO.W; x++,i++){
+    const r = Math.hypot(y-GEO.cy, x-GEO.cx);
+    L.r[i] = r;
+    if (LP){
+      let t = Math.atan2(y-GEO.cy, x-GEO.cx); if (t<0) t += 2*Math.PI;
+      const f = t/(2*Math.PI)*LP.length, k = Math.floor(f), g = f-k;
+      L.rmask[i] = (LP[k%LP.length]*(1-g) + LP[(k+1)%LP.length]*g) + LM;
+    } else L.rmask[i] = GEO.Rmask ?? (GEO.R + LM);
+    L.wf[i] = _ss((r - 1.02*GEO.R)/(0.55*GEO.R));
+  }
+  ready = true; $("export").disabled = false;
+  $("views").style.display = "inline-flex";
+  $("status").textContent = "ready — adjust and export";
+  renderNow();
+}
+
+const cv = $("cv"), ctx = cv.getContext("2d");
+const oc = document.createElement("canvas"), octx = oc.getContext("2d");
+let out = null, vz = 1, vtx = 0, vty = 0;
+
+function clampView(){
+  vz = Math.min(10, Math.max(1, vz));
+  vtx = Math.min(0, Math.max(GEO ? GEO.W*(1-vz) : 0, vtx));
+  vty = Math.min(0, Math.max(GEO ? GEO.H*(1-vz) : 0, vty));
+}
+function draw(){
+  if (!GEO) return;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,GEO.W,GEO.H);
+  ctx.imageSmoothingEnabled = vz < 3;
+  ctx.setTransform(vz,0,0,vz,vtx,vty);
+  ctx.drawImage(oc, 0, 0);
+}
+let nafeMed = 0.5;
+function detailAt(j){
+  const {mgnContrast,fnCompress,innerDenoise,clarity,smoothing,nafeMix} = P;
+  let mgr = L.mgn[j]/255;
+  if (clarity>0) mgr += clarity*(mgr - L.mgn_lo[j]/255);
+  if (smoothing>0) mgr = (1-smoothing)*mgr + smoothing*(L.mgn_sm[j]/255);
+  let mg = 0.5 + (mgr - 0.5)*mgnContrast; mg = mg<0?0:mg>1?1:mg;
+  let fnr = L.fnrgf[j]/255;
+  if (clarity>0) fnr += clarity*(fnr - L.fnrgf_lo[j]/255);
+  if (smoothing>0) fnr = (1-smoothing)*fnr + smoothing*(L.fnrgf_sm[j]/255);
+  const D = (fnr - 0.5)*8;
+  const sHi = 2.5/Math.max(fnCompress,1e-4);
+  let fn = (D>=0 ? Math.tanh(D/sHi) : Math.tanh(D/(1.5*sHi)))*0.5 + 0.5;
+  if (nafeMix>0 && L.nafe){
+    let nf = L.nafe[j]/255;
+    if (clarity>0) nf += clarity*(nf - L.nafe_lo[j]/255);
+    if (smoothing>0) nf = (1-smoothing)*nf + smoothing*(L.nafe_sm[j]/255);
+    nf = 0.5 + (nf - nafeMed);
+    nf = nf<0?0:nf>1?1:nf;
+    mg = (1-nafeMix)*mg + nafeMix*nf;
+    fn = (1-nafeMix)*fn + nafeMix*nf;
+  }
+  const inEff = (1-innerDenoise)*(L.inner0[j]/255) + innerDenoise*(L.inner[j]/255);
+  return [mg, fn, inEff];
+}
+function renderNow(){
+  if (!ready) return;
+  const {fnMix,detailGain,baseLift,envGamma,radialFlatten,innerMix,innerDim,promGain,
+         temp,satur,hlCompress,hlDesat,outGamma,bgBlack,discLevel,discTrim,earthShine} = P;
+  const knee = 0.9 - 0.35*hlCompress;
+  const bg=L.bg, rp=L.rprof, ear=L.earth, pr=L.prom, ch=L.ratio,
+        wf=L.wf, rr_=L.r, d=out.data;
+  const ig=1/outGamma, ib=1/(1-bgBlack);
+  const DEC = GEO.decim || 4;
+  // matches render.py's np.clip(ratio, 0.2, 3.0); hoisted out of the pixel loop
+  const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
+  const bc = GEO.bgChroma || [1,1,1], bn = P.bgNeutral || 0;
+  const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
+  const lvl = 1-0.5*radialFlatten;
+  for (let i=0,j=0; i<wf.length; i++,j+=4){
+    const [mg, fn, inEff] = detailAt(j);
+    if (VIEW !== "composite"){
+      const v = VIEW==="mgn"?mg : VIEW==="fnrgf"?fn : VIEW==="inner"?inEff :
+                VIEW==="nafe"?(L.nafe?L.nafe[j]/255:0.5) :
+                VIEW==="pellett"?L.pel[j]/255 : pr[j]/255;
+      const b = Math.max(0, Math.min(255, v*255));
+      d[j]=b; d[j+1]=b; d[j+2]=b; d[j+3]=255;
+      continue;
+    }
+    const r = rr_[i];
+    const Re = L.rmask[i] + discTrim/DEC;   // discTrim is full-res px
+    const eg = Math.min(1, Math.max(0, (r-(Re-10/DEC))/(12/DEC)));
+    const wI = eg*_ss((1.45*GEO.R - r)/(0.40*GEO.R));
+    const wG = eg*Math.exp(-Math.max(0, r-Re)/(0.60*GEO.R));
+    let B = Math.pow(bg[j]/255, envGamma)*(1-innerDim*wG);
+    B = B/Math.pow(Math.max(rp[j]/255, 0.12), radialFlatten)*lvl;
+    let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
+    det = det + P.pelGain*(L.pel[j]/255 - 0.5);
+    det = det*(1-innerMix*wI) + innerMix*wI*inEff;
+    let Y = B*(baseLift+detailGain*det);
+    Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(inEff-0.5)));
+    const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
+    Y = Y*eg + Yd*(1-eg);
+    let a0 = Math.pow(_cl(ch[j]),   satur)/BC[0];
+    let a1 = Math.pow(_cl(ch[j+1]), satur)/BC[1];
+    let a2 = Math.pow(_cl(ch[j+2]), satur)/BC[2];
+    a0 *= temp; a2 /= temp; a1 *= P.tint;
+    const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
+    a0 /= alum; a1 /= alum; a2 /= alum;
+    a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
+    let r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
+    const m = Math.max(r0,r1,r2);
+    const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));
+    const sc = m>1e-6 ? ms/m : 1;
+    const tt = Math.min(1, Math.max(0,(ms-0.9)/0.1))*hlDesat;
+    const rr = [r0*sc, r1*sc, r2*sc];
+    const ring = P.ringBlend>0 && L.contact;
+    let jr = j;
+    if (ring && (P.ringScale!==1 || P.ringDX!==0 || P.ringDY!==0)){
+      const dec = GEO.decim || 4;
+      const y = (i/GEO.W)|0, x = i - y*GEO.W;
+      const sy = Math.round(GEO.cy + (y - GEO.cy - P.ringDY/dec)/P.ringScale);
+      const sx = Math.round(GEO.cx + (x - GEO.cx - P.ringDX/dec)/P.ringScale);
+      jr = (sy>=0 && sy<GEO.H && sx>=0 && sx<GEO.W) ? (sy*GEO.W+sx)*4 : -1;
+    }
+    for (let c=0; c<3; c++){
+      let v = rr[c]*(1-tt)+ms*tt; v = v<0?0:v>1?1:v;
+      v = Math.pow(v, ig);
+      v = (v-bgBlack)*ib; v = v<0?0:v>1?1:v;
+      if (ring && jr>=0) v = 1-(1-v)*(1-P.ringBlend*(L.contact[jr+c]/255));
+      d[j+c] = v*255;
+    }
+    d[j+3] = 255;
+  }
+  octx.putImageData(out, 0, 0);
+  draw();
+}
+document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () => {
+  VIEW = b.dataset.view;
+  document.querySelectorAll(".vbtn").forEach(x => x.classList.toggle("primary", x===b));
+  renderNow();
+}));
+let raf = null;
+function scheduleRender(){ if(!raf) raf = requestAnimationFrame(()=>{raf=null; renderNow();}); }
+
+cv.addEventListener("wheel", e => {
+  if (!GEO) return;
+  e.preventDefault();
+  const rc = cv.getBoundingClientRect();
+  const mx = (e.clientX-rc.left)*GEO.W/rc.width, my = (e.clientY-rc.top)*GEO.H/rc.height;
+  const f = Math.exp(-e.deltaY*0.0015), z0 = vz;
+  vz *= f; clampView();
+  vtx = mx-(mx-vtx)*vz/z0; vty = my-(my-vty)*vz/z0; clampView();
+  draw();
+}, {passive:false});
+let drag = null;
+cv.addEventListener("pointerdown", e => {drag=[e.clientX,e.clientY,vtx,vty]; cv.setPointerCapture(e.pointerId);});
+cv.addEventListener("pointermove", e => {
+  if (!drag || !GEO) return;
+  const rc = cv.getBoundingClientRect(), s = GEO.W/rc.width;
+  vtx = drag[2]+(e.clientX-drag[0])*s; vty = drag[3]+(e.clientY-drag[1])*s;
+  clampView(); draw();
+});
+cv.addEventListener("pointerup", () => drag=null);
+cv.addEventListener("dblclick", () => {vz=1; vtx=vty=0; draw();});
+
+$("ringload").addEventListener("click", async () => {
+  $("ringload").disabled = true;
+  const r = await fetch("/api/contact", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({path: $("ringpath").value})});
+  const j = await r.json();
+  if (!j.ok){ $("status").textContent = j.error; $("ringload").disabled = false; return; }
+  const poll = async () => {
+    const p = await (await fetch("/api/progress")).json();
+    $("log").textContent = p.lines.join("\n"); $("log").scrollTop = 1e9;
+    if (p.error){ $("status").textContent = "contact frame failed — see log"; $("ringload").disabled = false; return; }
+    if (p.done){ await fetchLayer("contact"); $("ringload").disabled = false;
+      $("status").textContent = "contact frame loaded — raise Ring blend"; renderNow(); return; }
+    setTimeout(poll, 600);
+  };
+  poll();
+});
+fetch("/api/version").then(r => r.json()).then(j => {
+  $("credit").textContent = `EclipseForgeHDR ${j.version} · \u00a9 2026 N. Augustin with ClaudeAI`;
+}).catch(() => {});
+$("load").addEventListener("click", loadFolder);
+$("folder").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
+$("start").addEventListener("click", startRun);
+$("export").addEventListener("click", async () => {
+  const fmt = document.querySelector("input[name=fmt]:checked").value;
+  $("export").disabled = true;
+  const r = await fetch("/api/export", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({format: fmt, params: P, name: $("expname").value, view: VIEW, size: $("exphalf").checked ? "half" : "full"})});
+  const j = await r.json();
+  if (j.ok){ $("status").textContent = "exporting → " + j.path; pollExport(); }
+  else { $("status").textContent = j.error; $("export").disabled = false; }
+});
+async function pollExport(){
+  const j = await (await fetch("/api/progress")).json();
+  if (j.done){
+    $("export").disabled = false;
+    $("status").textContent = j.error ? ("export failed: "+j.error) :
+      (j.lines[j.lines.length-1] || "export done");
+    return;
+  }
+  setTimeout(pollExport, 700);
+}
+</script>
+</body>
+</html>

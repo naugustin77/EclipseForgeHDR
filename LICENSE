@@ -1,0 +1,68 @@
+EclipseForgeHDR
+Copyright (c) 2026 N. Augustin. All rights reserved.
+
+NO LICENCE IS GRANTED AT THIS TIME.
+
+This repository is source-available, not open source. The code is published so
+that people can read it, run it on their own eclipse data, and tell me where it
+breaks. A proper licence will follow once it is clear what the project should
+be; until then the default of copyright law applies and the paragraphs below say
+plainly what I do and do not intend by that.
+
+
+WHAT YOU MAY DO
+
+Because this repository is public on GitHub, GitHub's Terms of Service already
+let you view it and fork it within GitHub. Beyond that, and for the avoidance of
+doubt:
+
+  * Run it on your own images, for any purpose, commercial or not.
+  * Modify your own copy to make it work with your data.
+  * Open issues and pull requests.
+
+THE IMAGES YOU MAKE WITH IT ARE ENTIRELY YOURS.
+
+This is worth stating on its own line, because non-commercial software licences
+often leave it ambiguous. I claim nothing over anything you photograph, process
+or produce with this tool: no rights, no royalty, no attribution requirement.
+Sell the prints, license the images, publish them, put them in a book. That the
+software is restricted does not reach through to your pictures.
+
+
+WHAT IS NOT GRANTED
+
+Redistributing the code outside GitHub, publishing modified versions, bundling
+it into another product, selling it, or offering it as a service. None of that
+is permitted at present. If you want to do any of it, ask — the answer is likely
+to be yes with conditions, and a request is what will tell me which licence this
+project actually needs.
+
+
+WHERE THIS IS HEADED
+
+The intent is that people should be free to use and improve this without paying
+for it, that nobody should be able to sell it or close it off, and that
+improvements should stay available under the same terms. No widely used software
+licence expresses exactly that combination, so rather than pick a poor fit in a
+hurry, this stays unlicensed while the question is open. Suggestions welcome in
+an issue.
+
+
+CONTRIBUTIONS
+
+By opening a pull request you agree that your contribution may be included in
+this project and released under whatever licence the project eventually adopts,
+alongside the rest of the code.
+
+
+NO WARRANTY
+
+This software is provided "as is", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability, fitness
+for a particular purpose and non-infringement. In no event shall the author be
+liable for any claim, damages or other liability arising from, out of, or in
+connection with the software or its use.
+
+The scientific methods this code implements are the work of others and are cited
+in README.md and in the source. Nothing here claims any right over those methods
+or the papers describing them.

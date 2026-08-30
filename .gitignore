@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
+
+# EclipseForgeHDR working products, written next to the raw files
+.eclipseforgehdr/
+eclipseforge_output/

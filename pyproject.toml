@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eclipseforgehdr"
+dynamic = ["version"]
+description = "EclipseForgeHDR — High-Dynamic-Range Solar Eclipse Image Processing: quality selection, sub-pixel alignment, seam-free HDR merge, MGN/FNRGF/NAFE detail extraction, interactive rendering GUI"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "N. Augustin" }]
+keywords = ["solar eclipse", "corona", "HDR", "astrophotography",
+            "image processing", "MGN", "FNRGF", "NAFE"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Web Environment",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Astronomy",
+  "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "scikit-image>=0.22",
+  "pillow>=10",
+  "tifffile>=2023.9",
+  "rawpy>=0.19",
+  "exifread>=3.0",
+  "flask>=3.0",
+]
+
+[project.scripts]
+eclipseforgehdr = "eclipseforgehdr.cli:main"
+efhdr = "eclipseforgehdr.cli:main"   # short alias
+
+# Single source of truth for the version: src/eclipseforgehdr/__init__.py.
+# It used to be written here as well, and the two drifted -- the code said
+# 0.8.0 while `pipx list` still reported 0.7.1.
+[tool.setuptools.dynamic]
+version = {attr = "eclipseforgehdr.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+eclipseforgehdr = ["gui.html"]
