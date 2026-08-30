@@ -230,6 +230,13 @@ def _detail_layers(src, P, preview=True):
     # NAFE-VN rides with the other two rather than replacing them: it sees the
     # faint outer structure they flatten away, and because it needs no disc
     # geometry it stays clean at the limb where they are most fragile.
+    #
+    # The stored layer is E, the equalized field -- not the paper's eq. 2
+    # output B = (1-w) T_gamma(A) + w E. That combination happens HERE and one
+    # level up: the composite's envelope plays the role of T_gamma, and
+    # nafeMix is w. Their w runs 0.05..0.3, so the useful part of this slider
+    # is the bottom third; past that the rank field starts to overwhelm the
+    # envelope's own falloff.
     nf_ = src.get("nafe")
     if nf_ is not None and P.get("nafeMix", 0.0) > 0:
         a = float(np.clip(P["nafeMix"], 0.0, 1.0))

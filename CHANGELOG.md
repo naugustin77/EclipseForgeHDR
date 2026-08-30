@@ -5,6 +5,30 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.10.1 — NAFE was shipping the wrong term
+
+- **The NAFE layer was 99% a gamma stretch.** The 2014 paper's output is
+  `B = (1−w)·T_γ(A) + w·E` (eq. 2) with w in 0.05–0.3, and that is what was
+  being stored — but B is their *final display image*: T_γ carries the
+  large-scale brightness and E carries the structure, so at w = 0.2 the result
+  is four fifths gamma transform by construction. As a detail layer that was a
+  second copy of the base image, and mixing it in diluted MGN and FNRGF rather
+  than adding to them. It looked, correctly, like a greyscale version of the
+  plain stack.
+  The layer is now **E**, the equalized field. Measured on the reference set
+  (×4 decimated, K=64, γ=2.4, ε=0.05):
+
+  | | stored before (B) | stored now (E) |
+  |---|---|---|
+  | correlation with a plain gamma stretch | 0.992 | 0.562 |
+  | high-pass structure (sd) | 0.0180 | 0.0675 |
+
+  Equation 2 has not been abandoned — it now happens where it belongs, one
+  level up: the composite's envelope is T_γ and the **nafeMix slider is w**.
+  Since the paper's w runs 0.05–0.3, the useful part of that slider is its
+  bottom third. `nafe_vn(..., combine=True)` still returns the paper's B for
+  anyone who wants the standalone image.
+
 ## 0.10.0 — full code audit
 
 A line-by-line review of every module, with a specific eye on datasets other

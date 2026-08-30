@@ -19,7 +19,8 @@ from .nafe import nafe_vn
 #  * K 64 with a Gaussian membership 1.5 bins wide keeps the cumulative
 #    histogram smooth; a narrower membership prints concentric contour rings.
 NAFE_K = 64
-NAFE_W = 0.2
+NAFE_W = 0.2          # the paper's eq.2 weight; the stored layer is E, so this
+                      # is unused here -- nafeMix in render.py is the live w
 NAFE_GAMMA = 2.4
 NAFE_EPS = 0.05
 NAFE_GRID = 8
@@ -415,10 +416,16 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     # drawn around it. Where the limb fit is imperfect this layer is unaffected.
     progress.log("NAFE (variable neighbourhood)...", 0.958)
     try:
-        nv = nafe_vn(Ldn, K=NAFE_K, w=NAFE_W, gamma=NAFE_GAMMA,
+        # combine=False: store E, the equalized field, NOT the paper's eq. 2
+        # output B = (1-w) T_gamma + w E. B is their final display image and is
+        # four fifths gamma transform at w = 0.2 -- as a detail layer it was a
+        # second copy of the base image and diluted MGN and FNRGF with it. The
+        # eq. 2 mix happens in render.py instead, where the composite envelope
+        # is T_gamma and the nafeMix slider is w.
+        nv = nafe_vn(Ldn, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
                      eps_frac=NAFE_EPS, n_scales=8, grid=NAFE_GRID)
         np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
-        lstats["nafe"] = {"K": NAFE_K, "w": NAFE_W, "eps": NAFE_EPS}
+        lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E"}
         del nv
     except Exception as e:
         progress.log(f"NAFE layer unavailable ({e})", None)

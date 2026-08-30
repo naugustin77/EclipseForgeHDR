@@ -102,17 +102,42 @@ def value_neighbourhood_weight(L, sigma_sp=25.0, eps=None, valid=None,
 
 
 def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
-            eps_frac=0.25, valid=None, n_scales=10, fuzzy=True, grid=4):
+            eps_frac=0.25, valid=None, n_scales=10, fuzzy=True, grid=4,
+            combine=False):
     """Noise Adaptive Fuzzy Equalization with a Variable Neighbourhood.
 
     `A` is a luminance image, ideally already in a log or gamma domain.
 
-    The output is  B = (1-w) * T_gamma(A) + w * E_{N,sigma}(A)  (their eq. 2),
-    where E is the fuzzy rank of each pixel within its own neighbourhood: the
+    Returns E, the fuzzy rank of each pixel within its own neighbourhood: the
     fraction of the neighbourhood that is darker than it. Because a rank is
     scale-free, faint structure is brought up to the same contrast as bright
     structure without any radial model at all -- which is why NAFE sees the
     inner corona and the outer corona in one pass.
+
+    WHY E AND NOT B (fixed in 0.10.1)
+    ---------------------------------
+    The paper's output is  B = (1-w) T_gamma(A) + w E_{N,sigma}(A)  (eq. 2)
+    with w in 0.05..0.3, and `combine=True` returns exactly that. But B is
+    their FINAL DISPLAY IMAGE: T_gamma carries the large-scale brightness and
+    E carries the structure, and at w = 0.2 the result is four fifths gamma
+    transform by construction.
+
+    This pipeline does not want a display image here. It wants a detail layer
+    to mix against MGN and FNRGF, and its composite already supplies the
+    large-scale brightness through the envelope -- which is the same role
+    T_gamma plays in eq. 2. Returning B therefore added a SECOND copy of the
+    base image into the detail term and diluted the other two layers with it.
+
+    Measured on the reference set (decimated x4, K=64, w=0.2, gamma=2.4,
+    eps=0.05):
+
+        corr(B, T_gamma)          0.992      <- B is a gamma stretch
+        corr(E, T_gamma)          0.562
+        high-pass sd of B         0.0180
+        high-pass sd of E         0.0675     <- 3.8x the local structure
+
+    So the eq. 2 mix still happens; it happens in render.py, where the
+    envelope is T_gamma and the nafeMix slider is w.
 
     Implementation: the local cumulative histogram is evaluated for every pixel
     at once by quantizing into K levels and blurring each level's membership
@@ -245,5 +270,11 @@ def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
     # the equalized term carries the structure. T_gamma is applied to the
     # LINEAR-in-A version, not the rank-mapped one, so the base image keeps its
     # natural falloff instead of being flattened twice.
+    if not combine:
+        return np.where(m, E, 0.5).astype(np.float32)
+    # eq. 2, for callers that want the paper's standalone display image.
+    # T_gamma is applied to the LINEAR-in-A version, not the rank-mapped one,
+    # so the base image keeps its natural falloff instead of being flattened
+    # twice.
     out = (1.0 - w) * np.power(x_lin, 1.0 / max(gamma, 1e-3)) + w * E
     return np.where(m, out, 0.5).astype(np.float32)
