@@ -22,7 +22,18 @@ NAFE_K = 64
 NAFE_W = 0.2          # the paper's eq.2 weight; the stored layer is E, so this
                       # is unused here -- nafeMix in render.py is the live w
 NAFE_GAMMA = 2.4
-NAFE_EPS = 0.05
+NAFE_EPS = 0.10       # value window, in rank units. Swept on the reference set:
+                      # 0.02 prints concentric rings (the paper's "fragmentation"),
+                      # 0.05 gave high-pass 0.076, 0.10 gives 0.109 at the same
+                      # agreement with FNRGF (0.711 -> 0.721), and past 0.15 the
+                      # curve is flat and the extra is noise.
+NAFE_NOISE_MULT = 4.0 # the paper's sigma in units of sigma_A; their range is 2..12
+NAFE_STAT_R = 1.5     # the rank map's resolution goes to r < this x R ...
+NAFE_STAT_W = 0.10    # ... with everything outside still counted, at this weight
+NAFE_NEIGH_R = 0.13   # neighbourhood sigma as a fraction of the lunar radius.
+                      # Measured flat from 0.06 R to 0.51 R, so this is not
+                      # critical -- but it has to scale with the disc, or the
+                      # neighbourhood means something different on every camera.
 NAFE_GRID = 8
 
 
@@ -422,10 +433,18 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         # second copy of the base image and diluted MGN and FNRGF with it. The
         # eq. 2 mix happens in render.py instead, where the composite envelope
         # is T_gamma and the nafeMix slider is w.
+        _sm = (r < NAFE_STAT_R * R)
         nv = nafe_vn(Ldn, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
+                     sigma_sp=max(NAFE_NEIGH_R * R, 8.0) / NAFE_GRID,
+                     noise_mult=NAFE_NOISE_MULT,
+                     stat_mask=_sm, stat_weight=NAFE_STAT_W,
                      eps_frac=NAFE_EPS, n_scales=8, grid=NAFE_GRID)
+        del _sm
         np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
-        lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E"}
+        lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E",
+                          "noise_mult": NAFE_NOISE_MULT,
+                          "neigh_px": round(NAFE_NEIGH_R * R, 1),
+                          "stat_R": NAFE_STAT_R, "stat_w": NAFE_STAT_W}
         del nv
     except Exception as e:
         progress.log(f"NAFE layer unavailable ({e})", None)

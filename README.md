@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.10.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.10.3
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
@@ -8,6 +8,11 @@ a few minutes, then adjust the result on a live preview and export it.
 
 Everything runs on your own machine. No cloud, no account, no telemetry: the
 GUI is a small web server on `127.0.0.1` that only your browser talks to.
+
+![Composite render](docs/images/composite.jpeg)
+
+*49 frames, 14 exposure tiers, 12.6 EV — Panasonic S1R II at 600 mm f/8,
+Spain, 12 August 2026.*
 
 ---
 
@@ -95,6 +100,15 @@ things, each has its own button in the GUI so you can look at it alone, and the
 composite is a weighted mix. Broadly: MGN and Pellett are for fine structure,
 FNRGF and NAFE for faint outer structure, and Inner and Prom gate are extra
 *sources* rather than filters.
+
+| MGN | FNRGF | NAFE |
+|:---:|:---:|:---:|
+| ![](docs/images/mgr.jpeg) | ![](docs/images/fnrgf.jpeg) | ![](docs/images/nafe.jpeg) |
+| **Pellett** | **Inner** | **Prom gate** |
+| ![](docs/images/pellet.jpeg) | ![](docs/images/inner.jpeg) | ![](docs/images/prom.jpeg) |
+
+*The same merged image through each layer. These are the GUI's own view
+buttons — every layer can be inspected alone before it is mixed.*
 
 **MGN — Multi-scale Gaussian Normalisation** (Morgan & Druckmüller 2014)
 Normalises local contrast at six spatial scales at once: at each scale it

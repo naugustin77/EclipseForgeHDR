@@ -5,6 +5,80 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.10.3 — NAFE's histogram was being spent on sky
+
+Testing the "crop the field" hypothesis from 0.10.2 turned into a real fix.
+
+The rank map decides how finely NAFE can resolve brightness, and it was built
+from the whole frame. A 600 mm full-frame bracket is 6.5 x 4.4 lunar diameters
+and overwhelmingly sky, so the map spent its resolution on sky noise and had
+almost none left for the inner corona — exactly where a rank filter should be
+strongest.
+
+Cropping the working field to 2 lunar diameters did triple the corona detail,
+confirming the diagnosis. But cropping throws away real corona, and a hard mask
+on the statistics was worse still: it pinned 61% of the frame at rank 0 or 1 and
+blew the outer corona out. The answer is a **weighted** rank map — pixels inside
+1.5 R count fully, everything outside counts at 0.10 — so the map still spans
+the whole value range and nothing clamps.
+
+Measured on the reference set. "repeat" is the correlation between two runs of
+the same image differing by one independent σ_A of added noise, which separates
+reproducible structure from amplified noise:
+
+| | inner detail (1.05–1.8 R) | repeat | outer detail (2.2–3.2 R) | repeat |
+|---|---|---|---|---|
+| 0.10.1 | 0.00559 | +0.906 | 0.04850 | +0.663 |
+| 0.10.3 | **0.01552** | **+0.961** | 0.04246 | +0.656 |
+
+Inner-corona detail **2.8×**, and it is *more* reproducible than before, not
+less — so it is structure, not amplified grain. The outer corona pays 12%.
+
+Two things this test also caught:
+
+- σ_A must still be measured over the **whole** frame. Measuring it inside
+  1.5 R, where the radial gradient is steep, made consecutive-pixel differences
+  signal-dominated, σ_A came out too large, the level smoothing over-fired and
+  the outer corona lost 38% of its detail for nothing.
+- The FNRGF-correlation metric used in 0.10.2 is contaminated: the two layers
+  share a noise realisation, so part of that agreement was agreement on noise.
+  The added-noise repeatability test replaces it.
+
+## 0.10.2 — NAFE parameters, derived rather than guessed
+
+Two of the three NAFE constants had never been swept. Both moved, both measured
+on the reference set (corona = 1.05–2.2 R, sky = beyond 3.2 R):
+
+- **ε 0.05 → 0.10.** The value window was in the steep part of its curve. At
+  0.02 it prints concentric rings — the paper's "fragmentation" — at 0.05 the
+  high-pass structure is 0.076, at 0.10 it is 0.109 with the agreement against
+  FNRGF unchanged (0.711 → 0.721), and past 0.15 the curve is flat and the
+  extra is noise.
+- **Noise σ: 2 σ_A → 4 σ_A.** The paper's range is 2–12 and this sat at the
+  bottom of it, with a cap that clipped even that.
+
+  | σ / σ_A | corona detail | sky grain | detail/grain |
+  |---|---|---|---|
+  | 2 | 0.00843 | 0.12421 | 0.068 |
+  | **4** | **0.00820** | **0.06621** | **0.124** |
+  | 6 | 0.00782 | 0.04488 | 0.174 |
+  | 12 | 0.00696 | 0.03085 | 0.226 |
+
+  Sky grain halves from 2 to 4 for 3% of the corona detail. It keeps falling
+  after that, but a broad dark halo appears around the disc as the level
+  smoothing lets the radial gradient back in, and by 12 the halo has swallowed
+  the streamers. 4 is the last value with no visible cost.
+
+- **`sigma_sp` now does something.** On the fuzzy path it was silently ignored
+  and the neighbourhood was fixed in grid pixels — i.e. fixed relative to the
+  decimation factor rather than to the Sun. It is now the widest scale of the
+  multiscale kernel and defaults to 0.13 R. Measured flat from 0.06 R to
+  0.51 R, so the value is not critical; scaling with the disc is.
+
+End to end on the reference set, detail-to-sky-grain improves 0.094 → 0.124.
+That is real but modest, and it does not close the gap to the paper's Fig. 5 —
+see the note in `nafe.py` on why.
+
 ## 0.10.1 — NAFE was shipping the wrong term
 
 - **The NAFE layer was 99% a gamma stretch.** The 2014 paper's output is

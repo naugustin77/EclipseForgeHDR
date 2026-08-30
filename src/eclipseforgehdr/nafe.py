@@ -33,15 +33,22 @@ import numpy as np
 from scipy import ndimage
 
 
-def multiscale_blur(a, n_scales=12, base=2.0, out=None):
+def multiscale_blur(a, n_scales=12, base=2.0, out=None, sigma=None):
     """The fuzzy multiscale neighbourhood of the 2014 paper: a sum of Gaussians
     with sigma_m = 2^(m/2), which behaves like a single smooth kernel with no
-    preferred scale (their n = 129 kernel, built as 12 summed Gaussians)."""
+    preferred scale (their n = 129 kernel, built as 12 summed Gaussians).
+
+    `sigma` sets the WIDEST scale, so the ladder ends there instead of always
+    ending at 2^((n-1)/2) whatever the image size. Without it the caller's
+    sigma_sp was silently ignored on this path and the neighbourhood was fixed
+    in grid pixels -- which is to say fixed relative to the decimation factor
+    rather than to the Sun."""
     acc = np.zeros_like(a, dtype=np.float32) if out is None else out
     acc[...] = 0
     wsum = 0.0
+    _sc = 1.0 if sigma is None else sigma / (base ** ((n_scales - 1) / 2.0))
     for m in range(n_scales):
-        s = base ** (m / 2.0)
+        s = _sc * base ** (m / 2.0)
         w = 1.0 / (1.0 + m)          # taper so the widest scale does not rule
         acc += w * ndimage.gaussian_filter(a, s, mode="nearest")
         wsum += w
@@ -103,7 +110,7 @@ def value_neighbourhood_weight(L, sigma_sp=25.0, eps=None, valid=None,
 
 def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
             eps_frac=0.25, valid=None, n_scales=10, fuzzy=True, grid=4,
-            combine=False):
+            combine=False, noise_mult=4.0, stat_mask=None, stat_weight=0.10):
     """Noise Adaptive Fuzzy Equalization with a Variable Neighbourhood.
 
     `A` is a luminance image, ideally already in a log or gamma domain.
@@ -139,6 +146,27 @@ def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
     So the eq. 2 mix still happens; it happens in render.py, where the
     envelope is T_gamma and the nafeMix slider is w.
 
+    WHAT THIS LAYER WILL AND WILL NOT DO ON ECLIPSE DATA
+    ----------------------------------------------------
+    It will not reproduce the paper's Fig. 5 on a wide-field, low-altitude
+    bracket, and no amount of parameter tuning gets it there. Three reasons,
+    none of them the algorithm:
+
+      * Field of view. Their figure is roughly 2.5 lunar diameters across;
+        a 600 mm frame on full-frame is 6.5 x 4.3. The rank map is anchored
+        on the global histogram, so most of ours is sky.
+      * Sky noise. Below 7 degrees of solar altitude the scattered-light
+        floor is high; measured here the sky grain in this field is about 8x
+        the corona detail, and a rank filter has no way to tell them apart.
+      * No radial model, by design. That is what keeps NAFE honest at the
+        limb, where MGN and FNRGF depend on the fit -- but it also means the
+        outer corona has to beat the noise unaided. FNRGF, which does have an
+        explicit radial and azimuthal model with robust fitting, is the layer
+        that delivers Fig.-5-like structure on this data.
+
+    The useful reading: NAFE earns its place near the limb and wherever the
+    limb fit is doubtful, not as the outer-corona workhorse.
+
     Implementation: the local cumulative histogram is evaluated for every pixel
     at once by quantizing into K levels and blurring each level's membership
     (K blurs, not a per-pixel scan). Then
@@ -171,9 +199,46 @@ def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
     # distribution first makes every bin equally populated, so the histogram
     # resolves structure at the faint end as finely as at the bright end. The
     # map is monotone, so it does not change what the local rank means.
-    qs = np.linspace(0, 100, 512)
-    knots = np.percentile(v, qs).astype(np.float64)
-    knots = np.maximum.accumulate(knots + np.arange(knots.size) * 1e-9)
+    # WHERE THE HISTOGRAM'S RESOLUTION GOES (added in 0.10.3)
+    #
+    # The rank map decides how finely the filter can resolve brightness, and it
+    # was built from the whole frame. On a 600 mm full-frame bracket that frame
+    # is 6.5 x 4.4 lunar diameters and overwhelmingly sky, so the map spent its
+    # resolution on sky noise and had almost none left for the inner corona --
+    # which is exactly where a rank filter should be strongest.
+    #
+    # `stat_mask` marks the region worth resolving (the pipeline passes
+    # r < 1.5 R). Pixels outside it still enter the map, at `stat_weight`, so
+    # the map still spans the full value range and nothing clamps -- a hard
+    # mask instead of a weight pinned 61% of the frame at rank 0 or 1 and blew
+    # the outer corona out. Measured on the reference set (inner = 1.05-1.8 R,
+    # outer = 2.2-3.2 R; "repeat" is the correlation between two runs that
+    # differ by one independent sigma_A of added noise, so it separates
+    # reproducible structure from amplified noise):
+    #
+    #   weight   inner detail  repeat    outer detail  repeat   clamped
+    #    1.00      0.00503     +0.870      0.04388     +0.666     0.0%
+    #    0.30      0.00884     +0.937      0.04336     +0.663     0.2%
+    #    0.10      0.01552     +0.961      0.04246     +0.656     0.3%
+    #    0.03      0.02236     +0.965      0.04115     +0.650     0.3%
+    #
+    # Inner detail triples and becomes MORE reproducible, not less, while the
+    # outer corona loses 3%. Going below 0.10 keeps buying inner detail but
+    # starts costing the outer corona, which is most of what this app is for.
+    if stat_mask is not None and stat_weight < 1.0:
+        nb = 4096
+        e_ = np.linspace(lo, hi, nb + 1)
+        h_in, _ = np.histogram(A[m & stat_mask], e_)
+        h_out, _ = np.histogram(A[m & ~stat_mask], e_)
+        hh = h_in.astype(np.float64) + float(stat_weight) * h_out
+        cc = np.cumsum(hh); cc /= max(cc[-1], 1e-12)
+        knots = (0.5 * (e_[1:] + e_[:-1])).astype(np.float64)
+        qs = np.clip(cc, 0, 1) * 100.0
+        qs = np.maximum.accumulate(qs + np.arange(qs.size) * 1e-9)
+    else:
+        qs = np.linspace(0, 100, 512)
+        knots = np.percentile(v, qs).astype(np.float64)
+        knots = np.maximum.accumulate(knots + np.arange(knots.size) * 1e-9)
     x_r = np.interp(np.nan_to_num(A, nan=lo).ravel(), knots,
                     (qs / 100.0)).reshape(A.shape).astype(np.float32)
     x_lin, x = x, np.clip(x_r, 0, 1)
@@ -192,7 +257,7 @@ def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
     xs = x[::q, ::q]
     oks = ok[::q, ::q]
     ssp = sigma_sp / q
-    blur = (lambda a: multiscale_blur(a, n_scales=n_scales)) if fuzzy else \
+    blur = (lambda a: multiscale_blur(a, n_scales=n_scales, sigma=ssp)) if fuzzy else \
         (lambda a: ndimage.gaussian_filter(a, ssp, mode="nearest"))
     Hst = np.empty((K,) + xs.shape, np.float32)
     # Gaussian, not triangular, membership. A triangular membership makes the
@@ -225,6 +290,11 @@ def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
     # is computed PER LEVEL by carrying sigma_A through the map at that level,
     # and applied as a single (K x K) mixing matrix over the level axis.
     if noise_sigma is None:
+        # sigma_A is measured over the WHOLE valid frame, not over stat_mask.
+        # Inside 1.5 R the radial gradient is steep, so consecutive-pixel
+        # differences there are dominated by signal rather than noise: measured
+        # that way sigma_A comes out too large, the level smoothing over-fires,
+        # and the outer corona loses 38% of its detail for nothing.
         d = np.abs(np.diff(x_lin[m][:200000]))
         s_a = 1.4826 * float(np.median(d)) / 1.4142 if d.size else 0.01
     else:
@@ -233,7 +303,23 @@ def nafe_vn(A, sigma_sp=30.0, K=48, w=0.2, gamma=3.0, noise_sigma=None,
     lin_lv = (lv_val - lo) / max(hi - lo, 1e-9)
     r_hi = np.interp(np.clip(lin_lv + s_a, 0, 1) * (hi - lo) + lo, knots, qs / 100.0)
     r_lo = np.interp(np.clip(lin_lv - s_a, 0, 1) * (hi - lo) + lo, knots, qs / 100.0)
-    sig_lv = np.clip(2.0 * np.abs(r_hi - r_lo) / 2.0, 0.5 * dl, 0.20)  # 2 sigma_A
+    # `noise_mult` is the paper's sigma in units of sigma_A. Their range is
+    # 2..12; this sat at the bottom of it, and the cap of 0.20 clipped even
+    # that. Swept on the reference set (eps 0.10, corona = 1.05-2.2 R,
+    # sky = beyond 3.2 R):
+    #
+    #   mult   corona detail   sky grain   detail/grain
+    #      2      0.00843        0.12421       0.068
+    #      4      0.00820        0.06621       0.124
+    #      6      0.00782        0.04488       0.174
+    #     12      0.00696        0.03085       0.226
+    #
+    # Sky grain halves from 2 to 4 for 3% of the corona detail, which is free.
+    # It keeps falling after that, but a broad dark halo appears around the
+    # disc as the level smoothing lets the radial gradient back in, and by 12
+    # the halo has swallowed the streamers. 4 is the last value with no visible
+    # cost on this data.
+    sig_lv = np.clip(noise_mult * np.abs(r_hi - r_lo) / 2.0, 0.5 * dl, 0.60)
     Mx = np.exp(-0.5 * ((edges[None, :] - edges[:, None]) / sig_lv[:, None]) ** 2)
     Mx /= np.maximum(Mx.sum(axis=1, keepdims=True), 1e-12)
     Hst = np.tensordot(Mx.astype(np.float32), Hst, axes=(1, 0))
