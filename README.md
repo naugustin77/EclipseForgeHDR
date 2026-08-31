@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.12.0
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.13.1
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
@@ -9,7 +9,7 @@ a few minutes, then adjust the result on a live preview and export it.
 Everything runs on your own machine. No cloud, no account, no telemetry: the
 GUI is a small web server on `127.0.0.1` that only your browser talks to.
 
-![Composite render](docs/images/composite.jpeg)
+![Composite render](docs/images/eclipseforge_composite_render.jpeg)
 
 *49 frames, 14 exposure tiers, 12.6 EV — Panasonic S1R II at 600 mm f/8,
 Spain, 12 August 2026.*
@@ -110,9 +110,9 @@ FNRGF and NAFE for faint outer structure, and Inner and Prom gate are extra
 
 | MGN | FNRGF | NAFE |
 |:---:|:---:|:---:|
-| ![](docs/images/mgr.jpeg) | ![](docs/images/fnrgf.jpeg) | ![](docs/images/nafe.jpeg) |
+| ![](docs/images/eclipseforge_render_mgn.jpeg) | ![](docs/images/eclipseforge_render_fnrgf.jpeg) | ![](docs/images/eclipseforge_render_nafe.jpeg) |
 | **Pellett** | **Inner** | **Prom gate** |
-| ![](docs/images/pellet.jpeg) | ![](docs/images/inner.jpeg) | ![](docs/images/prom.jpeg) |
+| ![](docs/images/eclipseforge_render_pellett.jpeg) | ![](docs/images/eclipseforge_render_inner.jpeg) | ![](docs/images/eclipseforge_render_prom.jpg) |
 
 *The same merged image through each layer. These are the GUI's own view
 buttons — every layer can be inspected alone before it is mixed.*
