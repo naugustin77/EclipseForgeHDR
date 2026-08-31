@@ -5,6 +5,161 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.13.1 — the disc is found by its edge, not by its brightest pixels
+
+Fixes two failures that both came from the same wrong assumption: that you can
+guess where the Moon is, and how big it is, from brightness and from the frame
+size. One of them put a second black disc 1000 px from the Moon in a 0.13.0
+render; the other has been silently disabling features on every short-focal-
+length dataset since the beginning.
+
+**The centre.** `find_center` took the centroid of the brightest **0.05%** of
+pixels. That is the disc centre only while the bright inner corona rings the
+disc evenly. When one sector dominates — a big prominence, an active region, a
+lopsided inner corona — every one of those pixels sits on the same arc and the
+centroid lands *on the limb*. Measured on the reference set: **646 px out on a
+620 px disc, i.e. 1.04 R.**
+
+I measured what the half-level fit downstream can actually absorb:
+
+| seed centre offset | result |
+|---|---|
+| 0 – 500 px (0.81 R) | R 622.3, rms 5.00, 720/720 rays, **0.2 px from truth** |
+| 620 px (1.00 R) | **fails** |
+
+So the estimator had been sitting a few percent from a cliff, and a 3% change in
+the limb ring — which is all the new flat-field correction does there — pushed it
+over. Everything alarming in that run was downstream of it: the 67 px limb ramp
+(was 21), `rim nan px`, "coronal range 1.2 EV" (was 6.5), the sky gradient
+refitted about a point 1000 px from the Moon.
+
+**The radius.** `fit_limb` searched for the limb between a tenth and a third of
+the short side. That is a statement about focal length, not about eclipses: on a
+24 MP APS-C body the limb is only inside that band beyond about **320 mm**, and
+on 24 MP full-frame beyond about **510 mm**. A 240 mm frame puts the disc at
+7.5% of the short side — below the floor — so the limb was never looked at. It
+returned R = 1005 px for a 301 px disc, and every per-tier limb measurement
+failed with it, taking prominence anchoring and per-tier lunar masking down too.
+
+**What replaces both.** A new `find_disc()` locates the disc from the limb
+*edge*. The limb is a huge relative step — 93× over ~20 px on the reference set
+— while the corona's own falloff is smooth, so in log intensity it dominates the
+gradient regardless of exposure or how bright one side is. A wide bright mask
+gives a starting centre, the radius comes from the peak of the azimuthally
+averaged log gradient, strong-gradient pixels in a band around that radius are
+fitted with a circle, and the two alternate. Nothing in it refers to the frame
+size, so the radius comes out of the data.
+
+Two gates decide whether the answer is a limb at all: the inliers must go at
+least 270° round, **and** their scatter about the circle must be tight. Coverage
+alone is not enough — on the short-exposure stack, where the fast tiers see
+nothing outside the inner corona, noise covers every azimuth and a meaningless
+circle scores a full 360°. A real limb sits at 0.04 R of scatter; those noise
+circles at 0.16–0.23 R.
+
+Measured across disc sizes from 3% to 30% of the short side, on 3:2, square and
+2.25:1 frames, with the inner corona lopsided up to 4:1 and prominences up to 3×
+the limb brightness — 18 + 7 cases:
+
+| | before | after |
+|---|---|---|
+| `fit_limb` R at 7.5% of the short side (240 mm) | **+344%** | **−1.2%** |
+| `fit_limb` R at 3% of the short side | +1232% | −5.2% |
+| centre, reference merged HDR | 646 px (1.04 R) | **62 px** |
+| centre, short-exposure stack | 611 px | **1 px** |
+| centre, lopsided inner corona | up to 1.03 R — past the cliff | 0–15 px |
+| `fit_limb_rays` from that seed | failed | 720/720 rays, **0.2 px from truth** |
+| seed cost | — | 0.08 s/frame, 4 s per 49-frame bracket |
+
+The measured radius is now also carried into every place that used to seed a
+limb fit with a frame fraction — the per-tier centres for the correlation
+windows, the prominence-search ladder (rungs are now 0.7–2.0× the measured
+radius instead of 6–24% of the frame), the moon-mask trial, and the merged-image
+fallback. `prepare_contact` gets it through `fit_limb` for free.
+
+Expect the knock-on effects to go with it: the same bad per-tier centres are why
+that run claimed the tiers were "spread 607px apart" while the lunar track said
+the Moon moved 1 px across the whole bracket, and why the alignment residual went
+0.80 → 2.13 px half-res between two runs on identical files.
+
+## 0.13.0 — Flat-field calibration
+
+Put your flat frames in a subfolder of the raw folder called `flats/` and they
+are found and used. No flats, nothing changes — the whole feature is inert when
+the folder is absent. A path box next to the folder box takes flats from
+somewhere else, or the word `off` to ignore a `flats/` folder that is there.
+
+A master flat is built once per folder and cached, then divided out of every
+frame of every tier before anything else touches it. It removes lens
+vignetting, the cos⁴ falloff, dust shadows on the sensor stack and
+per-photosite sensitivity. For an eclipse this matters more than for most
+subjects, because the corona's own radial falloff *is* the signal: a 6%
+vignette is a 6% error in the F-corona gradient, and every radial filter
+downstream then works to preserve it.
+
+**The master flat measures its own noise, and that sets how much it is
+smoothed.** A flat is not free: dividing by it injects whatever noise it
+carries into every frame identically, so stacking cannot average it away. The
+frames are split into two independent half-stacks; because `var(mean of half) =
+2 × var(mean of all)`, the difference between the two halves *is* the master's
+noise rather than a proxy for it. The Gaussian σ is then raised until the
+measured noise falls under 0.2% per photosite, and the numbers go in the log
+and the run report:
+
+```
+flat: min/max-trimmed mean of 20 frames from flats/
+flat: per-pixel noise 1.318% -> 0.183% after a 5.7 px smooth (target 0.2%)
+flat: corrects a 8.4% falloff — the dimmest part of the field sits at 0.923
+      of the brightest
+```
+
+So a clean, well-exposed flat set keeps its dust motes at full resolution (σ
+lands at 0 or 1 px), and a thin or under-exposed one degrades gracefully to a
+vignetting model instead of adding more noise than it removes. The first guess
+at σ comes from a white-noise formula, but sensor noise is not white — on the
+reference flats it needed 2.9× more smoothing than the formula predicted — so
+the guess is only a starting point and the answer is measured.
+
+Other things that fall out of doing this properly:
+
+- **Per Bayer channel, normalised to the centre of the frame.** Each flat is
+  divided by its own central median *per channel*, so exposure and
+  illumination-colour drift between flats cancels and the master cannot shift
+  the white balance or the overall level of the lights — only their spatial
+  structure. Measured end to end on a synthetic bracket: the central level
+  moves by 0.4%, and the correction the merged HDR actually received matches
+  the vignette that was baked into the frames to 0.9% median over 60% of the
+  field.
+- **Min/max-trimmed per-pixel combine** (5 frames or more), so a cosmic ray, a
+  satellite or a bird in any one flat is dropped rather than averaged in at
+  1/N. Tested with a synthetic trail: 15% contamination becomes 1.4%, which is
+  the master's own noise floor.
+- **The clipping test is made before the flat is divided out.** This is the
+  part that would have been a silent regression. A vignetted corner is
+  brightened by the correction, and a pixel compared against the scalar
+  saturation level *afterwards* reads as clipped at a fraction of the well it
+  actually filled. With a 30% vignette, a corner pixel that deserves full
+  weight 1.000 in the merge would have been given 0.269 — the longest tier
+  would have lost three-quarters of its contribution in the corners. Per-frame
+  saturation masks are now taken from the uncorrected data, and in the merge
+  and the inner stack the flat-corrected value is put back into raw units for
+  the comparison.
+- **Flats that are not usable say so, one line each**: exposed above 85% of
+  saturation (on the shoulder of the response), below 2% (too dark to
+  calibrate with), or a different frame size from the lights. A flat set that
+  cannot produce a master leaves a message in the log and the run continues
+  uncorrected rather than failing.
+- The flat files are part of the cache key, so adding, replacing or removing
+  one re-runs the stack instead of silently reusing the old one; a contact
+  frame loaded later gets the same flat, but only if the run that built the
+  composite actually applied one.
+
+This does not replace the sky-gradient fit from 0.11.x. Vignetting is radial
+about the frame centre and fixed by the optics; the low-altitude sky gradient
+is a tilted plane fixed by the atmosphere, and on the reference set a radial
+model explains 0.0% of it. Both run, in that order, and each is reported
+separately.
+
 ## 0.12.0 — FITS input
 
 Folders of FITS frames work as input, for capture software that writes it

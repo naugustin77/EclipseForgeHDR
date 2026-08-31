@@ -52,6 +52,9 @@ button:disabled{opacity:.45;cursor:default}
       <h1 title="High-Dynamic-Range Solar Eclipse Image Processing">EclipseForgeHDR</h1>
       <input type="text" id="folder" placeholder="/path/to/folder/with/RAWs" spellcheck="false">
       <button id="load">Load folder</button>
+      <input type="text" id="flatDir" spellcheck="false" style="width:190px"
+        placeholder="flats: auto"
+        title="Folder of flat-field frames. Left empty, a subfolder of the raw folder called flats/ is used if there is one, and no flat correction is applied if there is not. Type a path to use flats from somewhere else, or 'off' to ignore them. A master flat divides out lens vignetting, dust shadows and per-photosite sensitivity; it is smoothed only as much as its own measured noise requires, and the numbers are printed in the log.">
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
         Denoise
         <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -188,7 +191,11 @@ async function loadFolder(){
     body: JSON.stringify({path: $("folder").value})});
   const j = await r.json();
   if(!j.ok){ $("status").textContent = j.error; return; }
+  $("flatDir").placeholder = j.flat_dir
+    ? `flats: auto (${j.flat_count})` : "flats: none found";
   $("status").textContent = `${j.folder} — ${j.raw_count} raw files` +
+    (j.flat_dir ? ` · ${j.flat_count} flats in ${j.flat_dir.split("/").pop()}/`
+                : " · no flats folder") +
     (j.cached ? " · cached pipeline products found (Start reuses them)" : "");
   $("start").disabled = false;
   ready = false; $("export").disabled = true;
@@ -202,6 +209,7 @@ async function startRun(){
                           despeckle: $("despeckle").checked,
                           exportTiers: $("exportTiers").checked,
                           tierLinear: $("tierLinear").checked,
+                          flatDir: $("flatDir").value,
                           frames: $("frames").value})});
   pollProgress();
 }
@@ -451,6 +459,7 @@ fetch("/api/version").then(r => r.json()).then(j => {
 }).catch(() => {});
 $("load").addEventListener("click", loadFolder);
 $("folder").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
+$("flatDir").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
 $("start").addEventListener("click", startRun);
 $("export").addEventListener("click", async () => {
   const fmt = document.querySelector("input[name=fmt]:checked").value;

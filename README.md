@@ -4,12 +4,12 @@
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
-a few minutes, then adjust the result in a live preview and export it.
+a few minutes, then adjust the result on a live preview and export it.
 
 Everything runs on your own machine. No cloud, no account, no telemetry: the
 GUI is a small web server on `127.0.0.1` that only your browser talks to.
 
-![Composite render](docs/images/eclipseforge_composite_render.jpeg)
+![Composite render](docs/images/composite.jpeg)
 
 *49 frames, 14 exposure tiers, 12.6 EV — Panasonic S1R II at 600 mm f/8,
 Spain, 12 August 2026.*
@@ -26,16 +26,17 @@ rather than around stars.
 ## What it is not
 
 - **Not a general astrophotography stacker.** No star registration, no plate
-  solving, no deconvolution, no dark/flat library, no dithering or drizzle. If
-  you want DeepSkyStacker, Siril, or PixInsight's workflow, use those.
-- **Not a raw developer.** It does its own demosaic, white balance, and color
+  solving, no deconvolution, no dark frames, no dithering or drizzle. (Flats
+  it does take — see [Flat-field calibration](#flat-field-calibration).) If
+  you want DeepSkyStacker, Siril or PixInsight's workflow, use those.
+- **Not a raw developer.** It does its own demosaic, white balance and colour
   transform straight from the sensor data. It is not a Lightroom replacement
   and does not read your develop settings.
 - **Not for partial phases.** It expects frames taken during totality; frames
   showing a bright crescent are detected and dropped.
 - **Not rotation-aware (yet).** Cross-tier alignment solves translation only.
   On an equatorial mount that is exactly right. On an untracked or alt-az set
-  spanning a long totality, there will be residual field rotation it cannot
+  spanning a long totality there will be residual field rotation it cannot
   remove.
 - **Not a mosaic or multi-camera tool.** One camera, one focal length, one
   bracket set per run.
@@ -48,41 +49,43 @@ rather than around stars.
 ## How it works
 
 The pipeline runs once per folder and caches everything, so re-rendering and
-exporting afterward is instant.
+exporting afterwards is instant.
 
 1. **Read and group.** Raw files are decoded, grouped into exposure tiers by
    EXIF shutter speed, and hot/dead photosites are mapped on the shortest tier
-   and repaired everywhere.
+   and repaired everywhere. If a `flats/` folder is present, a master flat is
+   built from it and divided out of every frame first — see
+   [Flat-field calibration](#flat-field-calibration).
 2. **Score and average.** Every frame is scored for sharpness. Frames within a
    tier are aligned to each other sub-pixel and averaged (√N noise gain), or
-   you can keep only the sharpest. Frames that are not totality (e.g., a bright
-   partial-phase crescent) are rejected by their saturated area.
+   you can keep only the sharpest. Frames that are not totality — a bright
+   partial-phase crescent, say — are rejected by their saturated area.
 3. **Align the tiers.** The hard part. Each tier is flattened radially and
    log-scaled so the corona's own gradient stops dominating the correlation,
-   then phase-correlated against its neighbors. Links are built redundantly
+   then phase-correlated against its neighbours. Links are built redundantly
    (each tier to the next *and* to the one after) and the whole network is
    solved by weighted least squares, so one bad pair cannot drag the set.
-   Where prominences are detectable, they are located automatically and matched
-   by normalized cross-correlation, adding independent hard anchors to the same
+   Where prominences are detectable they are located automatically and matched
+   by normalised cross-correlation, adding independent hard anchors to the same
    network. Residuals are measured and reported.
 4. **Cross-calibrate.** Overlapping tiers are compared over regions selected by
    signal-to-noise, giving a photometric factor per tier so the exposures agree
    on absolute brightness rather than just nominal shutter speed.
-5. **Merge.** A saturation-weighted merge in linear color: each tier
+5. **Merge.** A saturation-weighted merge in linear colour: each tier
    contributes where it is neither clipped nor noise-dominated, with soft
    weights so there are no seams. Where it measurably helps, each tier is also
    masked to its own lunar disc, since the Moon moves against the corona during
    the bracket.
 6. **Trim, and flatten the sky.** The alignment border — the strip that only
-   some tiers cover — is cropped away automatically. At low solar altitude, the
+   some tiers cover — is cropped away automatically. At low solar altitude the
    sky itself is not uniform across a 3.5° field; a low-order surface is fitted
    per channel *beyond the measured corona extent* and divided out, which
-   takes the sky's color gradient with it, so the gradient goes
+   takes the sky's colour gradient with it, so the gradient goes
    without the corona's own asymmetry going with it.
 7. **Extract structure.** Several independent enhancement layers are computed
-   from the merged HDR: MGN (multi-scale Gaussian normalization), FNRGF
-   (Fourier normalizing radial-gradient filter), NAFE-VN (noise-adaptive fuzzy
-   equalization with a variable neighborhood), a Pellett rotational unsharp
+   from the merged HDR: MGN (multi-scale Gaussian normalisation), FNRGF
+   (Fourier normalising radial-gradient filter), NAFE-VN (noise-adaptive fuzzy
+   equalisation with a variable neighbourhood), a Pellett rotational unsharp
    mask, a short-exposure inner-corona/prominence layer, and an earthshine
    layer from the longest exposures.
 8. **Render.** The GUI mixes those layers live over a decimated preview; when
@@ -107,36 +110,36 @@ FNRGF and NAFE for faint outer structure, and Inner and Prom gate are extra
 
 | MGN | FNRGF | NAFE |
 |:---:|:---:|:---:|
-| ![](docs/images/eclipseforge_render_mgr.jpeg) | ![](docs/images/eclipseforge_render_fnrgf.jpeg) | ![](docs/images/eclipseforge_render_nafe.jpeg) |
+| ![](docs/images/mgr.jpeg) | ![](docs/images/fnrgf.jpeg) | ![](docs/images/nafe.jpeg) |
 | **Pellett** | **Inner** | **Prom gate** |
-| ![](docs/images/eclipseforge_render_pellet.jpeg) | ![](docs/images/eclipseforge_render_inner.jpeg) | ![](docs/images/eclipseforge_render_prom.jpeg) |
+| ![](docs/images/pellet.jpeg) | ![](docs/images/inner.jpeg) | ![](docs/images/prom.jpeg) |
 
 *The same merged image through each layer. These are the GUI's own view
 buttons — every layer can be inspected alone before it is mixed.*
 
 **MGN — Multi-scale Gaussian Normalisation** (Morgan & Druckmüller 2014)
-Normalizes local contrast at six spatial scales at once: at each scale it
+Normalises local contrast at six spatial scales at once: at each scale it
 divides out the local mean and scales by the local standard deviation, then
 recombines. The corona's brightness spans four orders of magnitude, and MGN
 makes structure equally visible at the bright base and out in the faint
 streamers. It is the workhorse — fine plumes, streamer filaments, the fine
 radial texture — and it is what most published corona images lean on. Its
-weakness is the disc edge, where a normalizing kernel straddling the limb has
-nothing sensible to normalize against.
+weakness is the disc edge, where a normalising kernel straddling the limb has
+nothing sensible to normalise against.
 *Sliders: MGN contrast, Clarity, Grain smoothing.*
 
 **FNRGF — Fourier Normalising Radial Gradient Filter** (Druckmüllerová, Morgan
 & Habbal 2011)
 Removes the radial falloff. At each radius it fits a low-order Fourier series in
-azimuth to both the mean brightness and its spread, then normalizes against that
+azimuth to both the mean brightness and its spread, then normalises against that
 model. Because the model varies *around* the disc rather than being a single
 number per ring, it follows the corona's real east–west asymmetry instead of
 fighting it. Strongest in the outer corona, where the falloff is the dominant
 signal; it is mixed in progressively with radius rather than applied everywhere.
 *Sliders: FNRGF strength, FNRGF share (outer).*
 
-**NAFE — Noise Adaptive Fuzzy Equalization** (Druckmüller 2013)
-A local histogram equalization, but with the neighborhood defined in *value*
+**NAFE — Noise Adaptive Fuzzy Equalisation** (Druckmüller 2013)
+A local histogram equalisation, but with the neighbourhood defined in *value*
 rather than in space: a pixel is ranked against other pixels of similar
 brightness, not against whatever happens to be nearby. The strength is limited
 by the locally measured noise, so it lifts faint structure without amplifying
@@ -146,10 +149,10 @@ outer detail; off by default because it is easy to overdo.
 *Slider: NAFE-VN mix.*
 
 **Pellett — rotational unsharp mask**
-Blurs the image along the azimuthal direction about the disc center and
+Blurs the image along the azimuthal direction about the disc centre and
 subtracts the result, in polar space. That enhances anything *radial* — plumes,
 streamer spines, polar brushes — and suppresses anything that runs around the
-disc, which is mostly artifacts. A small amount adds a lot of apparent
+disc, which is mostly artefacts. A small amount adds a lot of apparent
 sharpness to the streamers; too much and the whole corona looks combed.
 *Slider: Pellett layer.*
 
@@ -164,7 +167,7 @@ a window around the disc.
 *Sliders: Short-exposure detail, Detail denoise, Glare dim.*
 
 **Prom gate — prominence mask**
-Also not a filter but a mask, and the only layer that uses color. Prominences
+Also not a filter but a mask, and the only layer that uses colour. Prominences
 emit in H-alpha and are far redder than the corona, so the gate measures the
 corona's own red-to-green-plus-blue ratio in a ring around the limb and
 thresholds against a robust spread of that measurement — which makes it
@@ -179,38 +182,43 @@ without the rest of the image being touched.
 ## Features
 
 - Automatic tier detection, best-frame selection, hot-pixel repair
+- The lunar disc is found from its limb *edge*, so nothing depends on focal
+  length: it works from a disc filling 3% of the frame to one filling 30%, and
+  it does not care whether the inner corona is lopsided
+- Optional flat-field calibration from a `flats/` folder, with the master
+  flat's own noise measured and the smoothing set from it
 - Sub-pixel alignment within and across tiers, with prominence anchoring and a
   measured, reported error budget
 - Photometric tier cross-calibration
-- Seam-free saturation-weighted HDR merge in linear color
+- Seam-free saturation-weighted HDR merge in linear colour
 - Per-tier lunar masking, applied only when it measurably improves the limb
 - Automatic crop of the alignment border
 - Six independent structure layers, each on its own slider and each viewable
   alone: MGN, FNRGF, NAFE-VN, Pellett, inner corona, prominences
 - Earthshine layer from the longest exposures
 - Diamond-ring blending from a separate contact frame
-- Color controls that separate sky cast from corona color (measured, not
+- Colour controls that separate sky cast from corona colour (measured, not
   guessed), plus warmth, tint, saturation, highlight compression
 - Zoomable, pannable live preview; every parameter is a slider
 - Export at full or half resolution as 16-bit TIFF, 8-bit TIFF, 16-bit PNG or
   JPG, each with a `.params.json` sidecar recording the exact settings
 - Optional export of the **aligned exposure tiers** as 16-bit TIFFs with an
   embedded ICC profile (sRGB or scene-linear), for hand-blending or HDR
-  combining in Photoshop, Affinity, or PixInsight
+  combining in Photoshop, Affinity or PixInsight
 - A written run report: alignment residuals, lunar drift, tier variance,
   calibration factors, and every gate the pipeline opened or closed
 - Raw input from any Bayer camera LibRaw supports; 16-bit TIFF brackets and
-  FITS (color, mono or 3-plane) also accepted (FITS is experimental at this point)
+  FITS (colour, mono or 3-plane) also accepted
 
 ---
 
 ## Platform
 
-Nothing in the code is macOS-specific — it is Python; it binds a local web
+Nothing in the code is macOS-specific — it is Python, it binds a local web
 server to `127.0.0.1` and opens your default browser, and all paths go through
 `os.path`. It should run on **Windows and Linux** as well; every dependency
 (numpy, scipy, scikit-image, Pillow, tifffile, rawpy, exifread, Flask) ships
-wheels for all three. Only the install instructions below are Mac-flavored;
+wheels for all three. Only the install instructions below are Mac-flavoured;
 on Windows or Linux, `pipx install /path/to/eclipseforgehdr` is the same command
 without the `brew` line.
 
@@ -264,6 +272,70 @@ own cache.
 Heavy intermediates live in `.eclipseforgehdr/` inside the raw folder; outputs
 land in `eclipseforge_output/` next to the raws.
 
+## Flat-field calibration
+
+Optional, and inert unless you provide flats. Put them in a subfolder of the
+raw folder called `flats/`:
+
+    my_eclipse/
+      P1072647.RW2 ...      <- the bracket
+      flats/
+        P1072775.RW2 ...    <- the flats
+
+Load the folder and the status line says how many it found. The box next to the
+folder path takes a different location if your flats live elsewhere, or the word
+`off` to ignore a `flats/` folder that is there. Flats are never mistaken for
+light frames — only files sitting directly in the raw folder are read as
+lights.
+
+A master flat is built once, cached, and divided out of every frame of every
+tier before anything else touches it. It removes lens vignetting, the cos⁴
+falloff, dust shadows on the sensor stack, and per-photosite sensitivity
+(PRNU). This matters more for an eclipse than for most subjects, because the
+corona's own radial falloff *is* the signal: a 6% vignette is a 6% error in the
+F-corona gradient, and MGN, FNRGF and NAFE-VN all then work to preserve it.
+
+**How much the master is smoothed is measured, not chosen.** Dividing by a flat
+injects that flat's own noise into every frame identically, so stacking cannot
+average it away — twenty flats exposed at 12% of full well carry over 1% noise
+per photosite, which applied to correct a 6% vignette would put more noise in
+than gradient out. So the flats are split into two independent half-stacks,
+whose difference *is* the master's noise, and the smoothing radius is raised
+until that measured number falls under 0.2% per photosite. The log and the run
+report say what happened:
+
+    flat: min/max-trimmed mean of 20 frames from flats/
+    flat: per-pixel noise 1.318% -> 0.183% after a 5.7 px smooth (target 0.2%)
+    flat: corrects a 8.4% falloff — the dimmest part of the field sits at
+          0.923 of the brightest
+
+A clean, well-exposed set therefore keeps its dust motes at full resolution;
+a thin or under-exposed one degrades to a vignetting model rather than adding
+noise. **More flats and brighter flats both buy sharper correction** — if you
+want dust removed as well as vignetting, expose them to roughly half of
+saturation and shoot plenty.
+
+Practical notes:
+
+- Each flat is normalised **per Bayer channel to the centre of the frame**, so
+  the master cannot shift your white balance or your overall level, only the
+  spatial structure. Illumination colour drifting between flats cancels.
+- The per-pixel combine drops the highest and lowest sample (5 flats or more),
+  so a satellite, an aircraft or a cosmic ray in one flat does not survive.
+- Unusable flats are named and skipped: exposed above 85% of saturation (on the
+  shoulder of the sensor's response), below 2% (too dark to calibrate with), or
+  a different frame size from the lights. If no master can be built, the run
+  says so and continues uncorrected.
+- Sky flats, wall flats, panel flats — anything uniform. Dust that has moved
+  since the flats were taken will be corrected in the wrong place; if that
+  worries you, that is an argument for fewer, brighter flats, since the
+  smoothing then does less to hide it either way.
+
+This is separate from the sky-gradient fit. Vignetting is radial about the
+frame centre and fixed by the optics; the low-altitude sky gradient is a tilted
+plane fixed by the atmosphere, and on the reference set a radial model explains
+0.0% of it. Both run, and each is reported separately.
+
 ## FITS input
 
 Folders of FITS frames work as input, for capture software that writes it
@@ -276,11 +348,11 @@ respected.
 exposure tiers, so it cannot be guessed. `DATE-OBS`, `GAIN`, `PEDESTAL` and
 `SATURATE` are used when present.
 
-Two things to know. FITS headers carry no color matrix and no white balance,
-so both are identity: a color-camera frame comes out green-dominant as
-captured, and Warmth, Tint and Neutralize sky cast are the controls for that.
-Inventing a white balance would hide a color error inside the photometry. And
-where no `SATURATE` keyword exists, the saturation ceiling is recovered from the
+Two things to know. FITS headers carry no colour matrix and no white balance,
+so both are identity: a colour-camera frame comes out green-dominant as
+captured, and Warmth, Tint and Neutralise sky cast are the controls for that.
+Inventing a white balance would hide a colour error inside the photometry. And
+where no `SATURATE` keyword exists the saturation ceiling is recovered from the
 data — a real ceiling shows as a minority of pixels sharing the maximum — with
 the bit depth as a fallback; the run report says which was used.
 
@@ -306,7 +378,7 @@ path — TIFF input exists for preprocessed workflows and unsupported cameras.
 
 ## Licence
 
-Source-available, **not open source**: copyright is reserved, and no license has
+Source-available, **not open source**: copyright is reserved and no licence has
 been granted yet — see [LICENSE](LICENSE) for the full text. In short:
 
 - **Run it on your own images, for anything.** Modify your copy. Open issues and
@@ -317,12 +389,12 @@ been granted yet — see [LICENSE](LICENSE) for the full text. In short:
   through to your pictures.
 - **Not granted:** redistributing the code outside GitHub, publishing modified
   versions, bundling it into a product, selling it, or offering it as a service.
-  Ask — the answer is likely yes, with conditions.
+  Ask — the answer is likely yes with conditions.
 
 The intent is that people should be free to use and improve this without paying,
 that nobody should be able to sell it or close it off, and that improvements
-stay available on the same terms. No widely used software license expresses
-exactly that, so rather than pick a poor fit in a hurry, it stays unlicensed
+stay available on the same terms. No widely used software licence expresses
+exactly that, so rather than pick a poor fit in a hurry it stays unlicensed
 while the question is open. Suggestions are welcome in an issue.
 
 ## Methods and references

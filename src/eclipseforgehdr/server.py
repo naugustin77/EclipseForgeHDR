@@ -43,8 +43,13 @@ def set_folder():
     STATE["folder"] = folder
     STATE["layers"] = None
     cached = os.path.exists(os.path.join(workdir(folder), "geometry.json"))
+    # offer the conventionally-named flats subfolder, if there is one; the GUI
+    # shows it and the user can clear it or point somewhere else
+    from .flat import find_flat_dir
+    fd = find_flat_dir(folder)
     return jsonify({"ok": True, "folder": folder, "raw_count": len(raws),
-                    "cached": cached})
+                    "cached": cached, "flat_dir": fd,
+                    "flat_count": len(list_raws(fd)) if fd else 0})
 
 
 @app.post("/api/run")
@@ -66,6 +71,8 @@ def start_run():
     frames = (request.json.get("frames", "all") if request.is_json else "all")
     if frames not in ("all", "best50", "best"):
         frames = "all"
+    flat_dir = (request.json.get("flatDir", "") if request.is_json else "") or ""
+    flat_dir = str(flat_dir).strip()
     prog = Progress()
     STATE["progress"] = prog
     # Bind the folder HERE. work() used to re-read STATE["folder"] at execution
@@ -82,10 +89,15 @@ def start_run():
             wd = workdir(folder)
             opts_path = os.path.join(wd, "opts.json")
             from . import __version__
+            from .pipeline import resolve_flat_dir
+            from .flat import fingerprint as _flat_fp
+            _fd = resolve_flat_dir(folder, flat_dir)
             opts_ok = False
             if os.path.exists(opts_path):
                 o = json.load(open(opts_path))
                 opts_ok = (o.get("denoise") == denoise
+                           and o.get("flat_dir") == _fd
+                           and o.get("flat_inputs") == _flat_fp(_fd)
                            and bool(o.get("earthshine", False)) == earthshine
                            and bool(o.get("despeckle", True)) == despeckle
                            and o.get("frames", "all") == frames
@@ -112,7 +124,7 @@ def start_run():
                 run_pipeline(folder, prog, denoise=denoise,
                              earthshine=earthshine, despeckle=despeckle,
                              frames=frames, export_tiers=export_tiers,
-                             tier_linear=tier_linear)
+                             tier_linear=tier_linear, flat_dir=flat_dir)
             else:
                 prog.log("using cached pipeline products (Start with force to redo)", 0.9)
             prog.log("loading layers for preview...", None)

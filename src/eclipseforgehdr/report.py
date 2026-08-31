@@ -172,6 +172,21 @@ def build(stats):
           f"tolerated)")
     if stats.get("hot_pixels") is not None:
         A(f"sensor defects: {stats['hot_pixels']} photosites repaired")
+    _fl = stats.get("flat") or {}
+    if _fl.get("dir") and _fl.get("applied") and _fl.get("n_used"):
+        A(f"flat field   : {_fl['combine']} from "
+          f"{os.path.basename(_fl['dir'])}/, corrects a "
+          f"{100 * (_fl.get('vignette', 1) - 1):.1f}% falloff")
+        if "noise_master" in _fl:
+            A(f"             : master flat noise {100 * _fl['noise_raw']:.3f}% "
+              f"per photosite, {100 * _fl['noise_master']:.3f}% after a "
+              f"{_fl.get('sigma_px', 0):.1f} px smooth — that is what the "
+              f"division injects into every frame")
+        if _fl.get("rejected"):
+            A(f"             : {len(_fl['rejected'])} flat frame(s) rejected "
+              f"({_fl['rejected'][0]['file']} {_fl['rejected'][0]['why']})")
+    elif _fl.get("dir"):
+        A(f"flat field   : NOT applied — {_fl.get('error', 'unavailable')}")
 
     A("")
     A("MEASURED")

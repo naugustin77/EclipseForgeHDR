@@ -75,10 +75,161 @@ def half_luma(bayer):
     return b.mean(axis=(1, 3))
 
 
+def find_disc(lum, target=520.0):
+    """Locate the occulting disc from the LIMB EDGE, not from brightness.
+
+    Returns (cy, cx, R) in the input's own pixels, or None.
+
+    Why not brightness. The old centre estimator took the centroid of the
+    brightest 0.05% of pixels. That is only the disc centre while the bright
+    inner corona rings the disc evenly. When one sector dominates -- a big
+    prominence, an active region, a lopsided inner corona -- every one of those
+    pixels sits on the same arc and the centroid lands ON THE LIMB. Measured on
+    the reference set: 646 px out on a 620 px disc, i.e. 1.04 R. The half-level
+    fit downstream tolerates a seed up to 0.81 R off and fails past ~1.0 R, so
+    that estimator was sitting a few percent from a cliff, and a 3% change in
+    the limb ring (a flat-field correction) was enough to push it over. The
+    result was a disc mask 1000 px from the Moon.
+
+    What replaces it is geometric. The limb is a huge RELATIVE step -- 93x over
+    ~20 px on the reference set -- while the corona's own falloff is smooth, so
+    in log intensity the limb dominates the gradient no matter how the frame is
+    exposed or how bright one side is. Strong-gradient pixels are collected and
+    a circle is fitted to them with iterative trimming. Nothing here refers to
+    the frame size, so it does not care whether the disc is 3% or 30% of the
+    frame: the radius comes out of the data. The one thing demanded of the
+    answer is that the inliers go most of the way ROUND, which is what stops a
+    streamer edge or a frame border from passing as a limb.
+    """
+    h, w = lum.shape
+    dec = max(1, int(round(min(h, w) / float(target))))
+    s = np.asarray(lum[::dec, ::dec], np.float32)
+    s = ndimage.gaussian_filter(np.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0), 1.5)
+    lo = float(np.percentile(s, 1.0))
+    span = float(np.percentile(s, 99.9)) - lo
+    if not np.isfinite(span) or span <= 0:
+        return None
+    # log, floored well below the corona: a RELATIVE contrast measure, so it is
+    # independent of exposure, of units and of the sky level
+    L = np.log(np.maximum(s - lo, span * 1e-4) + span * 1e-4)
+    gy, gx = np.gradient(L)
+    g = np.hypot(gy, gx)
+    hs, ws = s.shape
+
+    # Start from a wide bright mask -- not the extreme tail. Measured across the
+    # sweep this lands 0-15 px from the centre, which is plenty to begin with.
+    thr = float(np.percentile(s, 98.0))
+    ys, xs = np.nonzero(s >= thr)
+    if ys.size < 20:
+        return None
+    cy, cx = float(ys.mean()), float(xs.mean())
+
+    # Then alternate: measure the radius from the azimuthal gradient profile
+    # about the current centre, keep only the strong-gradient pixels in a band
+    # around THAT radius, and refit the centre to them. Restricting to the band
+    # is what makes this work at any disc size -- it is what stops streamers and
+    # the corona's own falloff from being fitted along with the limb.
+    R = None
+    for _ in range(4):
+        Rn = _limb_radius_from_gradient(g, cy, cx, R or 0.25 * min(hs, ws))
+        if Rn is None or not (2.0 < Rn < 0.48 * min(hs, ws)):
+            return None
+        R = Rn
+        gthr = float(np.percentile(g, 96.0))
+        yy = np.arange(hs, dtype=np.float32)[:, None] - cy
+        xx = np.arange(ws, dtype=np.float32)[None, :] - cx
+        rr = np.hypot(yy, xx)
+        band = (g >= gthr) & (np.abs(rr - R) < max(0.25 * R, 3.0))
+        py, px = np.nonzero(band)
+        if py.size < 40:
+            return None
+        y = py.astype(np.float64)
+        x = px.astype(np.float64)
+        for _t in range(4):
+            A = np.stack([2 * x, 2 * y, np.ones(x.size)], axis=1)
+            try:
+                sol, *_ = np.linalg.lstsq(A, x * x + y * y, rcond=None)
+            except np.linalg.LinAlgError:
+                return None
+            ccx, ccy = float(sol[0]), float(sol[1])
+            rad = sol[2] + ccx * ccx + ccy * ccy
+            if not np.isfinite(rad) or rad <= 0:
+                return None
+            cR = float(np.sqrt(rad))
+            d = np.abs(np.hypot(x - ccx, y - ccy) - cR)
+            keep = d <= max(2.0 * float(np.median(d)), 1.0)
+            if keep.sum() < 40 or keep.all():
+                break
+            x, y = x[keep], y[keep]
+        if not (0 <= ccy < hs and 0 <= ccx < ws):
+            return None
+        cy, cx = ccy, ccx
+
+    # Validate. Coverage alone is not enough: where the edge set is noise rather
+    # than structure -- the short-exposure stack, whose fast tiers see nothing
+    # outside the inner corona -- noise covers every azimuth and a meaningless
+    # circle scores a full 360 degrees. The SCATTER of the inliers about the
+    # circle is what separates them: measured on the reference set a real limb
+    # sits at 0.04 R and the noise-fitted circles at 0.16-0.23 R.
+    ang = np.arctan2(y - cy, x - cx)
+    bins = np.zeros(36, bool)
+    bins[((ang + np.pi) / (2 * np.pi) * 36).astype(int) % 36] = True
+    med = float(np.median(np.abs(np.hypot(x - cx, y - cy) - cR)))
+    if bins.mean() < 0.75 or med > max(0.10 * cR, 1.5):
+        return None
+    if not (0.008 * min(hs, ws) < cR < 0.48 * min(hs, ws)):
+        return None
+    return cy * dec, cx * dec, cR * dec
+
+
+def _limb_radius_from_gradient(g, cy, cx, R_hint):
+    """Radius of the strongest closed edge about (cy, cx): the limb."""
+    h, w = g.shape
+    rmax = min(cy, h - 1 - cy, cx, w - 1 - cx)
+    rmax = float(min(max(rmax, 4.0), 0.48 * min(h, w), 3.0 * max(R_hint, 1.0)))
+    if rmax < 6:
+        return None
+    yy = np.arange(h, dtype=np.float32)[:, None] - cy
+    xx = np.arange(w, dtype=np.float32)[None, :] - cx
+    rr = np.hypot(yy, xx)
+    m = rr < rmax
+    idx = rr[m].astype(np.int32)
+    tot = np.bincount(idx, weights=g[m].astype(np.float64), minlength=int(rmax) + 1)
+    cnt = np.bincount(idx, minlength=int(rmax) + 1).astype(np.float64)
+    prof = tot / np.maximum(cnt, 1.0)
+    prof[:3] = 0.0
+    prof[cnt < 8] = 0.0
+    if not prof.any():
+        return None
+    k = int(np.argmax(prof))
+    # parabolic interpolation on the peak, so the answer is not quantised to
+    # whole decimated pixels
+    if 0 < k < len(prof) - 1:
+        a, b, c = prof[k - 1], prof[k], prof[k + 1]
+        den = a - 2 * b + c
+        if den != 0:
+            k = k + 0.5 * (a - c) / den
+    return float(k)
+
+
 def find_center(lum):
+    """Centre of the occulting disc. Edge geometry first, brightness only as a
+    fallback -- and then over a wide bright mask, never the extreme tail.
+
+    On the reference merged frame the centroid of the brightest 0.05% lands 646
+    px from the centre; widening the mask to the brightest 2% brings it to 81
+    px, and every value between 1% and 20% lands inside 170 px. The tail was the
+    whole problem: it is the part of the distribution a single bright feature
+    can own outright.
+    """
+    d = find_disc(lum)
+    if d is not None:
+        return d[0], d[1]
     sm = ndimage.gaussian_filter(lum, 8)
-    thr = np.percentile(sm, 99.95)
+    thr = np.percentile(sm, 98.0)
     ys, xs = np.nonzero(sm >= thr)
+    if ys.size == 0:
+        return lum.shape[0] / 2.0, lum.shape[1] / 2.0
     return float(ys.mean()), float(xs.mean())
 
 
@@ -226,10 +377,13 @@ def _moon_mask_helps(stacks_half, sat_half, secs, cal, abs_shift,
     m1, w1 = build(True)
     cy0 = float(np.median([track[s][0] for s in track])) / 2.0
     cx0 = float(np.median([track[s][1] for s in track])) / 2.0
-    f0 = fit_limb_rays(np.clip(m0, 0, None), cy0, cx0,
-                       0.10 * min(m0.shape), decim=1)
-    f1 = fit_limb_rays(np.clip(m1, 0, None), cy0, cx0,
-                       0.10 * min(m1.shape), decim=1)
+    # the track measured the radius on every tier; use it rather than a frame
+    # fraction, which is a statement about focal length
+    _r0 = float(np.median([track[s][2] for s in track])) / 2.0
+    if not np.isfinite(_r0) or _r0 <= 0:
+        _r0 = 0.10 * min(m0.shape)
+    f0 = fit_limb_rays(np.clip(m0, 0, None), cy0, cx0, _r0, decim=1)
+    f1 = fit_limb_rays(np.clip(m1, 0, None), cy0, cx0, _r0, decim=1)
     if f0 is None or f1 is None:
         return False, {"verdict": "limb fit failed on one of the trial merges"}
     a = align.limb_transition_width(np.clip(m0, 0, None), f0[0], f0[1], f0[2])
@@ -552,19 +706,38 @@ def shift_bayer_even(a, dy, dx):
 
 # ---------- main pipeline ----------
 
+def resolve_flat_dir(folder, flat_dir=None):
+    """Where the flats are: what the caller asked for, or the convention.
+
+    "" / None  -> a flats subfolder of the light folder if there is one
+    "off"      -> no flat correction even if such a folder exists
+    anything else -> that path, expanded
+    """
+    from . import flat as _flat
+    s = (flat_dir or "").strip()
+    if s.lower() in ("off", "none", "no", "-"):
+        return None
+    if s:
+        return os.path.abspath(os.path.expanduser(s))
+    return _flat.find_flat_dir(folder)
+
+
 def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         earthshine=False, despeckle=True, frames="all", export_tiers=False,
-        tier_linear=False):
+        tier_linear=False, flat_dir=None):
+    from . import flat as _flat
     wd = workdir(folder)
     paths = list_raws(folder)
     if len(paths) < 3:
         raise RuntimeError(f"only {len(paths)} raw files found in {folder}")
     progress.log(f"{len(paths)} raw files found", 0.01)
+    _flat_dir = resolve_flat_dir(folder, flat_dir)
     stats = {"version": __version__, "folder": folder, "n_files": len(paths),
              "options": {"denoise": denoise, "earthshine": bool(earthshine),
                          "despeckle": bool(despeckle), "frames": frames,
                          "export_tiers": bool(export_tiers),
-                         "tier_linear": bool(tier_linear)},
+                         "tier_linear": bool(tier_linear),
+                         "flat_dir": _flat_dir},
              "camera_info": read_camera_info(paths[0])}
 
     # --- metadata & tiers ---
@@ -617,6 +790,24 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     color_info = None
     n_done = 0
     hot = None
+    # Master flat, built once and divided out of every frame of every tier.
+    # Built BEFORE any light frame is decoded: the build itself holds four
+    # frame-sized accumulators, and overlapping that with a tier's worth of
+    # decoded frames would double the peak working set for no reason.
+    flat_master = None
+    stats["flat"] = {"dir": _flat_dir}
+    if _flat_dir:
+        try:
+            flat_master, _fi = _flat.load_or_build(folder, _flat_dir, None,
+                                                   progress, wd)
+            stats["flat"] = dict(_fi, dir=_flat_dir)
+        except Exception as e:
+            progress.log(f"flat correction skipped — the master flat could not "
+                         f"be built ({e})", None)
+            stats["flat"] = {"dir": _flat_dir, "error": str(e)}
+            flat_master = None
+        if flat_master is None:
+            progress.log("continuing without flat correction", None)
     for s in secs:
         files = tiers[s]
         lums, sats, bayers = {}, {}, {}
@@ -630,6 +821,20 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                               "shape": list(rf.shape)}
             raw_bayers.append((p, rf.bayer, rf.sat_level))
             del rf
+        # A flat from another body, another crop mode or another orientation is
+        # not a flat for these frames. Checked against the frames of THIS tier,
+        # so a bracket that changes size partway disables the flat with a
+        # sentence instead of raising a broadcast error at the division.
+        _lshape = raw_bayers[0][1].shape if raw_bayers else tuple(color_info["shape"])
+        if flat_master is not None and flat_master.shape != tuple(_lshape):
+            progress.log(f"flat correction DISABLED — the master flat is "
+                         f"{flat_master.shape[1]}x{flat_master.shape[0]} px and "
+                         f"the {_exp_name(s)} frames are {_lshape[1]}x"
+                         f"{_lshape[0]}; flats have to come from the "
+                         f"same camera in the same crop mode", None)
+            stats["flat"]["error"] = "flat/light frame size mismatch"
+            flat_master = None
+        stats["flat"]["applied"] = flat_master is not None
         # sensor defects: map them once, on the shortest tier (darkest sky, so
         # real sky objects cannot be mistaken for hot pixels), then repair every
         # frame of every tier with it
@@ -646,10 +851,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         for p, bay, sat_level in raw_bayers:
             if hot is not None:
                 repair_hot(bay, hot)
-            lums[p] = half_luma(bay)
-            h2, w2 = lums[p].shape
+            # The clipping test has to be made BEFORE the flat is divided out.
+            # A vignetted corner is brightened by the correction, and a pixel
+            # measured against the scalar saturation level afterwards would be
+            # declared clipped at a fraction of the well it actually filled.
+            h2, w2 = bay.shape[0] // 2, bay.shape[1] // 2
             b = bay[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2)
             sats[p] = (b >= sat_level).any(axis=(1, 3))
+            del b
+            if flat_master is not None:
+                bay /= flat_master
+            lums[p] = half_luma(bay)
             bayers[p] = bay
         del raw_bayers
         # quality
@@ -781,7 +993,19 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # --- cross-tier alignment: lag-1 + lag-2 phase correlation, global LS ---
     progress.log("cross-tier alignment...", 0.42)
     mid = secs[len(secs) // 2]
-    cym, cxm = find_center(stacks_half[mid])
+    # Measure the disc ONCE, here, and use its radius as the seed everywhere
+    # below. Every one of those seeds used to be a fraction of the frame, which
+    # only works while the Moon is a particular size in the frame.
+    _dm = find_disc(stacks_half[mid])
+    if _dm is not None:
+        cym, cxm, _Rseed = _dm
+        progress.log(f"disc found on the {_exp_name(mid)} tier: "
+                     f"R={_Rseed * 2:.0f}px full-res", None)
+    else:
+        cym, cxm = find_center(stacks_half[mid])
+        _Rseed = 0.10 * min(stacks_half[mid].shape)
+        progress.log("disc edge not detected — falling back to a brightness "
+                     "centroid and a frame-fraction radius seed", None)
     S = min(crop_pc, min(stacks_half[mid].shape))
     _, y0, x0 = crop_around(stacks_half[mid], cym, cxm, S)
 
@@ -808,7 +1032,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     for _s in secs:
         try:
             _f = fit_limb_rays(stacks_half[_s], cym, cxm,
-                               0.10 * min(stacks_half[_s].shape), decim=1)
+                               _Rseed, decim=1)
         except Exception:
             _f = None
         _tc[_s] = (_f[0], _f[1]) if (_f is not None and _f[3] < 0.05 * _f[2]) \
@@ -891,10 +1115,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # rather than a disc to centre on. When this returned None the whole
         # prominence path was skipped with one line of log.
         _f = None
-        _sd = min(stacks_half[mid].shape)
+        _sd = _Rseed
         _cand = [mid] + [x for x in secs[::max(1, len(secs) // 4)] if x != mid]
         for _tier in _cand:
-            for _frac in (0.10, 0.06, 0.16, 0.24):
+            for _frac in (1.0, 0.7, 1.4, 2.0):
                 try:
                     _t = fit_limb_rays(stacks_half[_tier], cym, cxm,
                                        _frac * _sd, decim=1)
@@ -911,7 +1135,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 break
         if _f is None:
             raise RuntimeError(f"no limb fit on any of {len(_cand)} tiers "
-                               f"(seeds 6-24% of {_sd}px)")
+                               f"(seed radii 0.7-2.0x {_sd:.0f}px half-res)")
         cyp, cxp, R_half = _f[0], _f[1], _f[2]
         # anchor tier: the one whose prominences are clearest. Scored on the
         # data rather than fixed by index, so it adapts to how a given
@@ -1078,7 +1302,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     for s in secs:
         try:
             f = fit_limb_rays(stacks_half[s], cym, cxm,
-                              0.10 * min(stacks_half[s].shape), decim=1)
+                              _Rseed, decim=1)
         except Exception:
             f = None
         if f is None or f[3] > 0.05 * f[2]:
@@ -1224,6 +1448,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # tenth of a 200px disc, feathering the merge weights across a tenth of the
     # Moon; tied to the measured radius it means the same thing everywhere.
     _feather = float(np.clip(0.032 * (R_measured or 620.0), 8.0, 40.0))
+    # Puts a flat-corrected value back into raw units for the clipping test
+    # below. 1.0 everywhere when no flat was applied.
+    _fsat = None
+    if flat_master is not None and flat_master.shape == (H2, W2):
+        _fsat = _flat.superpixel_full(flat_master)
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
     for k, s in enumerate(secs):
@@ -1238,6 +1467,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # subject green is the largest raw channel and WB leaves it alone --
         # which is why this never showed on the corona itself.
         cmax = rgb.max(axis=2)
+        if _fsat is not None:
+            cmax *= _fsat            # back to raw units -- see _fsat above
         rgb *= wb[None, None, :]
         rgb = (rgb.reshape(-1, 3) @ cam2rgb.T).reshape(H2, W2, 3)
         rgb /= np.float32(s * cal[s])
@@ -1292,6 +1523,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     for s in inner_secs:
         rgb = demosaic_rggb(stacks_bayer[s])
         cmax = rgb.max(axis=2)            # raw units -- see the merge loop
+        if _fsat is not None:
+            cmax *= _fsat
         rgb *= wb[None, None, :]
         rgb = (rgb.reshape(-1, 3) @ cam2rgb.T).reshape(H2, W2, 3)
         lt = (0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2])
@@ -1314,6 +1547,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         short_lum = short_lum[crop_origin[0]:crop_origin[0] + lum.shape[0],
                               crop_origin[1]:crop_origin[1] + lum.shape[1]]
     np.save(os.path.join(wd, "short_lum.npy"), short_lum)
+    _fsat = None                      # last user of it; ~180 MB on a 45 Mpx frame
     # Where the Moon is in THIS stack, taken from the fitted track rather than
     # from a limb fit on the stack itself.
     #
@@ -1341,8 +1575,13 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
 
     # --- disc center + limb radius: coarse fit on HDR luminance (robust),
     # then band-restricted refinement on the short stack (crisp limb) ---
-    cy0, cx0 = find_center(lum)
-    cyA, cxA, RA = fit_limb(lum, cy0, cx0)
+    _d0 = find_disc(lum)
+    if _d0 is not None:
+        cy0, cx0, _R0 = _d0
+    else:
+        cy0, cx0 = find_center(lum)
+        _R0 = None
+    cyA, cxA, RA = fit_limb(lum, cy0, cx0, R0=_R0)
     # Two seeds, judged on their own merits. The gradient fit is only a seed:
     # never reject the half-level fit for disagreeing with it (that guard threw
     # away the good solution whenever the seed was bad, leaving the disc mask
@@ -1354,7 +1593,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # px away from the merged limb the composite actually displays (measured on
     # this dataset: 71 px in y). Masking must follow the image being masked.
     for img in (lum, short_lum):
-        for seed in ((cyA, cxA, RA), (cy0, cx0, 0.12 * Hs)):
+        for seed in ((cyA, cxA, RA), (cy0, cx0, _R0 or 0.12 * Hs)):
             try:
                 f = fit_limb_rays(img, seed[0], seed[1], seed[2])
             except Exception:
@@ -1613,6 +1852,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     json.dump({"export_tiers": bool(export_tiers),
                "tier_linear": bool(tier_linear),
                "inputs": input_fingerprint(folder),
+               # the flats are inputs too: adding, replacing or removing one
+               # has to invalidate the cache exactly as a light frame does
+               "flat_dir": _flat_dir,
+               "flat_inputs": _flat.fingerprint(_flat_dir),
+               # whether it was actually APPLIED, not just requested: a run
+               # that found the flats unusable leaves the cached master on
+               # disk, and a contact frame loaded afterwards must not be
+               # corrected with a flat the composite never saw
+               "flat_applied": flat_master is not None,
                "denoise": denoise, "earthshine": bool(earthshine),
                "despeckle": bool(despeckle), "frames": frames,
                "build": __version__},
@@ -1723,11 +1971,29 @@ def fit_limb_rays(lum, cy0, cx0, R0, n_ang=720, iters=5, decim=2):
             (prof * decim).astype(np.float32))
 
 
-def fit_limb(lum, cy0, cx0, n_ang=720):
+def fit_limb(lum, cy0, cx0, n_ang=720, R0=None):
+    """Gradient-maximum limb fit. Only ever a SEED for fit_limb_rays.
+
+    The search band used to be a fixed fraction of the frame -- R had to land
+    between a tenth and a third of the short side. That is a statement about
+    focal length, not about eclipses: on a 24 MP APS-C body it means the limb is
+    only inside the band beyond about 320 mm, and on 24 MP full-frame beyond
+    about 510 mm. A 240 mm shot puts the disc at 7.5% of the short side, below
+    the floor, so the limb was never even looked at -- the fit returned R = 1005
+    px for a 301 px disc and every per-tier limb measurement failed with it,
+    taking prominence anchoring and per-tier lunar masking down as well.
+
+    The band now comes from the measured disc instead, so nothing here depends
+    on how big the Moon happens to be in the frame.
+    """
     sm = ndimage.gaussian_filter(lum[::2, ::2], 2)
     cy, cx = cy0 / 2, cx0 / 2
-    rmax_est = min(sm.shape) / 3
-    rmin, rmax = rmax_est * 0.3, rmax_est
+    if R0 is None:
+        d = find_disc(lum)
+        if d is not None:
+            cy, cx, R0 = d[0] / 2, d[1] / 2, d[2]
+    rmax_est = (R0 / 2.0) if R0 else min(sm.shape) / 3
+    rmin, rmax = rmax_est * 0.55, rmax_est * 1.8
     for _ in range(4):
         ang = np.linspace(0, 2 * np.pi, n_ang, endpoint=False)
         rr = np.arange(rmin, rmax, 0.5)
@@ -1752,13 +2018,17 @@ def fit_limb(lum, cy0, cx0, n_ang=720):
         _rad = sol[2] + cx ** 2 + cy ** 2
         if not np.isfinite(_rad) or _rad <= 0:
             # rmax_est is half-res, like everything else in this loop; the
-            # normal return scales back up the same way
-            return cy0, cx0, float(rmax_est * 2)
+            # normal return scales back up the same way. The centre returned is
+            # the measured disc's when there is one -- bailing out of the
+            # refinement is no reason to throw away a good centre.
+            return cy * 2, cx * 2, float(rmax_est * 2)
         R = np.sqrt(_rad)
         if not (0.02 * min(sm.shape) < R < 0.45 * min(sm.shape)):
             # rmax_est is half-res, like everything else in this loop; the
-            # normal return scales back up the same way
-            return cy0, cx0, float(rmax_est * 2)
+            # normal return scales back up the same way. The centre returned is
+            # the measured disc's when there is one -- bailing out of the
+            # refinement is no reason to throw away a good centre.
+            return cy * 2, cx * 2, float(rmax_est * 2)
         rmin, rmax = R * 0.85, R * 1.15
     return cy * 2, cx * 2, R * 2
 
@@ -1771,6 +2041,24 @@ def prepare_contact(folder, raw_path, progress):
     geo = json.load(open(os.path.join(wd, "geometry.json")))
     progress.log(f"decoding {os.path.basename(raw_path)}...", 0.1)
     rf = open_frame(raw_path)
+    # the contact frame goes through the same optics, so it gets the same flat
+    # -- but only if the run that built the composite actually applied one
+    _mf = os.path.join(wd, "masterflat.npy")
+    _op = os.path.join(wd, "opts.json")
+    _used_flat = False
+    try:
+        _used_flat = bool(json.load(open(_op)).get("flat_applied", False))
+    except Exception:
+        pass
+    if _used_flat and os.path.exists(_mf):
+        try:
+            _m = np.load(_mf)
+            if _m.shape == rf.bayer.shape:
+                rf.bayer /= _m
+                progress.log("contact frame: flat correction applied", None)
+            del _m
+        except Exception as e:
+            progress.log(f"contact frame: flat not applied ({e})", None)
     rgb = demosaic_rggb(rf.bayer)
     rgb *= rf.daylight_wb[None, None, :]
     rgb = (rgb.reshape(-1, 3) @ rf.cam2rgb.T).reshape(rgb.shape)
