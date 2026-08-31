@@ -7,10 +7,11 @@ RAW_EXTS = {".rw2", ".raf", ".nef", ".cr2", ".cr3", ".arw", ".orf", ".dng", ".pe
 
 
 def list_raws(folder):
+    from .fits import is_fits
     out = []
     for name in sorted(os.listdir(folder)):
         ext = os.path.splitext(name)[1].lower()
-        if ext in RAW_EXTS or ext in {".tif", ".tiff"}:
+        if ext in RAW_EXTS or ext in {".tif", ".tiff"} or is_fits(name):
             out.append(os.path.join(folder, name))
     return out
 
@@ -63,6 +64,9 @@ def read_camera_info(path):
 
 def read_exif(path):
     """Return (exposure_seconds, iso, timestamp_str)."""
+    from .fits import is_fits, fits_exif
+    if is_fits(path):
+        return fits_exif(path)
     try:
         import exifread
     except ImportError:
@@ -245,6 +249,9 @@ class TiffFrame:
 
 
 def open_frame(path):
+    from .fits import is_fits, FitsFrame
+    if is_fits(path):
+        return FitsFrame(path)
     if os.path.splitext(path)[1].lower() in TIFF_EXTS:
         return TiffFrame(path)
     return RawFile(path)

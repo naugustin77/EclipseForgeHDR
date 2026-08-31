@@ -5,13 +5,16 @@ import numpy as np
 from scipy import ndimage
 from PIL import Image
 
+# Starting points, not truths. These are the settings the reference bracket was
+# worked to by eye once the layers were behaving (0.12.0); every one of them is
+# a taste call and every one is a slider.
 DEFAULTS = {
-    "fnMix": 0.25, "detailGain": 1.05, "baseLift": 0.18, "envGamma": 1.0,
-    "radialFlatten": 0.2, "mgnContrast": 0.4, "fnCompress": 1.5,
-    "clarity": 0.39, "smoothing": 0.0, "pelGain": 0.2,
-    "nafeMix": 0.0, "innerMix": 0.24, "innerDenoise": 0.5, "innerDim": 0.35, "promGain": 0.4,
-    "temp": 1.0, "tint": 1.0, "bgNeutral": 0.7, "satur": 1.25, "hlCompress": 0.5, "hlDesat": 0.12,
-    "outGamma": 1.15, "bgBlack": 0.02,
+    "fnMix": 0.17, "detailGain": 1.0, "baseLift": 0.255, "envGamma": 1.0,
+    "radialFlatten": 0.5, "mgnContrast": 0.04, "fnCompress": 0.9,
+    "clarity": 0.39, "smoothing": 0.25, "pelGain": 0.0,
+    "nafeMix": 0.15, "innerMix": 0.31, "innerDenoise": 0.4, "innerDim": 0.05, "promGain": 0.4,
+    "temp": 0.9, "tint": 1.205, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.1, "hlDesat": 0.0,
+    "outGamma": 1.0, "bgBlack": 0.005,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
 }
@@ -61,13 +64,49 @@ class Layers:
         lum = np.load(os.path.join(wd, "hdr_lum.npy"))
         self.shape = lum.shape
         H, W = lum.shape
-        lo = np.percentile(lum, 2); hi = np.percentile(lum, 99.97)
-        xn = np.clip((lum - lo) / (hi - lo), 0, 1)
-        Bg = xn ** (1 / 3.0)
-        # azimuthal-median radial brightness profile (for radial flattening)
         yy = np.arange(H, dtype=np.float32)[:, None] - self.cy
         xx = np.arange(W, dtype=np.float32)[None, :] - self.cx
         r = np.sqrt(yy * yy + xx * xx)
+        # BLACK POINT FROM THE SKY, NOT FROM A PERCENTILE (fixed in 0.11.5)
+        #
+        # This used lo = percentile(lum, 2). On a wide field the sky IS most of
+        # the frame, so that lands the sky within a noise sigma of the clip
+        # point -- and then `xn` is a small difference between two nearly equal
+        # numbers, which turns a tiny real variation in the sky into an
+        # enormous one on screen. Measured on the reference set:
+        #
+        #                         corner   mid-edge   ratio   sky clipped
+        #   the data itself                            1.030
+        #   lo = p2          Bg   0.0478   0.0637      1.332      2.4%
+        #   lo = sky - 5 sig Bg   0.1253   0.1284      1.025      0.0%
+        #
+        # A 3% brightness difference across the frame was being shown as 33%,
+        # and 2.4% of the sky was crushed to pure black. That -- not any detail
+        # layer -- is the "vignetting" that survived every layer being set to
+        # zero.
+        #
+        # It also un-pins the radial flatten control: with the sky that close to
+        # the floor, `rprof` sat on its 0.12 clamp everywhere in the outer field
+        # (corner and mid-edge both exactly 0.1200), so radial flattening did
+        # nothing out there. After the fix it reads 0.165-0.170 and works.
+        # Net through both: 1.332 -> 1.013, against 1.030 in the data.
+        hi = float(np.percentile(lum, 99.97))
+        _far = r > 2.5 * max(float(self.R), 1.0)
+        lo = float(np.percentile(lum, 2))
+        if _far.sum() > 20000:
+            _sv = lum[_far]
+            _sm = float(np.median(_sv))
+            _ss = 1.4826 * float(np.median(np.abs(_sv - _sm)))
+            if np.isfinite(_sm) and _ss > 0:
+                # never ABOVE the 1st percentile, so this can only ever clip
+                # less than the old rule, never more
+                lo = min(_sm - 5.0 * _ss, float(np.percentile(lum, 1)))
+        del _far
+        if not np.isfinite(lo) or hi <= lo:
+            lo = float(np.percentile(lum, 2)); hi = float(np.percentile(lum, 99.97))
+        self.black_point = lo
+        xn = np.clip((lum - lo) / (hi - lo), 0, 1)
+        Bg = xn ** (1 / 3.0)
         # Sized from the image, not capped at a literal 6000 px: on a larger
         # sensor, or with the disc off-centre, every radius past the cap
         # collapsed into one bin and the radial-flatten control quietly stopped
@@ -140,14 +179,38 @@ class Layers:
             del rc
         self.colour_floor = float(_floor)
         self.colour_conf_frac = float((_conf > 0.5).mean())
+        # Keep the confidence map. Neutralising the sky cast has to be applied
+        # WITH it: `ratio` above is already faded to exactly neutral wherever
+        # the signal is below the noise, so dividing that region by the sky's
+        # colour a second time does not neutralise anything -- it tips an
+        # already-grey sky blue. Weighted by confidence the correction is
+        # consistent: full where there is real chroma to correct, absent where
+        # the chroma was discarded. (0.11.4)
+        self._cconf = _conf
         # colour of the sky far from the corona. At low sun altitude extinction
         # crushes blue, so the background carries a real yellow-green cast that
         # is atmosphere, not corona; dividing it out neutralises the sky while
         # leaving the corona's own (very different) colour recognisable.
+        # Measured on the HDR itself, not on `ratio` (fixed in 0.11.4).
+        # `ratio` carries the confidence fade above, which drives it to exactly
+        # 1.0 wherever the signal is near the noise floor -- which is precisely
+        # this region. Mean confidence out here measures 0.015, so the old
+        # measurement returned R 1.000 G 1.000 B 1.000 on a sky whose real
+        # colour is R 0.985 G 1.037 B 0.681, and the Neutralise sky cast slider
+        # did nothing at any setting.
         rmx = float(r.max())
         farm = r > 0.72 * rmx
         if farm.sum() > 10000:
-            bc = np.median(ratio[farm].reshape(-1, 3), axis=0).astype(np.float32)
+            # subsampled: hdr is a memmap and this region is tens of millions
+            # of pixels; a median over every 4th row and column is the same
+            # number for a fraction of the memory
+            _fs = farm[::4, ::4]
+            _hs = np.asarray(hdr[::4, ::4], np.float32)[_fs].reshape(-1, 3)
+            bc = (np.median(_hs, axis=0).astype(np.float32) if _hs.shape[0] > 2000
+                  else np.ones(3, np.float32))
+            del _hs, _fs
+            if not np.isfinite(bc).all() or bc.min() <= 0:
+                bc = np.ones(3, np.float32)
         else:
             bc = np.ones(3, np.float32)
         bl = 0.2126 * bc[0] + 0.7152 * bc[1] + 0.0722 * bc[2]
@@ -155,7 +218,7 @@ class Layers:
         self.full = {"bg": Bg, "rprof": rprof, "mgn": mg, "fnrgf": fnl,
                      "inner": inner, "inner0": inner0, "earth": earth,
                      "prom": gate, "pel": pel, "ratio": ratio,
-                     "nafe": nfl}
+                     "nafe": nfl, "cconf": self._cconf}
         q = preview_decim
         self.prev = {k: v[::q, ::q] for k, v in self.full.items()}
         # clarity/smoothing variants (preview scale; full-res computed on demand)
@@ -308,7 +371,10 @@ def render(layers: Layers, params, preview=False, view="composite"):
 
     a = np.clip(src["ratio"], 0.2, 3.0) ** P["satur"]
     if P.get("bgNeutral", 0) > 0:
-        a = a / (layers.bg_chroma[None, None, :] ** P["bgNeutral"])
+        # weighted by the same confidence that built `ratio` -- see the note
+        # where _cconf is stored
+        _bn = (layers.bg_chroma[None, None, :] ** P["bgNeutral"]) - 1.0
+        a = a / (1.0 + src["cconf"][:, :, None] * _bn)
     a[:, :, 0] *= P["temp"]
     a[:, :, 2] /= P["temp"]
     a[:, :, 1] *= P.get("tint", 1.0)

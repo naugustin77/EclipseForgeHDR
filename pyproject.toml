@@ -31,6 +31,12 @@ dependencies = [
   "flask>=3.0",
 ]
 
+[project.optional-dependencies]
+# FITS input works without these -- there is a built-in reader for plain
+# uncompressed FITS, which is what cameras write. astropy covers
+# tile-compressed files and the stranger corners of the standard.
+fits = ["astropy>=5.0"]
+
 [project.urls]
 Homepage = "https://github.com/naugustin77/EclipseForgeHDR"
 Repository = "https://github.com/naugustin77/EclipseForgeHDR.git"

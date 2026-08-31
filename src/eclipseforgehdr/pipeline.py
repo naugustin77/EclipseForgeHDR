@@ -368,6 +368,156 @@ def _write_tier_tiff(folder, sec, cal_s, sat_level, hi, rgb_norm, n_frames,
     progress.log(f"  wrote {os.path.basename(path)}", None)
 
 
+def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
+    """Divide out the smooth brightness AND colour gradient across the frame.
+
+    At low solar altitude the sky is neither uniform nor uniformly coloured. On
+    the reference set (sun below 7 deg) it varies by 1.20x corner to corner in
+    red and 1.34x in blue -- blue steepest, which is what Rayleigh scattering
+    with airmass does, and the best evidence that what is being fitted is real
+    atmosphere rather than an artefact.
+
+    WHAT IT IS NOT: lens vignetting. That is radial about the FRAME centre, and
+    such a model explains 0.0% of the tilt and 2.5% of the curvature here,
+    against 54% and 52% for a plane and a quadratic. Flats would not remove it;
+    it has to be fitted per run.
+
+    THE ORDER: a plane leaves a curved remainder that reads as darkening on the
+    OTHER side and around the corners. Measured on what a plane leaves behind:
+    another plane explains 0.8%, a radial model 2.5%, a full quadratic 51.8%.
+
+    PER CHANNEL, not on luminance. One shared correction flattens brightness and
+    leaves the colour gradient untouched. Fitting each channel separately takes
+    the colour with it -- measured on the reference set, the spread of sky colour
+    between frame quadrants:
+
+                  before   after
+        R         0.0551   0.0106
+        G         0.0123   0.0024
+        B         0.0429   0.0072
+
+    WHERE IT IS FITTED matters more than the model. Fitted close in, it absorbs
+    the corona's OWN east-west asymmetry, which is real solar structure: the
+    fitted amplitude runs 1.22 in the 1.6-2.4 R shell, 0.55 at 2.4-3.2 R, 0.34
+    at 3.2-4 R and 0.22 beyond 4 R, converging only once the corona has faded.
+    The direction is stable at -13 to -18 deg throughout, which is what says it
+    is one real gradient. So the fit is restricted to beyond the MEASURED corona
+    extent. After removal the sky shell keeps 15% of its gradient while the
+    corona shells keep 93% and 71% of theirs.
+    """
+    hp = os.path.join(wd, "hdr_rgb.npy")
+    if not os.path.exists(hp):
+        return
+    hdr = np.load(hp, mmap_mode="r")
+    H, W, _ = hdr.shape
+    d = 6
+    S = np.asarray(hdr[::d, ::d], np.float32)
+    h, w, _ = S.shape
+    yy = np.arange(h, dtype=np.float32)[:, None] - cy / d
+    xx = np.arange(w, dtype=np.float32)[None, :] - cx / d
+    r = np.hypot(yy, xx)
+    Rd = max(R / d, 1e-6)
+    rb = np.clip((r / Rd * 8).astype(np.int32), 0, 400)
+    # beyond the corona, with a floor so a short bracket cannot fit on the corona
+    r_fit = max(float(extent_R or 0.0), 4.0)
+    m = (r > r_fit * Rd)
+    if m.sum() < 20000:
+        progress.log(f"sky gradient: too little sky beyond {r_fit:.1f} R to fit "
+                     f"({int(m.sum())} px) — skipped", None)
+        return
+    # six terms need plenty of sky to be stable; fall back to a plane if not
+    quad = int(m.sum()) >= 100000
+
+    def _design(X, Y):
+        cols = [np.ones_like(X), X, Y]
+        if quad:
+            cols += [X * X, Y * Y, X * Y]
+        return np.stack(cols, 1)
+
+    Xg = np.ones((h, 1), np.float32) * (xx / w)
+    Yg = (yy * np.ones((1, w), np.float32)) / h
+    A = _design(Xg[m], Yg[m])
+    coeffs, spans = [], []
+    for ch in range(3):
+        c_ = S[:, :, ch]
+        pos = c_[c_ > 0]
+        if pos.size < 1000:
+            return
+        # TRUE log, not log1p: the correction is multiplicative on the linear
+        # image, so the fit has to live where a multiplicative change is an
+        # additive one. log1p(S/median) compresses exactly where the sky sits,
+        # and a fit made there came out at half strength.
+        Ls = np.log(np.maximum(c_, max(float(np.percentile(pos, 0.5)), 1e-12)))
+        prof = np.array([np.median(Ls[rb == k]) if (rb == k).sum() > 20 else np.nan
+                         for k in range(int(rb.max()) + 1)])
+        ok = np.flatnonzero(np.isfinite(prof))
+        if ok.size < 4:
+            return
+        prof = np.interp(np.arange(prof.size), ok, prof[ok])
+        res = Ls - prof[rb]
+        cc, *_ = np.linalg.lstsq(A, res[m], rcond=None)
+        mf = A @ cc
+        coeffs.append(cc)
+        spans.append(float(mf.max() - mf.min()))
+    amp = float(max(spans))
+    ang = float(np.degrees(np.arctan2(coeffs[1][2], coeffs[1][1])))
+    # significance, by bootstrap on the green channel
+    Lg = np.log(np.maximum(S[:, :, 1],
+                           max(float(np.percentile(S[:, :, 1][S[:, :, 1] > 0], 0.5)), 1e-12)))
+    pg = np.array([np.median(Lg[rb == k]) if (rb == k).sum() > 20 else np.nan
+                   for k in range(int(rb.max()) + 1)])
+    okg = np.flatnonzero(np.isfinite(pg))
+    pg = np.interp(np.arange(pg.size), okg, pg[okg])
+    resg = (Lg - pg[rb])[m]
+    rs = np.random.default_rng(0)
+    aa = []
+    for _ in range(24):
+        i = rs.integers(0, A.shape[0], A.shape[0] // 4)
+        c2, *_ = np.linalg.lstsq(A[i], resg[i], rcond=None)
+        mm = A @ c2
+        aa.append(float(mm.max() - mm.min()))
+    sig = amp / max(float(np.std(aa)), 1e-9)
+    stats["sky_gradient"] = {"amp_log": amp, "ratio": float(np.exp(amp)),
+                             "angle_deg": ang, "sigma": sig,
+                             "fitted_beyond_R": r_fit,
+                             "order": 2 if quad else 1,
+                             "per_channel": [float(np.exp(x)) for x in spans]}
+    # a sky model has no business spanning more than a factor of two
+    if amp > 0.7:
+        progress.log(f"sky gradient: fitted model spans {np.exp(amp):.2f}x — "
+                     f"implausible for sky, not applied", None)
+        stats["sky_gradient"]["applied"] = False
+        return
+    if amp < 0.02 or sig < 8.0:
+        progress.log(f"sky gradient: {np.exp(amp):.3f}x across the frame "
+                     f"({sig:.0f} sigma) — below the threshold, left alone", None)
+        stats["sky_gradient"]["applied"] = False
+        return
+    # Evaluated in row blocks: six full-resolution term arrays per channel would
+    # be several gigabytes on a 45 MP frame.
+    yf_all = (np.arange(H, dtype=np.float32) - cy) / float(H)
+    xf = ((np.arange(W, dtype=np.float32) - cx) / float(W))[None, :]
+    out = np.load(hp)
+    for y0 in range(0, H, 512):
+        y1 = min(y0 + 512, H)
+        yf = yf_all[y0:y1, None]
+        for ch in range(3):
+            cc = coeffs[ch]
+            e = cc[1] * xf + cc[2] * yf
+            if quad:
+                e = e + cc[3] * (xf * xf) + cc[4] * (yf * yf) + cc[5] * (yf * xf)
+            out[y0:y1, :, ch] *= np.exp(-e).astype(np.float32)
+    np.save(hp, out)
+    lum2 = (0.2126 * out[:, :, 0] + 0.7152 * out[:, :, 1]
+            + 0.0722 * out[:, :, 2]).astype(np.float32)
+    np.save(os.path.join(wd, "hdr_lum.npy"), lum2)
+    stats["sky_gradient"]["applied"] = True
+    progress.log(f"sky gradient removed per channel: R {np.exp(spans[0]):.3f}x "
+                 f"G {np.exp(spans[1]):.3f}x B {np.exp(spans[2]):.3f}x across the "
+                 f"frame ({'quadratic' if quad else 'plane'}, tilt {ang:+.0f} deg), "
+                 f"fitted beyond {r_fit:.1f} R ({sig:.0f} sigma)", None)
+
+
 def shift_bayer_even(a, dy, dx):
     """Shift a Bayer mosaic by an EVEN number of pixels without wrapping.
 
@@ -1304,6 +1454,13 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          "rays_kept": int(fit[4]) if fit else None,
                          "rays": int(fit[5]) if fit else None}
     stats.update(_report.measure_image(lum, cyf, cxf, R))
+    # now that the corona's extent is measured, the sky beyond it can be fitted
+    try:
+        remove_sky_gradient(wd, cyf, cxf, R, stats.get("corona_extent_R"),
+                            stats, progress)
+        lum = np.load(os.path.join(wd, "hdr_lum.npy"))
+    except Exception as e:
+        progress.log(f"sky gradient removal skipped ({e})", None)
 
     # --- how well did the tiers actually land on each other? ---
     # Photoshop's 'Variance' stack mode, as a number. Aligned tiers disagree

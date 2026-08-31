@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.10.3
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.12.0
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
@@ -73,8 +73,12 @@ exporting afterwards is instant.
    weights so there are no seams. Where it measurably helps, each tier is also
    masked to its own lunar disc, since the Moon moves against the corona during
    the bracket.
-6. **Trim.** The alignment border — the strip that only some tiers cover — is
-   cropped away automatically.
+6. **Trim, and flatten the sky.** The alignment border — the strip that only
+   some tiers cover — is cropped away automatically. At low solar altitude the
+   sky itself is not uniform across a 3.5° field; a low-order surface is fitted
+   per channel *beyond the measured corona extent* and divided out, which
+   takes the sky's colour gradient with it, so the gradient goes
+   without the corona's own asymmetry going with it.
 7. **Extract structure.** Several independent enhancement layers are computed
    from the merged HDR: MGN (multi-scale Gaussian normalisation), FNRGF
    (Fourier normalising radial-gradient filter), NAFE-VN (noise-adaptive fuzzy
@@ -195,8 +199,8 @@ without the rest of the image being touched.
   combining in Photoshop, Affinity or PixInsight
 - A written run report: alignment residuals, lunar drift, tier variance,
   calibration factors, and every gate the pipeline opened or closed
-- Raw input from any Bayer camera LibRaw supports; 16-bit TIFF brackets also
-  accepted
+- Raw input from any Bayer camera LibRaw supports; 16-bit TIFF brackets and
+  FITS (colour, mono or 3-plane) also accepted
 
 ---
 
@@ -259,6 +263,33 @@ own cache.
 
 Heavy intermediates live in `.eclipseforgehdr/` inside the raw folder; outputs
 land in `eclipseforge_output/` next to the raws.
+
+## FITS input
+
+Folders of FITS frames work as input, for capture software that writes it
+rather than camera raw — INDI/EKOS, SharpCap, N.I.N.A., FireCapture. Colour
+(CFA + `BAYERPAT`), monochrome, and already-debayered 3-plane cubes are all
+handled; the Bayer pattern is rolled to RGGB and `XBAYROFF`/`YBAYROFF` are
+respected.
+
+`EXPTIME` or `EXPOSURE` is **required** — it is what groups frames into
+exposure tiers, so it cannot be guessed. `DATE-OBS`, `GAIN`, `PEDESTAL` and
+`SATURATE` are used when present.
+
+Two things to know. FITS headers carry no colour matrix and no white balance,
+so both are identity: a colour-camera frame comes out green-dominant as
+captured, and Warmth, Tint and Neutralise sky cast are the controls for that.
+Inventing a white balance would hide a colour error inside the photometry. And
+where no `SATURATE` keyword exists the saturation ceiling is recovered from the
+data — a real ceiling shows as a minority of pixels sharing the maximum — with
+the bit depth as a fallback; the run report says which was used.
+
+Reading needs no extra package: there is a built-in reader for plain
+uncompressed FITS, which is what cameras write. `astropy` is used automatically
+if installed and covers tile-compressed files and the stranger corners of the
+standard:
+
+    pipx install '.[fits]'      # or: pip install astropy
 
 ## TIFF input
 

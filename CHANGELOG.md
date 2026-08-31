@@ -5,7 +5,322 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
-## 0.10.3 — NAFE's histogram was being spent on sky
+## 0.12.0 — FITS input
+
+Folders of FITS frames work as input, for capture software that writes it
+rather than camera raw — INDI/EKOS, SharpCap, N.I.N.A., FireCapture. Colour
+(CFA + `BAYERPAT`), monochrome, and already-debayered 3-plane cubes; the Bayer
+pattern is rolled to RGGB the same way a camera raw is, and `XBAYROFF` /
+`YBAYROFF` are respected.
+
+**No new dependency.** `astropy.io.fits` is used if installed, then `fitsio`,
+then a built-in reader for plain uncompressed FITS — which is what cameras
+actually write. astropy earns its place on tile-compressed files and the odd
+corners of the standard, so it is an optional extra
+(`pip install 'eclipseforgehdr[fits]'`) and the error message says to install it
+if a file turns up that the built-in reader cannot open.
+
+A FITS frame arrives without the two things LibRaw normally supplies, so both
+are recovered from the file:
+
+- **Exposure** from `EXPTIME` / `EXPOSURE`, and it is required rather than
+  guessed — it is what groups frames into tiers. A file without it stops the
+  run with that said plainly.
+- **The saturation ceiling** from `SATURATE` / `DATAMAX` if the writer records
+  one; otherwise from a saturation *plateau* in the data, since a real ceiling
+  shows as many pixels sharing the maximum. That test now also requires the
+  plateau to be under 20% of the frame — caught by a test of my own where a
+  uniform frame tripped it and would have told the merge that a perfectly good
+  frame was clipped everywhere. Bit depth is the last fallback. The report says
+  which was used, because guessing high is the dangerous direction: clipped
+  pixels then merge as if they were valid.
+
+There is no colour matrix or white balance in a FITS header, so both are
+identity and the README says so. A colour-camera frame comes out green-dominant
+as captured; Warmth, Tint and Neutralise sky cast are the controls. Inventing a
+white balance would bury a colour error inside the photometry where nothing can
+see it.
+
+Tested against hand-written FITS covering int16-with-BZERO, float32, RGGB and
+BGGR (which must decode identically — they do), mono, 3-plane cubes, pedestal
+subtraction, and a missing exposure time.
+
+**New defaults**, from the settings the reference bracket was worked to: radial
+flatten 0.5, FNRGF share 0.17 / strength 0.9, MGN contrast 0.04, NAFE-VN mix
+0.15, Pellett off, short-exposure detail 0.31, glare dim 0.05, warmth 0.9, tint
+1.205, neutralise sky cast 1.0, saturation 1.0, highlight compression 0.1,
+output gamma 1.0, black point 0.005.
+
+## 0.11.5 — the "vignetting" was the black point
+
+Setting every structure slider to zero and still seeing it was the decisive
+clue: it was never NAFE, or any detail layer. It was the base envelope.
+
+`Bg` normalised the merged luminance with `lo = percentile(lum, 2)`. On a wide
+field the sky **is** most of the frame, so that lands the black point within a
+noise sigma of the sky itself — and `xn` becomes a small difference between two
+nearly equal numbers, which turns a tiny real variation into an enormous one on
+screen. Measured on the reference set, corner against mid-edge:
+
+| | corner | mid-edge | ratio | sky clipped to black |
+|---|---|---|---|---|
+| the data itself | | | **1.030** | |
+| `lo = p2` (before) | 0.0478 | 0.0637 | **1.332** | 2.4% |
+| `lo = sky − 5σ` (now) | 0.1253 | 0.1284 | 1.025 | 0.0% |
+
+A 3% brightness difference across the frame was being displayed as 33%, and
+2.4% of the sky was crushed to pure black. The black point is now measured from
+the sky itself — median and MAD beyond 2.5 R — and clamped never to sit above
+the 1st percentile, so it can only ever clip less than the old rule, never more.
+
+It also **un-pinned the radial flatten control**. With the sky that close to the
+floor, `rprof` sat on its 0.12 clamp everywhere in the outer field — corner and
+mid-edge both read exactly 0.1200 — so radial flattening did nothing out there
+at any setting. It now reads 0.165–0.170 and works.
+
+End to end, rendered composite with every detail layer at zero: corner-to-edge
+ratio **1.332 → 1.000**. With the default layers on, 1.017.
+
+**The background now starts lighter**, because the crush is gone rather than
+hidden. `Black point` is the control, and it now behaves uniformly instead of
+distorting shape. Measured on the reference set:
+
+| bgBlack | sky | corona | corona/sky |
+|---|---|---|---|
+| 0.02 (default) | 0.185 | 0.251 | 1.36 |
+| 0.08 | 0.131 | 0.202 | 1.54 |
+| 0.11 | 0.102 | 0.179 | 1.75 |
+
+About 0.11 reproduces the old background darkness — but note the corona-to-sky
+contrast *improves* as you crush, which it could not do before, because the
+crush used to take the shape with it.
+
+## 0.11.4 — the sky's colour, and a slider that did nothing
+
+**Neutralise sky cast had no effect at any setting, and never had.** It divides
+the chroma field by the measured background colour — but that colour was being
+measured on `ratio`, which carries a confidence fade that drives it to exactly
+1.0 wherever the signal is near the noise floor. That is precisely the region it
+was measured in: mean confidence there is **0.015**. So it returned R 1.000
+G 1.000 B 1.000 on a sky whose real colour is R 0.985 G 1.037 B 0.681, and
+dividing by unity does nothing. It is now measured on the HDR itself.
+
+That exposed a second problem. With a real value in hand, dividing the whole
+chroma field by it tipped the *far sky* blue — because `ratio` had already
+forced that region neutral, so the correction was applied twice there and once
+in the corona. The correction is now weighted by the same confidence that built
+`ratio`: full where there is real chroma to correct, absent where the chroma was
+discarded. Measured across the slider:
+
+| bgNeutral | far sky B/R | corona B/R |
+|---|---|---|
+| 0.00 | 1.000 | 0.166 |
+| 0.50 | 1.000 | 0.200 |
+| 1.00 | 1.000 | 0.239 |
+
+The sky stays exactly neutral at every setting while the corona's atmospheric
+cast comes off monotonically — which is what the label promises.
+
+**The sky gradient is now removed per channel.** One shared correction flattens
+brightness and leaves the colour gradient behind. Fitting each channel takes the
+colour with it, and the fitted spans are R 1.202× G 1.262× **B 1.335×** — blue
+steepest, which is what Rayleigh scattering with airmass does, and the best
+evidence that what is being fitted is real atmosphere. Measured on the sky:
+
+| | before | after |
+|---|---|---|
+| brightness spread across quadrants | 1.122× | **1.019×** |
+| colour spread, R | 0.0551 | **0.0106** |
+| colour spread, G | 0.0123 | **0.0024** |
+| colour spread, B | 0.0429 | **0.0072** |
+
+**New defaults.** The starting slider positions are now the settings the
+reference bracket was worked to by eye, rather than the ones inherited from
+before the layers behaved: MGN contrast 0.4 → 0.1, FNRGF strength 1.5 → 0.5,
+NAFE-VN mix 0 → 0.2, short-exposure detail 0.24 → 0.6, glare dim 0.35 → 0.15,
+radial flatten 0.2 → 0.35, base lift 0.18 → 0.255, grain smoothing 0 → 0.25,
+neutralise sky cast 0.7 → 0.5, and a few smaller moves. They are starting
+points, not truths — every one is a taste call and every one is a slider.
+
+## 0.11.3 — the sky curves; a plane was the wrong order
+
+0.11.2 took out the tilt and left a curved remainder, which then read as
+darkening on the *other* side and around the corners. Measured on what the
+plane left behind, beyond 4.1 R:
+
+| model fitted to the remainder | explains |
+|---|---|
+| another plane | 0.8% ← the tilt really was gone |
+| radial about the frame centre (vignetting) | 2.5% ← still not vignetting |
+| **full quadratic in x, y** | **51.8%** |
+
+So the sky curves across a 3.5° field near the horizon, and a plane cannot
+follow it. The model is now a full quadratic, still fitted only beyond the
+measured corona extent:
+
+| shell | before | after | retained |
+|---|---|---|---|
+| 1.6–2.4 R | 0.1735 | 0.1608 | 93% ← corona survives |
+| 2.4–3.2 R | 0.0810 | 0.0576 | 71% ← corona survives |
+| 4.0–6.0 R | 0.0594 | 0.0088 | **15%** ← sky collapses |
+
+Six terms need plenty of sky to be stable, so it falls back to the plane below
+100k fitted pixels. A model spanning more than 2× across the frame is rejected
+outright — that is not sky. And the full-resolution evaluation is done in row
+blocks, since six term arrays at 45 MP would be a gigabyte.
+
+## 0.11.2 — the dark wedge is the sky, not the lens
+
+A broad dark gradient across one side of the frame, strongest at low solar
+altitude. Measured on the reference set it is **1.20× corner to corner**.
+
+**It is not vignetting.** A radial model about the frame centre — what lens
+vignetting looks like — explains **0.0%** of it, against 54% for a plane in x
+and y. So flats would not have removed it, and it has to be fitted per run
+rather than calibrated once.
+
+**Where you fit it matters more than the model.** Fitted close in, the plane
+absorbs the corona's own east–west asymmetry, which is real solar structure.
+The fitted amplitude runs 1.22 in the 1.6–2.4 R shell, 0.55 at 2.4–3.2 R, 0.34
+at 3.2–4 R and 0.22 beyond 4 R, converging only once the corona has faded into
+the sky — while the *direction* is stable at −13° to −18° everywhere, which is
+what says it is one real gradient rather than a fitting accident. So the fit is
+restricted to beyond the measured `corona_extent_R`, and only what it finds
+there is removed:
+
+| shell | before | after | retained |
+|---|---|---|---|
+| 1.6–2.4 R | 1.2235 | 1.0381 | 85% ← corona, survives |
+| 2.4–3.2 R | 0.5530 | 0.3676 | 66% ← corona, survives |
+| 3.2–4.0 R | 0.3425 | 0.1572 | 46% |
+| 4.0–6.0 R | 0.2184 | 0.0331 | **15%** ← sky, collapses |
+
+The correction is multiplicative and identical in all three channels, so colour
+is untouched. It is gated: below 2% amplitude or 8σ it is measured, reported
+and left alone. The run report prints what was found either way.
+
+One thing this cost me an iteration: the fit must be in **true log**, not
+`log1p(S/median)`. The correction is multiplicative on the linear image, so the
+fit has to live in the space where a multiplicative change is an additive one —
+and `log1p` compresses exactly where the sky sits. Fitted that way the
+correction came out at half strength (sky residual 0.105 → 0.063 instead of
+→ 0.017).
+
+## 0.11.1 — the white rim, and the contrast
+
+Both of these turned out to be the same thing.
+
+E is a rank, so its useful range is set by how much of its neighbourhood a
+pixel actually beats. In the quiet corona that is a narrow band around the
+middle — hence the flat look — while the near-limb brightness **ridge** is a
+local maximum by definition and pins at exactly 1.0 — hence the blown white
+rim. Raw, you get a washed-out corona and a saturated rim at the same time, and
+they are two faces of one problem: the layer was being used unscaled.
+
+The layer is now rescaled by its own robust spread, with the response rolled
+off softly past 3 robust sigmas so an extreme cannot reach the rail. Measured
+at full resolution (rim = 1.04–1.18 R):
+
+| | 1.05–1.5 R | 1.5–2 R | 2–2.5 R | 2.5–3 R | 3–4 R | rim p99.9 | rim >0.99 |
+|---|---|---|---|---|---|---|---|
+| 0.11.0 | 0.0747 | 0.0272 | 0.0268 | 0.0276 | 0.0301 | 1.0000 | 6.75% |
+| **0.11.1** | **0.1225** | **0.0882** | **0.0843** | **0.0856** | 0.0940 | **0.8792** | **0.00%** |
+
+Corona contrast 3.1–3.3×, limb 1.6×, and the rim stops clipping entirely.
+Repeatability under an independent σ_A is unchanged (+0.96 at the limb, +0.77
+to +0.81 outside), so this is a rescale of the same structure, not new
+structure invented out of noise.
+
+The knee position was chosen by measurement: at 2 the rim is darkest but the
+corona gives up contrast; past 6 the rim starts clipping again; without it the
+contrast barely improves *and* the rim returns. `knee=0` returns the raw rank
+for anyone who wants the paper's E untouched.
+
+Note the sky looks grainier than in 0.11.0 — everything is stretched three
+times, sky included. That is honest, and the mix slider plus the composite's
+own envelope decide how much of it reaches the image.
+
+## 0.11.0 — NAFE-VN, in the paper's units
+
+You were right to send the paper. The variable neighbourhood was implemented
+correctly — eqs. 11–12 are there, and the ratio this code computes,
+`(C(a) − C(a−ε)) / (C(a+ε) − C(a−ε))`, is exactly the restricted rank the paper
+defines. This *was* NAFE-VN and not plain NAFE. What was wrong was the units
+everything was measured in, and that broke the one thing that makes the method
+work on noisy data.
+
+**The bug.** The image was passed through an equal-population rank map first,
+and ε and σ were then applied in *rank* units. That looks harmless — a monotone
+remap does not change which neighbour is brighter than which. But eq. 13's noise
+adaptivity depends on σ being a **fixed width in the value units of A**: where
+the local histogram is wide (real contrast) a fixed smoothing is negligible,
+where it is narrow (noise only) it dominates and flattens the rank. Under a rank
+map the sky — most of the pixels — is stretched to fill most of the axis and the
+corona is squeezed into what is left, so the same physical width means something
+different at every radius. The automatic behaviour is gone. A per-level
+correction had been bolted on to compensate; it did not.
+
+Per-annulus contrast (sd) on the reference frame, full resolution:
+
+| | 1.05–1.5 R | 1.5–2 R | 2–2.5 R | 2.5–3 R | 3–4 R (sky) |
+|---|---|---|---|---|---|
+| 0.10.4, rank units | 0.0944 | 0.0105 | 0.0253 | 0.0602 | 0.1041 |
+| **0.11.0, level units** | 0.0747 | **0.0272** | **0.0268** | 0.0276 | **0.0301** |
+
+In rank units the layer's contrast *rose* with radius, tracking the falling
+signal-to-noise — it was a noise detector, which is why the sky was grainy and
+the corona flat. In level units it is nearly constant with radius, which is what
+a scale-free rank filter should produce: the corona from 1.5 to 3 R gains
+40–160% of contrast and the sky loses two thirds of its grain. Repeatability
+under an independent σ_A of added noise is +0.99 at the limb and +0.77 to +0.82
+everywhere else.
+
+Three other things the re-reading turned up:
+
+- **K = 128, not 64.** The paper notes its images have "several thousand
+  discrete pixel values". 64 levels is a real approximation and it cost real
+  contrast (2–2.5 R: 0.0273 at K=64 against 0.0366 at K=128). Past 128 the
+  corona keeps gaining but the sky gains faster.
+- **The paper's plain Gaussian kernel beats the multiscale sum** this had been
+  building for the fuzzy weights l_{k,l} of eqs. 4–5 — more corona contrast and
+  nearly twice as fast.
+- **The speed is legitimate.** The paper calls the naive per-pixel algorithm
+  "extremely time consuming"; this evaluates every pixel's local histogram at
+  once as K blurred membership maps, which is the same computation reorganised
+  rather than an approximation. The one genuine shortcut is sampling that field
+  every `grid` px — and grid 8 against grid 4 agrees to three decimals in every
+  annulus, so it is free. K=64 was the shortcut that was not free.
+
+## 0.10.4 — reverting 0.10.3
+
+**0.10.3 broke the NAFE layer and should not be used.** Reverted; this build is
+0.10.2 behaviour.
+
+Weighting the rank map toward r < 1.5 R starved the *mid* corona, which is
+neither in the favoured region nor negligible. Measured at full resolution on
+the reference set, the field from 1.5 to 3 R collapsed to sd 0.044 with p1–p99
+of 0.46–0.75 — a flat grey plateau with a hard edge where the weighting ran
+out — while inside 1.5 R it clipped at 1.000.
+
+It should not have shipped, and the reason it did is worth recording:
+
+- The metric was **high-pass sd**, which only sees pixel-scale variation. The
+  streamers are mid-scale, so the collapse was invisible to it. The right
+  metric is per-annulus contrast, and by that measure 0.10.3 fails immediately.
+- The check image was **cropped to 2.4 R**, just inside the plateau's edge.
+
+Both checks were run on a decimated probe rather than the full-resolution code
+path, which is also where the σ_A error in 0.10.3 hid. Any future attempt here
+must be judged on per-annulus contrast, out to at least 4 R, on a picture of
+the whole frame, computed on the shipped path.
+
+Verified after the revert: 0.10.4 matches 0.10.1 to within 0.002 sd in every
+annulus from 1.05 R to 4 R.
+
+The 0.10.2 changes (ε, noise σ, a working `sigma_sp`) are kept — they were
+measured on the same footing and are small.
+
+## 0.10.3 — NAFE's histogram was being spent on sky (REVERTED in 0.10.4)
 
 Testing the "crop the field" hypothesis from 0.10.2 turned into a real fix.
 

@@ -203,6 +203,19 @@ def build(stats):
     if stats.get("hdr_range_ev"):
         A(f"coronal range: {stats['hdr_range_ev']:.1f} EV between the inner corona "
           f"at the limb and the outer background")
+    sg = stats.get("sky_gradient")
+    if sg:
+        if sg.get("applied"):
+            pc = sg.get("per_channel")
+            span = (f"R {pc[0]:.3f}x G {pc[1]:.3f}x B {pc[2]:.3f}x" if pc
+                    else f"{sg['ratio']:.3f}x")
+            A(f"sky gradient : {span} across the frame, removed per channel "
+              f"({'quadratic' if sg.get('order', 1) >= 2 else 'plane'}, tilt "
+              f"{sg['angle_deg']:+.0f} deg, fitted beyond "
+              f"{sg['fitted_beyond_R']:.1f} R, {sg['sigma']:.0f} sigma)")
+        else:
+            A(f"sky gradient : {sg['ratio']:.3f}x across the frame — below the "
+              f"threshold, left alone")
     p = stats.get("prom") or {}
     if p:
         A(f"prominences  : corona colour R/GB = {p.get('med_red', 0):.2f}, "
