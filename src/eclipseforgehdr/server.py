@@ -42,14 +42,35 @@ def set_folder():
     raws = list_raws(folder)
     STATE["folder"] = folder
     STATE["layers"] = None
+    # "cached" has to mean Start will actually reuse it, and Start also checks
+    # the build. Reporting a stale-version cache as reusable was a small lie.
+    from . import __version__
+    _op = os.path.join(workdir(folder), "opts.json")
     cached = os.path.exists(os.path.join(workdir(folder), "geometry.json"))
+    if cached:
+        try:
+            from . import cache_ok
+            cached = cache_ok(json.load(open(_op)).get("build"))
+        except Exception:
+            cached = False
     # offer the conventionally-named flats subfolder, if there is one; the GUI
     # shows it and the user can clear it or point somewhere else
     from .flat import find_flat_dir
     fd = find_flat_dir(folder)
+    # A finished HDR the user might want to import rather than stack: a lone
+    # 16-bit TIFF sitting in the folder is almost always exactly that.
+    cand = []
+    try:
+        for n in sorted(os.listdir(folder)):
+            if os.path.splitext(n)[1].lower() in (".tif", ".tiff") and \
+                    os.path.isfile(os.path.join(folder, n)):
+                cand.append(n)
+    except OSError:
+        pass
     return jsonify({"ok": True, "folder": folder, "raw_count": len(raws),
                     "cached": cached, "flat_dir": fd,
-                    "flat_count": len(list_raws(fd)) if fd else 0})
+                    "flat_count": len(list_raws(fd)) if fd else 0,
+                    "tiffs": cand[:24]})
 
 
 @app.post("/api/run")
@@ -73,6 +94,13 @@ def start_run():
         frames = "all"
     flat_dir = (request.json.get("flatDir", "") if request.is_json else "") or ""
     flat_dir = str(flat_dir).strip()
+    # One finished HDR instead of a bracket: skip stacking entirely and run the
+    # detail layers on the supplied image.
+    import_path = (request.json.get("importPath", "") if request.is_json else "") or ""
+    import_path = os.path.expanduser(str(import_path).strip())
+    if import_path and not os.path.isfile(import_path):
+        return jsonify({"ok": False,
+                        "error": f"not a file: {import_path}"}), 400
     prog = Progress()
     STATE["progress"] = prog
     # Bind the folder HERE. work() used to re-read STATE["folder"] at execution
@@ -88,9 +116,39 @@ def start_run():
         try:
             wd = workdir(folder)
             opts_path = os.path.join(wd, "opts.json")
-            from . import __version__
+            from . import __version__, cache_ok as _cache_ok
             from .pipeline import resolve_flat_dir
             from .flat import fingerprint as _flat_fp
+            if import_path:
+                from . import importhdr
+                o = {}
+                if os.path.exists(opts_path):
+                    try:
+                        o = json.load(open(opts_path))
+                    except Exception:
+                        o = {}
+                same = (o.get("mode") == "import"
+                        and o.get("import") == os.path.basename(import_path)
+                        and o.get("import_mtime") == int(os.path.getmtime(import_path))
+                        and o.get("import_size") == int(os.path.getsize(import_path))
+                        and o.get("denoise") == denoise
+                        and _cache_ok(o.get("build")))
+                have = all(os.path.exists(os.path.join(wd, f))
+                           for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))
+                if force or not same or not have:
+                    if os.path.exists(opts_path):
+                        try:
+                            os.remove(opts_path)
+                        except OSError:
+                            pass
+                    importhdr.run(folder, import_path, prog, denoise=denoise)
+                else:
+                    prog.log("using cached layers for this image", 0.9)
+                prog.log("loading layers for preview...", None)
+                STATE["layers"] = Layers(wd)
+                prog.log("ready", 1.0)
+                prog.done = True
+                return
             _fd = resolve_flat_dir(folder, flat_dir)
             opts_ok = False
             if os.path.exists(opts_path):
@@ -103,7 +161,7 @@ def start_run():
                            and o.get("frames", "all") == frames
                            and bool(o.get("export_tiers", False)) == export_tiers
                            and bool(o.get("tier_linear", False)) == tier_linear
-                           and o.get("build") == __version__
+                           and _cache_ok(o.get("build"))
                            # ... and the input files themselves. Without this,
                            # adding or removing a frame and pressing Start (not
                            # force) silently reused the previous stack, and the
@@ -146,9 +204,17 @@ def get_progress():
     p = STATE["progress"]
     if p is None:
         return jsonify({"lines": [], "frac": 0, "done": False, "error": None,
+                        "elapsed": 0.0, "since": 0.0, "step": "",
                         "ready": STATE["layers"] is not None})
+    # "step" is the last log line: it is what the run is actually doing, and
+    # pairing it with "since" tells the user whether a long wait is a slow step
+    # or a dead one.
     return jsonify({"lines": p.lines[-250:], "frac": p.frac, "done": p.done,
-                    "error": p.error, "ready": STATE["layers"] is not None})
+                    "error": p.error,
+                    "elapsed": round(p.elapsed(), 1),
+                    "since": round(p.since(), 1),
+                    "step": p.lines[-1] if p.lines else "",
+                    "ready": STATE["layers"] is not None})
 
 
 @app.get("/api/geometry")
@@ -167,6 +233,9 @@ def get_geometry():
                     "limbMargin": ly.limb_margin / ly.prev_decim,
                     "bgChroma": [float(x) for x in ly.bg_chroma],
                     "decim": ly.prev_decim, "has_contact": ly.has_contact,
+                    "has_flat": getattr(ly, "has_flat", False),
+                    "flat_range": list(getattr(ly, "flat_range", []) or []),
+                    "flat_error": getattr(ly, "flat_error", None),
                     "has_earth": getattr(ly, "has_earth", False)})
 
 

@@ -78,6 +78,23 @@ def build(stats):
     A(f"folder       : {stats.get('folder', '?')}")
     if stats.get("finished"):
         A(f"processed    : {stats['finished']}")
+    _tm = stats.get("timing") or {}
+    if _tm.get("total_s"):
+        def _d(s):
+            s = int(round(float(s)))
+            return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+        A(f"run time     : {_d(_tm['total_s'])}")
+        # Every step over a second, not just the slowest few: the point of this
+        # block is to make the progress bar's weights measurable, and a list
+        # that stops at the top four leaves the rest of the run unaccounted for.
+        _steps = _tm.get("steps") or _tm.get("slowest") or []
+        _tot = float(_tm["total_s"]) or 1.0
+        for d, m in _steps:
+            A(f"               {_d(d):>7}  {100 * float(d) / _tot:4.1f}%  {m}")
+        if _tm.get("accounted_s"):
+            _un = float(_tm["total_s"]) - float(_tm["accounted_s"])
+            A(f"               {_d(_un):>7}  {100 * _un / _tot:4.1f}%  "
+              f"(steps under 1s, not listed)")
     cam = stats.get("camera_info") or {}
     if cam:
         bits = [cam.get("camera"), cam.get("lens")]
@@ -91,12 +108,34 @@ def build(stats):
     if stats.get("shot_first"):
         A(f"frames taken : {stats['shot_first']}  ..  {stats.get('shot_last', '')}")
 
-    A("")
-    A("EXPOSURE STACK")
-    A("-" * 60)
+    if stats.get("mode") == "imported HDR":
+        A("")
+        A("IMPORTED HDR")
+        A("-" * 60)
+        A(f"source       : {os.path.basename(str(stats.get('imported', '?')))}")
+        _tc = {"srgb": "sRGB transfer function (inverted on import)",
+               "linear": "linear (used as it is)",
+               "gamma": f"gamma {stats.get('import_gamma') or '?'} (inverted on import)"
+               }.get(stats.get("import_tone"), "not declared")
+        A(f"tone curve   : {_tc}")
+        A("This image was not stacked here, so there is nothing to report about")
+        A("alignment, photometry or per-tier lunar masking, and no earthshine")
+        A("layer was built. Two layers are weaker than they would be from a")
+        A("bracket, and it is worth knowing which:")
+        A("  * inner corona: normally a separate MGN of the shortest tiers, which")
+        A("    see the inner corona unsaturated. From one image it is a second")
+        A("    view of the same pixels -- a different filter, not new data.")
+        A("  * prominences : the gate keys on H-alpha redness in a fast tier. A")
+        A("    merged image has usually compressed exactly that, so the gate has")
+        A("    less to work with and flags less.")
+    _imported = stats.get("mode") == "imported HDR"
     tiers = stats.get("tiers", [])
-    A(f"{'exposure':>10}  {'used':>6}  {'best frame':<18} {'sharp':>7} {'spread':>6}  "
-      f"{'photom.':>7}  {'shift px':>9}")
+    if not (_imported and not tiers):
+        A("")
+        A("EXPOSURE STACK")
+        A("-" * 60)
+        A(f"{'exposure':>10}  {'used':>6}  {'best frame':<18} {'sharp':>7} {'spread':>6}  "
+          f"{'photom.':>7}  {'shift px':>9}")
     for t in tiers:
         sh = t.get("shift", [0, 0])
         A(f"{_fmt_exp(t['sec']):>10}  "
@@ -252,8 +291,28 @@ def build(stats):
     A("")
     A("METHODS")
     A("-" * 60)
+    # In import mode two of these would describe something that did not happen:
+    # there are no tiers, so "a stack of the four shortest tiers" and "a single
+    # fast tier" are not true of this run. The layers are still built, so the
+    # entries stay -- restated to say what was actually done.
+    _imp = stats.get("mode") == "imported HDR"
+    _skip = ({"Frame selection", "Sensor defects", "Alignment", "Prominence anchors",
+              "Demosaic", "Photometric calibration", "HDR merge"} if _imp else set())
+    _swap = {
+        "Inner corona":
+            "MGN of the imported image at coarser scales. With a bracket this is "
+            "a separate stack of the shortest tiers, which see the inner corona "
+            "unsaturated; here it is the same pixels through a different filter",
+        "Prominences":
+            "H-alpha redness R/((G+B)/2) measured on the imported image, "
+            "thresholded against the robust spread of the corona's own colour in "
+            "the limb annulus. With a bracket this reads a fast tier where the "
+            "chromosphere is not blown, so an imported image flags less",
+    } if _imp else {}
     for name, desc in METHODS:
-        A(f"* {name}: {desc}")
+        if name in _skip:
+            continue
+        A(f"* {name}: {_swap.get(name, desc)}")
     A("")
     A("All methods are published and their patents (where any existed) expired;")
     A("see README for citations.")

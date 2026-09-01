@@ -1,6 +1,6 @@
 """Recombination render from cached layers, preview generation, exports."""
 from __future__ import annotations
-import os, json
+import os, sys, json
 import numpy as np
 from scipy import ndimage
 from PIL import Image
@@ -229,7 +229,70 @@ class Layers:
             del f
         self.prev_decim = q
         _geom_for_fill["g"] = (self.cy, self.cx, self.Rmask)   # full-res variants
+        self.flat_range = None
+        self.flat_error = None
+        self._load_flat(geo)
         self.reload_contact()
+
+    def _load_flat(self, geo):
+        """The master flat as a QC view.
+
+        It is the one cached product that is neither aligned nor trimmed, so it
+        has to be cut down to the layer grid before it can be shown beside the
+        others -- crop_origin says where that grid sits in the sensor frame.
+        Displayed on its own p0.5-p99.5, because a 16% falloff shown linearly
+        over 0..1 is invisible, which is exactly the kind of thing this view
+        exists to catch.
+
+        The layer grid is FULL sensor resolution (the merge demosaics to it),
+        while the master flat is a Bayer array on that same grid. The first
+        version of this reduced the flat to superpixels -- which does kill the
+        Bayer checkerboard, but leaves it at half the layer grid, so the crop
+        could never match and the view silently never appeared. Reduce to
+        superpixels and then put it BACK on the full grid: the checkerboard is
+        gone and the geometry lines up with everything else.
+        """
+        p = os.path.join(self.wd, "masterflat.npy")
+        if not os.path.exists(p):
+            return False
+        try:
+            m = np.load(p).astype(np.float32)
+            h2, w2 = m.shape[0] // 2, m.shape[1] // 2
+            sp = m[:2 * h2, :2 * w2].reshape(h2, 2, w2, 2).mean(axis=(1, 3))
+            del m
+            H, W = self.full["bg"].shape
+            # crop_origin is in full-res px and even (Bayer phase), so it maps
+            # exactly onto the superpixel grid; crop there, then expand, so the
+            # full-res copy that gets made is only the size of the view.
+            oy, ox = geo.get("crop_origin") or (0, 0)
+            oy, ox = int(oy) // 2, int(ox) // 2
+            nh, nw = (H + 1) // 2, (W + 1) // 2
+            if sp.shape[0] < oy + nh or sp.shape[1] < ox + nw:   # old cache/odd size
+                oy = max((sp.shape[0] - nh) // 2, 0)
+                ox = max((sp.shape[1] - nw) // 2, 0)
+            sp = sp[oy:oy + nh, ox:ox + nw]
+            if sp.shape != (nh, nw):
+                self.flat_error = (f"master flat {sp.shape} does not cover the "
+                                   f"{nh}x{nw} view grid")
+                return False
+            f = np.repeat(np.repeat(sp, 2, axis=0), 2, axis=1)[:H, :W]
+            del sp
+            lo, hi = np.percentile(f, [0.5, 99.5])
+            self.flat_range = (float(f.min()), float(f.max()), float(lo), float(hi))
+            f = np.clip((f - lo) / max(hi - lo, 1e-6), 0, 1).astype(np.float32)
+            self.full["flat"] = f
+            self.prev["flat"] = f[::self.prev_decim, ::self.prev_decim]
+            return True
+        except Exception as e:
+            # Never take the render down for a QC view -- but say so, because a
+            # silently missing button is what hid the bug above for a release.
+            self.flat_error = f"{type(e).__name__}: {e}"
+            sys.stderr.write(f"master-flat preview unavailable ({e})\n")
+            return False
+
+    @property
+    def has_flat(self):
+        return "flat" in self.full
 
     def reload_contact(self):
         p = os.path.join(self.wd, "contact_rgb.npy")
@@ -334,6 +397,11 @@ def render(layers: Layers, params, preview=False, view="composite"):
         return np.repeat(src["pel"][:, :, None], 3, axis=2)
     if view == "nafe":
         return np.repeat(np.clip(src.get("nafe", np.full_like(mg, 0.5)), 0, 1)[:, :, None], 3, axis=2)
+    if view == "flat":
+        f = src.get("flat")
+        if f is None:
+            return np.full((H, W, 3), 0.5, np.float32)
+        return np.repeat(np.clip(f, 0, 1)[:, :, None], 3, axis=2)
 
     yy = np.arange(H, dtype=np.float32)[:, None] - cy
     xx = np.arange(W, dtype=np.float32)[None, :] - cx
@@ -413,6 +481,22 @@ def render(layers: Layers, params, preview=False, view="composite"):
     return rgb
 
 
+def _range_note(a, gray):
+    """What fraction of the container this view actually uses.
+
+    A detail view is rendered at the slider setting it will contribute to the
+    composite, not at a setting that fills the histogram: measured on the
+    reference render, MGN occupies 14% of the 16-bit range where FNRGF occupies
+    81%. Someone compositing the layers by hand needs to know that before they
+    stretch one in another program, so it goes in the file.
+    """
+    try:
+        lo, hi = np.percentile(a, [1, 99])
+        return "p1 %.4f p99 %.4f (%.0f%% of full scale)" % (lo, hi, 100 * (hi - lo))
+    except Exception:
+        return "unknown"
+
+
 def export(layers: Layers, params, fmt, out_path, view="composite", size="full"):
     """fmt: tif16 | tif8 | png (16-bit when OpenCV present, else 8-bit) | jpg.
     view: composite | mgn | fnrgf | nafe | inner | prom | pellett (detail views export grayscale).
@@ -438,7 +522,8 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full")
         tifffile.imwrite(out_path, (arr16 * 65535 + 0.5).astype(np.uint16),
                          compression="zlib", extratags=_tags,
                          photometric="minisblack" if gray else "rgb",
-                         description="eclipseforgehdr %s, params: %s" % (view, json.dumps(params)))
+                         description="eclipseforgehdr %s, range %s, params: %s"
+                         % (view, _range_note(arr16, gray), json.dumps(params)))
     elif fmt == "tif8":
         import tifffile
         tifffile.imwrite(out_path, (arr16 * 255 + 0.5).astype(np.uint8),

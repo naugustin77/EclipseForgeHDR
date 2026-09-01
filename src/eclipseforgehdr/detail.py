@@ -33,6 +33,88 @@ NAFE_NEIGH_R = 0.13   # neighbourhood sigma as a fraction of the lunar radius.
                       # critical -- but it has to scale with the disc, or the
                       # neighbourhood means something different on every camera.
 NAFE_GRID = 8
+# NAFE is the one detail layer that takes no geometry -- it ranks each pixel
+# against a neighbourhood restricted in VALUE, so a bad limb fit cannot hurt it.
+# That also meant it was the only layer whose input still carried the corona's
+# whole radial envelope, and it paid for that twice: 60% of its output range
+# went on a large-scale gradient rather than on structure, and the steep falloff
+# just outside the limb drove the equalisation into a dark ring.
+#
+# The envelope is removed with a plain Gaussian high-pass, which needs no circle
+# and no limb. Measured on the reference stack against both the shipped version
+# and the fitted radial profile MGN uses (which does need the limb, and puts a
+# wedge on the disc where it extrapolates inward):
+#
+#                      large-scale   detail 1.05-1.5 R   ripple outside the mask
+#   as shipped            68.3%          0.0611                0.3451
+#   fitted radial profile  5.4%          0.1328                0.2543
+#   Gaussian, 0.08 R       3.6%          0.1360                0.1210
+#
+# So the geometry-free option is also the better one on every count: 2.2x the
+# near-limb detail and 2.9x less ripple where the ring used to be. Sigma was
+# swept over 0.08-0.35 R; smaller is better near the limb and the far field is
+# flat across the range. Tied to R, so it means the same on any focal length.
+NAFE_FLATTEN_R = 0.08
+
+# --- progress weighting for the detail stage -------------------------------
+# The stage used to split its band of the progress bar evenly by step, and the
+# split is nothing like even. Measured wall time (timedetail.py, synthetic
+# corona frames, one pass each):
+#
+#                              10.8 Mpx        43.4 Mpx
+#   denoise HDR master            2.9s            18.2s
+#   MGN                          26.9s           197.9s
+#   FNRGF                         7.6s            22.9s
+#   NAFE                         11.1s            56.3s
+#   inner corona (all of it)    135.3s          1001.1s
+#   prominence colour             0.9s             3.6s
+#   Pellett                      11.1s            31.7s
+#   ------------------------------------------------------
+#   total                       198.7s          1343.9s
+#
+# Two things follow. The inner-corona block is two thirds to three quarters of
+# the stage on its own -- it runs the multiscale normalisation TWICE at full
+# resolution, once raw and once denoised (61.0s and 61.7s of its 135.3s at
+# 10.8 Mpx) -- so the bar stood still through most of the stage, which is the
+# "almost full and needs a long time" of the first field report. And the whole
+# stage does not scale with pixel count: 4x the pixels cost 6.8x the time, so
+# on a 45 Mpx body it is 22 minutes, not the couple of minutes 6.5% of the bar
+# implies. See _BAR_DETAIL in pipeline.py for the band itself.
+#
+# The weights below are the 43.4 Mpx column (nearest to the cameras in use),
+# with the inner block split by its own sub-step measurement. Only ratios
+# matter. The MGN-to-inner ratio is 0.199 at 10.8 Mpx and 0.198 at 43.4, so the
+# dominant pair is size-stable; the small layers drift a little and are set
+# from the large frame. Earthshine is not measured (it was off in both runs)
+# and is a placeholder. Every run that finishes now prints its own timing
+# summary, which is how these get corrected against real cameras.
+_DETAIL_BAND = (0.935, 1.0)
+_DETAIL_W = {                 # in pipeline order -- dict order is the order
+    "denoise":    18.0,
+    "mgn":       198.0,
+    "fnrgf":      23.0,
+    "nafe":       56.0,
+    "inner_bg":   68.0,       # geometry, photon floor, Fourier background
+    "inner_raw": 452.0,       # first multiscale pass
+    "inner_dn":   25.0,       # denoise of the short stack
+    "inner_cln": 457.0,       # second multiscale pass
+    "prom":        4.0,
+    "pellett":    32.0,
+    "earth":      20.0,       # not measured -- placeholder
+}
+
+
+def _detail_fracs():
+    lo, hi = _DETAIL_BAND
+    tot = float(sum(_DETAIL_W.values()))
+    out, c = {}, 0.0
+    for k, v in _DETAIL_W.items():
+        out[k] = lo + (hi - lo) * c / tot
+        c += v
+    return out
+
+
+_DF = _detail_fracs()
 
 
 def photon_floor(sig_lin, r, r_sky=(0.75, 0.95)):
@@ -310,6 +392,57 @@ def _fit(a, shape):
     return a
 
 
+def resolution_floor(L, r, R, lo=1.3, hi=3.0):
+    """The smallest filter scale this image actually resolves, in pixels.
+
+    MGN's finest scales were fixed at 1.25 and 2.5 px. That is a statement about
+    a sensor and a lens, not about eclipses: at 1.79 arcsec/px behind 600 mm
+    those scales sit near the optical limit, but at 3.19 arcsec/px behind a
+    240 mm consumer zoom -- whose real resolution is 3-4 px -- they sit entirely
+    below anything the optics delivered, so they can only amplify noise. On that
+    dataset the pixel-scale band carried 9.6% of the local mean against 1.9-2.7%
+    for the bands where the real structure lives.
+
+    Measured rather than assumed: band-pass sd falls as ~1/s for white noise and
+    more slowly for real structure, so the scale where the log-log slope stops
+    looking like noise is where the data starts. Returns a floor, never a
+    ceiling -- it can only push the ladder coarser than it already is.
+    """
+    m = (r > lo * R) & (r < hi * R)
+    if int(m.sum()) < 20000:
+        return 1.25
+    ss = np.array([1.0, 1.4, 2.0, 2.8, 4.0, 5.6])
+    prev = L
+    sd = []
+    for s in ss:
+        cur = ndimage.gaussian_filter(L, float(s))
+        sd.append(float((prev - cur)[m].std()))
+        prev = cur
+    sd = np.maximum(np.array(sd), 1e-12)
+    # local log-log slope; white noise gives about -1, structure is shallower
+    sl = np.diff(np.log(sd)) / np.diff(np.log(ss))
+    for i, v in enumerate(sl):
+        if v > -0.7:
+            return float(ss[i])
+    return float(ss[-1])
+
+
+def scale_ladder(top, floor, n=6):
+    """n log-spaced scales up to `top`, none finer than `floor`."""
+    top = float(max(top, floor * 2.0))
+    out, s = [], top
+    for _ in range(n):
+        out.append(s)
+        s /= 2.0
+    out = sorted(max(float(x), float(floor)) for x in out)
+    # collapse the ones the floor merged together
+    ded = [out[0]]
+    for x in out[1:]:
+        if x > ded[-1] * 1.15:
+            ded.append(x)
+    return tuple(ded)
+
+
 def _deband(layer, r, valid, cy=None, cx=None, r0=None, order=6):
     """Remove residual radial trend from a detail layer, allowing the trend to
     vary slowly AROUND the disc as well as with radius.
@@ -388,14 +521,14 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     nf = photon_floor(lum, r)
     L = np.log10(np.clip(lum, 1.0, None))
     if do_dn:
-        progress.log(f"denoising HDR master (multiscale, profile: {denoise})...", 0.935)
+        progress.log(f"denoising HDR master (multiscale, profile: {denoise})...", _DF["denoise"])
         Ldn = denoise_loglum(L, nf, ks=ks)
         lum_dn = (10.0 ** Ldn).astype(np.float32)
     else:
         Ldn = L
         lum_dn = lum
 
-    progress.log("MGN detail extraction...", 0.94)
+    progress.log("MGN detail extraction...", _DF["mgn"])
     # 1) mask the disc out of the statistics entirely (normalized convolution)
     # 2) subtract the azimuthal radial profile first, so the real brightness
     #    peak at the limb is not re-sharpened into a hard ring
@@ -406,12 +539,21 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     inner_field = valid & (r < 4 * R)
     sd = float(np.std(Lf[inner_field])) if inner_field.any() else 0.05
     half = max(6.0 * sd, 1e-3)          # gain matched to the residual's own scale
-    mgl = mgn(Lf, floor_map=nf, valid=valid, norm_span=(-half, half))
+    # The ladder: top tied to R so it covers the same coronal structure at any
+    # focal length (0.0643 * 622 = 40 px reproduces the reference set exactly),
+    # bottom raised to whatever this image actually resolves.
+    _fl = resolution_floor(Lf, r, R)
+    _sc = scale_ladder(0.0643 * R, _fl)
+    lstats["mgn_scales"] = {"px": [round(x, 2) for x in _sc],
+                            "resolution_floor_px": round(_fl, 2)}
+    progress.log(f"MGN scales {', '.join('%.1f' % x for x in _sc)} px "
+                 f"(this image resolves down to {_fl:.1f} px)", None)
+    mgl = mgn(Lf, floor_map=nf, valid=valid, norm_span=(-half, half), scales=_sc)
     mgl = _deband(mgl, r, valid, cy, cx, R + margin)
     np.save(os.path.join(wd, "mgn.npy"), mgl.astype(np.float32))
     del nf, L, Lf, mgl
 
-    progress.log("FNRGF detail extraction...", 0.955)
+    progress.log("FNRGF detail extraction...", _DF["fnrgf"])
     D = fnrgf_robust(lum_dn, r, cy, cx, int(R) + 4)
     np.save(os.path.join(wd, "fnrgf.npy"), D.astype(np.float32))
     del D
@@ -423,7 +565,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     # neighbours of similar brightness, so the dark lunar plateau drops out of
     # the corona's statistics because it is dark, not because a circle was
     # drawn around it. Where the limb fit is imperfect this layer is unaffected.
-    progress.log("NAFE (variable neighbourhood)...", 0.958)
+    progress.log("NAFE (variable neighbourhood)...", _DF["nafe"])
     try:
         # combine=False: store E, the equalized field, NOT the paper's eq. 2
         # output B = (1-w) T_gamma + w E. B is their final display image and is
@@ -431,12 +573,17 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         # second copy of the base image and diluted MGN and FNRGF with it. The
         # eq. 2 mix happens in render.py instead, where the composite envelope
         # is T_gamma and the nafeMix slider is w.
-        nv = nafe_vn(Ldn, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
+        # flatten the envelope first -- see NAFE_FLATTEN_R
+        _Lnf = (Ldn - ndimage.gaussian_filter(Ldn, max(NAFE_FLATTEN_R * R, 4.0))
+                ).astype(np.float32)
+        nv = nafe_vn(_Lnf, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
                      sigma_sp=max(NAFE_NEIGH_R * R, 8.0) / NAFE_GRID,
                      noise_mult=NAFE_NOISE_MULT,
                      eps_frac=NAFE_EPS, kernel="gauss", grid=NAFE_GRID)
         np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
+        del _Lnf
         lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E",
+                          "flatten_px": round(max(NAFE_FLATTEN_R * R, 4.0), 1),
                           "noise_mult": NAFE_NOISE_MULT,
                           "neigh_px": round(NAFE_NEIGH_R * R, 1),
                           }
@@ -446,7 +593,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         np.save(os.path.join(wd, "nafe.npy"), np.full((H, W), 0.5, np.float32))
     del lum_dn, Ldn
 
-    progress.log("inner corona layers...", 0.97)
+    progress.log("inner corona layers...", _DF["inner_bg"])
     shortL = np.load(os.path.join(wd, "short_lum.npy"))
 
     # --- this layer gets its OWN lunar geometry ---
@@ -487,12 +634,22 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     Lsf = (Ls - fourier_background(Ls, r_s, cys, cxs, int(Rs) + 3)).astype(np.float32)
     shalf = max(6.0 * float(np.std(Lsf[inner_field_s])), 1e-3) \
         if inner_field_s.any() else 0.05
-    common = dict(scales=(2.5, 5, 10, 20, 40, 80), k=0.8, global_wt=0.0,
+    # same rule, one octave coarser -- 0.1286 * 622 = 80 px on the reference set
+    _scs = scale_ladder(0.1286 * Rs * 2.0, max(resolution_floor(Lsf, r_s, Rs), 2.5))
+    common = dict(scales=_scs, k=0.8, global_wt=0.0,
                   valid=valid_s, norm_span=(-shalf, shalf))
+    # Two full-resolution multiscale passes follow, and together they are the
+    # longest thing in the run. Announce each one: without these the progress
+    # bar and the log both stand still for the majority of the detail stage.
+    progress.log(f"  inner corona: raw pass, scales "
+                 f"{', '.join('%.1f' % x for x in _scs)} px", _DF["inner_raw"])
     raw = _deband(mgn(Lsf, floor_map=None, gains=(1, 1, 1, 1, 1, 1), **common),
               r_s, valid_s, cys, cxs, Rs + margin)
     np.save(os.path.join(wd, "inner0.npy"), _soft_norm(raw, ann).astype(np.float32))
+    if do_dn:
+        progress.log("  inner corona: denoising the short stack", _DF["inner_dn"])
     Ls_dn = denoise_loglum(Lsf, nfs, ks=tuple(k * 0.85 for k in ks)) if do_dn else Lsf
+    progress.log("  inner corona: denoised pass", _DF["inner_cln"])
     clean = _deband(mgn(Ls_dn, floor_map=nfs, gains=(0.8, 0.95, 1, 1, 1, 1), **common),
                 r_s, valid_s, cys, cxs, Rs + margin)
     clean = _soft_norm(clean, ann)
@@ -567,12 +724,12 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     np.save(os.path.join(wd, "prom.npy"), gate.astype(np.float32))
     del gate, Ls
 
-    progress.log("Pellett layer...", 0.98)
+    progress.log("Pellett layer...", _DF["pellett"])
     _pellett(wd, lum, r, cy, cx, R, disc_m)
 
     ep = os.path.join(wd, "earth.npy")
     if earthshine:
-        progress.log("earthshine layer...", 0.99)
+        progress.log("earthshine layer...", _DF["earth"])
         _earthshine(wd, r, cy, cx, R)
     elif os.path.exists(ep):
         os.remove(ep)

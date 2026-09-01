@@ -37,7 +37,20 @@ button:disabled{opacity:.45;cursor:default}
 .log{background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:8px;
   font:11px ui-monospace,monospace;color:var(--muted);height:110px;overflow-y:auto;white-space:pre-wrap;margin-top:8px}
 .bar{height:5px;background:#2a303a;border-radius:3px;margin-top:8px;overflow:hidden}
-.bar>div{height:100%;background:var(--gold);width:0%}
+.bar>div{height:100%;background:var(--gold);width:0%;transition:width .4s linear}
+/* While a run is live the bar carries moving stripes. The bar can sit at one
+   width for minutes on a slow step -- the stripes say "still working" without
+   pretending the fraction moved. */
+.bar.run>div{background-image:linear-gradient(115deg,rgba(0,0,0,.28) 25%,transparent 25%,
+  transparent 50%,rgba(0,0,0,.28) 50%,rgba(0,0,0,.28) 75%,transparent 75%);
+  background-size:16px 16px;animation:march 1s linear infinite}
+@keyframes march{from{background-position:0 0}to{background-position:16px 0}}
+.runline{display:flex;gap:8px;align-items:baseline;margin-top:8px;
+  font:12px ui-monospace,monospace;color:var(--muted)}
+.runline .spin{color:var(--gold);width:1ch;display:inline-block}
+.runline .clock{color:var(--text)}
+.runline .stale{color:#d8a13a}
+@media (prefers-reduced-motion:reduce){.bar.run>div{animation:none}}
 .export{display:flex;flex-direction:column;gap:6px}
 .export label.radio{display:flex;gap:8px;align-items:center;font-size:13px}
 .export input[type=text]{background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -55,6 +68,9 @@ button:disabled{opacity:.45;cursor:default}
       <input type="text" id="flatDir" spellcheck="false" style="width:190px"
         placeholder="flats: auto"
         title="Folder of flat-field frames. Left empty, a subfolder of the raw folder called flats/ is used if there is one, and no flat correction is applied if there is not. Type a path to use flats from somewhere else, or 'off' to ignore them. A master flat divides out lens vignetting, dust shadows and per-photosite sensitivity; it is smoothed only as much as its own measured noise requires, and the numbers are printed in the log.">
+      <input type="text" id="importPath" spellcheck="false" style="width:210px"
+        placeholder="or import one HDR"
+        title="Skip stacking entirely and run the enhancement layers on one finished HDR image you already have - from Siril, PixInsight, Photoshop, or this app's own aligned tier TIFFs. 16-bit TIFF or FITS. The tone curve is read from the file's embedded colour profile, so an sRGB export is linearised correctly; a file with no profile must say 'linear' in its name. What you give up: the inner-corona layer is no longer an independent source, the prominence gate is weaker, and there is no alignment or photometry section in the report.">
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
         Denoise
         <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -95,6 +111,8 @@ button:disabled{opacity:.45;cursor:default}
         <button data-view="inner" class="vbtn">Inner</button>
         <button data-view="pellett" class="vbtn">Pellett</button>
         <button data-view="prom" class="vbtn">Prom gate</button>
+        <button data-view="flat" class="vbtn" id="flatBtn" style="display:none"
+          title="The master flat itself, cut to the same frame as the other layers and stretched to its own 0.5-99.5 percentile so the falloff and any dust are visible. This is a quality check on your flats, not a layer that goes into the composite.">Flat</button>
       </span>
     </div>
     <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas></div>
@@ -103,7 +121,12 @@ button:disabled{opacity:.45;cursor:default}
   </div>
   <aside class="rail"><div class="railinner">
     <div class="group"><h2>Pipeline</h2>
-      <div class="bar"><div id="pbar"></div></div>
+      <div class="bar" id="pbarwrap"><div id="pbar"></div></div>
+      <div class="runline" id="runline" style="display:none">
+        <span class="spin" id="spin">&#9696;</span>
+        <span class="clock" id="clock">0:00</span>
+        <span id="stepnote"></span>
+      </div>
       <div class="log" id="log">idle</div>
     </div>
     <div class="group"><h2>Structure</h2><div id="g-structure"></div></div>
@@ -193,6 +216,8 @@ async function loadFolder(){
   if(!j.ok){ $("status").textContent = j.error; return; }
   $("flatDir").placeholder = j.flat_dir
     ? `flats: auto (${j.flat_count})` : "flats: none found";
+  if (j.tiffs && j.tiffs.length && !$("importPath").value)
+    $("importPath").placeholder = `or import: ${j.tiffs[0]}`;
   $("status").textContent = `${j.folder} — ${j.raw_count} raw files` +
     (j.flat_dir ? ` · ${j.flat_count} flats in ${j.flat_dir.split("/").pop()}/`
                 : " · no flats folder") +
@@ -210,8 +235,69 @@ async function startRun(){
                           exportTiers: $("exportTiers").checked,
                           tierLinear: $("tierLinear").checked,
                           flatDir: $("flatDir").value,
+                          importPath: $("importPath").value,
                           frames: $("frames").value})});
+  runStart();
   pollProgress();
+}
+
+/* ---- run clock -------------------------------------------------------
+   The progress bar is a poor liveness signal: the merge and the detail
+   layers each sit at one fraction for minutes on a large set, and a bar
+   that is nearly full and not moving looks identical to a hung process.
+   So show three things instead. The spinner ticks locally (the run is
+   being polled), the clock counts real elapsed seconds from the server's
+   own start time, and once a step has run long the line says which step
+   it is and for how long -- so a long wait is legible rather than scary.
+   Everything is extrapolated from the last poll so it stays smooth
+   between the 800ms polls without lying about where it came from.      */
+const SPIN = ["◜", "◝", "◞", "◟"];
+let RUNTICK = null, RUN_BASE = null, SPIN_I = 0;
+
+function fmtDur(s){
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s/3600), m = Math.floor(s/60)%60, q = s%60;
+  const p = n => String(n).padStart(2,"0");
+  return h ? `${h}:${p(m)}:${p(q)}` : `${m}:${p(q)}`;
+}
+function runStart(){
+  RUN_BASE = {e:0, s:0, at:Date.now()/1000, step:""};
+  $("runline").style.display = "";
+  $("pbarwrap").classList.add("run");
+  if (RUNTICK) clearInterval(RUNTICK);
+  RUNTICK = setInterval(runTick, 250);
+  runTick();
+}
+function runSync(j){
+  if (!RUN_BASE) return;
+  RUN_BASE = {e: j.elapsed || 0, s: j.since || 0, at: Date.now()/1000,
+              step: (j.step || "").trim().slice(0, 64)};
+}
+function runTick(){
+  SPIN_I = (SPIN_I + 1) % SPIN.length;
+  $("spin").textContent = SPIN[SPIN_I];
+  if (!RUN_BASE) return;
+  const d = Date.now()/1000 - RUN_BASE.at;
+  $("clock").textContent = fmtDur(RUN_BASE.e + d);
+  const since = RUN_BASE.s + d, note = $("stepnote");
+  if (since > 45 && RUN_BASE.step){
+    note.className = "stale";
+    note.textContent = `· ${RUN_BASE.step} — ${fmtDur(since)} on this step`;
+  } else {
+    note.className = "";
+    note.textContent = RUN_BASE.step ? "· " + RUN_BASE.step : "";
+  }
+}
+function runStop(mark, note){
+  if (RUNTICK) clearInterval(RUNTICK);
+  RUNTICK = null;
+  $("pbarwrap").classList.remove("run");
+  const total = RUN_BASE ? fmtDur(RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at)) : "";
+  $("spin").textContent = mark;
+  $("clock").textContent = total;
+  $("stepnote").className = "";
+  $("stepnote").textContent = note ? "· " + note : "";
+  RUN_BASE = null;
 }
 
 async function pollProgress(){
@@ -219,9 +305,11 @@ async function pollProgress(){
   $("log").textContent = j.lines.join("\n") || "…";
   $("log").scrollTop = 1e9;
   $("pbar").style.width = (j.frac*100).toFixed(1)+"%";
+  runSync(j);
   if (j.error){ $("status").textContent = "error — see log"; $("log").textContent += "\n"+j.error;
-    $("start").disabled = false; return; }
-  if (j.done && j.ready){ await loadLayers(); $("start").disabled = false; return; }
+    runStop("✕", "failed"); $("start").disabled = false; return; }
+  if (j.done && j.ready){ runStop("✓", "done");
+    await loadLayers(); $("start").disabled = false; return; }
   setTimeout(pollProgress, 800);
 }
 
@@ -254,6 +342,27 @@ async function loadLayers(){
                  "nafe","nafe_lo","nafe_sm",
                  "pel","inner","inner0","earth","prom","ratio","cconf"];
   if (GEO.has_contact) names.push("contact");
+  if (GEO.has_flat){
+    names.push("flat");
+    const fb = $("flatBtn");
+    if (fb){
+      fb.style.display = "";
+      const fr = GEO.flat_range || [];
+      if (fr.length === 4)
+        fb.title = `The master flat itself, cut to the same frame as the other `
+          + `layers and stretched to its own 0.5-99.5 percentile so the falloff `
+          + `and any dust are visible. Actual values: min ${fr[0].toFixed(3)}, `
+          + `max ${fr[1].toFixed(3)}; the stretch spans ${fr[2].toFixed(3)} to `
+          + `${fr[3].toFixed(3)}. This is a quality check on your flats, not a `
+          + `layer that goes into the composite.`;
+    }
+  } else {
+    const fb = $("flatBtn"); if (fb) fb.style.display = "none";
+    // A missing button used to be the only symptom of a broken flat preview,
+    // which is how it shipped unnoticed. Say why it is missing.
+    if (GEO.flat_error)
+      $("log").textContent += "\nmaster-flat preview unavailable: " + GEO.flat_error;
+  }
   // hide the Earthshine slider unless the layer was actually built
   const esc = $("s_earthShine");
   if (esc){
@@ -347,12 +456,24 @@ function renderNow(){
   const bc = GEO.bgChroma || [1,1,1], bn = P.bgNeutral || 0;
   const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
   const lvl = 1-0.5*radialFlatten;
+  // Single-layer views. This used to be a ternary chain ending in a bare
+  // `: pr[j]/255`, so ANY view not spelled out in it drew the prominence gate
+  // instead -- which is what the Flat button did on its first outing: the
+  // button worked, the server sent the right layer, and the preview drew a
+  // different one. Views that read a fetched layer name it here; a view whose
+  // layer is missing falls back to the composite rather than to whichever
+  // layer happened to be last in the chain.
+  const VSRC = {nafe:"nafe", pellett:"pel", prom:"prom", flat:"flat"};
+  const vComputed = VIEW==="mgn" || VIEW==="fnrgf" || VIEW==="inner";
+  const vArr = VSRC[VIEW] ? L[VSRC[VIEW]] : null;
+  const solo = VIEW !== "composite" && (vComputed || vArr);
+  if (VIEW !== "composite" && !solo)
+    console.warn("view '"+VIEW+"' has no layer — drawing the composite");
   for (let i=0,j=0; i<wf.length; i++,j+=4){
     const [mg, fn, inEff] = detailAt(j);
-    if (VIEW !== "composite"){
-      const v = VIEW==="mgn"?mg : VIEW==="fnrgf"?fn : VIEW==="inner"?inEff :
-                VIEW==="nafe"?(L.nafe?L.nafe[j]/255:0.5) :
-                VIEW==="pellett"?L.pel[j]/255 : pr[j]/255;
+    if (solo){
+      const v = VIEW==="mgn" ? mg : VIEW==="fnrgf" ? fn : VIEW==="inner" ? inEff
+                : vArr[j]/255;
       const b = Math.max(0, Math.min(255, v*255));
       d[j]=b; d[j+1]=b; d[j+2]=b; d[j+3]=255;
       continue;
@@ -444,11 +565,15 @@ $("ringload").addEventListener("click", async () => {
     body: JSON.stringify({path: $("ringpath").value})});
   const j = await r.json();
   if (!j.ok){ $("status").textContent = j.error; $("ringload").disabled = false; return; }
+  runStart();
   const poll = async () => {
     const p = await (await fetch("/api/progress")).json();
     $("log").textContent = p.lines.join("\n"); $("log").scrollTop = 1e9;
-    if (p.error){ $("status").textContent = "contact frame failed — see log"; $("ringload").disabled = false; return; }
-    if (p.done){ await fetchLayer("contact"); $("ringload").disabled = false;
+    runSync(p);
+    if (p.error){ $("status").textContent = "contact frame failed — see log";
+      runStop("✕", "failed"); $("ringload").disabled = false; return; }
+    if (p.done){ runStop("✓", "contact frame loaded");
+      await fetchLayer("contact"); $("ringload").disabled = false;
       $("status").textContent = "contact frame loaded — raise Ring blend"; renderNow(); return; }
     setTimeout(poll, 600);
   };
@@ -460,6 +585,7 @@ fetch("/api/version").then(r => r.json()).then(j => {
 $("load").addEventListener("click", loadFolder);
 $("folder").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
 $("flatDir").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
+$("importPath").addEventListener("keydown", e => {if (e.key==="Enter") startRun();});
 $("start").addEventListener("click", startRun);
 $("export").addEventListener("click", async () => {
   const fmt = document.querySelector("input[name=fmt]:checked").value;
@@ -468,13 +594,15 @@ $("export").addEventListener("click", async () => {
     headers:{"Content-Type":"application/json"},
     body: JSON.stringify({format: fmt, params: P, name: $("expname").value, view: VIEW, size: $("exphalf").checked ? "half" : "full"})});
   const j = await r.json();
-  if (j.ok){ $("status").textContent = "exporting → " + j.path; pollExport(); }
+  if (j.ok){ $("status").textContent = "exporting → " + j.path; runStart(); pollExport(); }
   else { $("status").textContent = j.error; $("export").disabled = false; }
 });
 async function pollExport(){
   const j = await (await fetch("/api/progress")).json();
+  runSync(j);
   if (j.done){
     $("export").disabled = false;
+    runStop(j.error ? "✕" : "✓", j.error ? "export failed" : "export done");
     $("status").textContent = j.error ? ("export failed: "+j.error) :
       (j.lines[j.lines.length-1] || "export done");
     return;

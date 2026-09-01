@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.13.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.14.4
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
@@ -13,6 +13,12 @@ GUI is a small web server on `127.0.0.1` that only your browser talks to.
 
 *49 frames, 14 exposure tiers, 12.6 EV — Panasonic S1R II at 600 mm f/8,
 Spain, 12 August 2026.*
+
+![The EclipseForgeHDR interface](docs/images/eclipseforge_gui.jpeg)
+
+*The whole interface. The folder and the flats go in the top bar; the row of
+buttons switches the preview between the composite and each individual layer;
+every slider on the right re-renders live, with no re-processing.*
 
 ---
 
@@ -181,6 +187,9 @@ without the rest of the image being touched.
 
 ## Features
 
+- Import a finished HDR instead of a bracket — one 16-bit TIFF or FITS from
+  Siril, PixInsight or Photoshop gets every enhancement layer, with the tone
+  curve read from the file's own colour profile
 - Automatic tier detection, best-frame selection, hot-pixel repair
 - The lunar disc is found from its limb *edge*, so nothing depends on focal
   length: it works from a disc filling 3% of the frame to one filling 30%, and
@@ -272,6 +281,34 @@ own cache.
 Heavy intermediates live in `.eclipseforgehdr/` inside the raw folder; outputs
 land in `eclipseforge_output/` next to the raws.
 
+## Importing a finished HDR
+
+If you already have a merged corona image, you do not have to stack it here
+again. Put its path in the box next to the flats box and press Start: the disc
+is located, the sky gradient is fitted and removed, and MGN, FNRGF, NAFE-VN,
+the inner-corona layer, Pellett and the prominence gate are all built on that
+image. Every view exports exactly as it does from a bracket.
+
+16-bit TIFF or FITS. **8-bit is refused** — the corona spans several thousand
+to one and 8 bits cannot hold it.
+
+The one thing that has to be right is linearity, and it is read from the file
+rather than assumed: an embedded ICC profile declares the transfer function,
+and the inverse is applied. An sRGB export therefore works correctly. A file
+with no profile has to say `linear` in its name, or it is rejected rather than
+guessed at.
+
+What an imported image gives up, all of it stated in the report:
+
+- no alignment, photometry or per-tier lunar masking, and no earthshine layer —
+  those describe a stack, and there is no stack
+- the **inner-corona layer stops being independent**. Normally it is a separate
+  MGN of the shortest tiers, which see the inner corona unsaturated; from one
+  image it is a second view of the same pixels
+- the **prominence gate is weaker**. It keys on H-alpha redness in a fast tier,
+  and a merged image has usually compressed exactly that: measured on the
+  reference stack, R/GB reads 1.84 against 3.02 from the real fast tier
+
 ## Flat-field calibration
 
 Optional, and inert unless you provide flats. Put them in a subfolder of the
@@ -314,6 +351,16 @@ a thin or under-exposed one degrades to a vignetting model rather than adding
 noise. **More flats and brighter flats both buy sharper correction** — if you
 want dust removed as well as vignetting, expose them to roughly half of
 saturation and shoot plenty.
+
+![The master flat](docs/images/eclipseforge_flat.jpeg)
+
+*The master flat itself, on the GUI's **Flat** button. It is stretched to its
+own 0.5–99.5 percentile, because a falloff of a few percent shown linearly over
+0–1 is invisible — and seeing it is the point of this view. Visible here: the
+vignette, a brightest point sitting below and left of the frame centre rather
+than on it, and a scatter of dust motes. All of it is divided out of every frame
+of every tier. Worth a look before you trust a flat set; it is the one place a
+bad one announces itself.*
 
 Practical notes:
 

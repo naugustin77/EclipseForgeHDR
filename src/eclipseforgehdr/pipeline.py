@@ -4,7 +4,7 @@ All intermediate products are cached in <folder>/.eclipseforgehdr/ so re-renders
 and exports don't repeat the heavy work.
 """
 from __future__ import annotations
-import os, json
+import os, json, time
 import numpy as np
 from scipy import ndimage
 from skimage.registration import phase_cross_correlation
@@ -48,17 +48,127 @@ from . import report as _report
 from . import __version__
 
 
+# Where the detail stage begins, in the fractions the pipeline code writes
+# (_BAR_PIVOT) and on the bar the user sees (_BAR_DETAIL). Timing on synthetic
+# frames (see detail.py) puts the detail stage at 22 minutes on a 43 Mpx frame,
+# so handing it the last 6.5% of the bar was never going to look like progress.
+# Rather than renumber every frac in this file, the two scales are joined by one
+# piecewise-linear map: everything before the pivot is compressed into
+# 0.._BAR_DETAIL, everything after is stretched over the rest.
+#
+# 0.14.1 set _BAR_DETAIL to 0.78 on an assumption -- that stacking costs about
+# 3.5x the detail stage -- because the stacking side had never been timed on real
+# RAWs. The run-time summary added in the same release then measured it, on a
+# 50-frame 14-tier bracket from a 45 Mpx body, 12m27s end to end:
+#
+#     141s  inner corona: raw pass
+#     140s  inner corona: denoised pass
+#      31s  MGN
+#     ----
+#     312s  = 42% of the run in the three NAMED detail steps alone
+#
+# The other eight detail steps are each below the report's 6th-slowest entry
+# (21s), which brackets the whole stage between 42% and 64% of the run. So
+# stacking and detail are roughly equal, not 3.5:1, and 0.78 was out by more
+# than a factor of two: the bar reached 78% around the halfway mark and crawled
+# the rest. 0.52 sits at the low end of the measured bracket, because a bar that
+# lags is better than one that arrives at 100% and waits.
+#
+# One real dataset, so this is an estimate with a range, not a constant. It will
+# move with frame count (more frames = more stacking) and with sensor size
+# (detail grows faster than pixel count). The report now lists every step over a
+# second, so the next few runs can narrow it without guesswork.
+#
+# A run that IMPORTS a finished HDR skips the stacking entirely, so the detail
+# stage is nearly the whole job there; that path lowers bar_detail on its own
+# Progress rather than pretending the first half of its bar meant something.
+_BAR_PIVOT = 0.935
+_BAR_DETAIL = 0.52
+
+
 class Progress:
+    """Log lines plus the two clocks the GUI needs to show it is alive.
+
+    A progress bar alone cannot distinguish "working on a slow step" from
+    "hung": the merge sits at one frac for minutes on a big set. t0 and t_line
+    let the GUI say how long the run has been going and how long since anything
+    last happened, which is the honest liveness signal -- a spinner on its own
+    only proves the browser is alive.
+    """
+
     def __init__(self):
         self.lines = []
+        self.stamps = []          # seconds since t0, one per line
         self.frac = 0.0
         self.done = False
         self.error = None
+        self.t0 = time.time()
+        self.t_line = self.t0
+        self.bar_pivot = _BAR_PIVOT
+        self.bar_detail = _BAR_DETAIL
+
+    def bar(self, f):
+        """Authored frac -> the frac the bar shows. See _BAR_DETAIL above."""
+        f = float(np.clip(f, 0.0, 1.0))
+        p, d = self.bar_pivot, self.bar_detail
+        if f <= p:
+            return f * (d / p)
+        return d + (f - p) * (1.0 - d) / (1.0 - p)
 
     def log(self, msg, frac=None):
+        self.t_line = time.time()
         self.lines.append(msg)
+        self.stamps.append(self.t_line - self.t0)
         if frac is not None:
-            self.frac = frac
+            # never go backwards: a stage that reports a lower frac than one
+            # already passed would make the bar jump back and read as a restart
+            self.frac = max(self.frac, self.bar(frac))
+
+    def elapsed(self):
+        return time.time() - self.t0
+
+    def since(self):
+        return time.time() - self.t_line
+
+
+def _fmt_dur(s):
+    s = int(round(float(s)))
+    return f"{s // 60}m{s % 60:02d}s" if s >= 60 else f"{s}s"
+
+
+def _timing_summary(progress, top=5, floor=1.0):
+    """Where this run's wall time went, from the progress line timestamps.
+
+    Every step announces itself before it works, so the cost of the step named
+    by line i is the gap to line i+1.
+
+    The first version of this reported only the six slowest, which was enough to
+    show that the progress bar's split was wrong but not enough to say by how
+    much: the named steps accounted for 42% of the run and everything else was
+    only known to be "under 21 seconds each", bracketing the answer between 42%
+    and 64%. So `steps` now carries every step over a second -- that is what
+    makes the next run's weights a measurement instead of another estimate --
+    while `slowest` stays short for the one-line log message.
+    """
+    lines = getattr(progress, "lines", None) or []
+    st = getattr(progress, "stamps", None) or []
+    if len(st) != len(lines) or len(st) < 3:
+        return None
+    def _label(m):
+        return m.strip().rstrip(".:").split(",")[0][:52]
+
+    durs = sorted(((st[i] - st[i - 1], lines[i - 1]) for i in range(1, len(st))),
+                  key=lambda t: -t[0])
+    steps = [[round(d, 1), _label(m)] for d, m in durs if d >= floor]
+    if not steps:
+        return None
+    acc = sum(d for d, _ in steps)
+    return {"total_s": round(st[-1], 1),
+            "slowest": steps[:top],
+            "steps": steps,
+            # what the listed steps add up to, so a reader can see how much of
+            # the run is accounted for rather than having to assume it is all
+            "accounted_s": round(acc, 1)}
 
 
 def workdir(folder):
@@ -839,15 +949,32 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # real sky objects cannot be mistaken for hot pixels), then repair every
         # frame of every tier with it
         if hot is None and despeckle:
-            hot = hot_pixel_map([b for _, b, _ in raw_bayers[:4]])
-            nhot = int(hot.sum()) if hot is not None else 0
-            progress.log(f"sensor defect map: {nhot} hot/dead photosites "
-                         f"({100.0 * nhot / max(hot.size, 1):.4f}%)", None)
-            if nhot > 0.002 * hot.size:      # implausible -> distrust and disable
-                progress.log("defect count implausibly high — skipping repair", None)
-                hot = np.zeros_like(hot)
-                nhot = 0
-            stats["hot_pixels"] = nhot
+            # ... but only if this tier can actually show a defect. A hot pixel
+            # is a pixel far above its neighbours, and in a saturated frame
+            # there is no "above": every photosite sits at the clip. One stray
+            # overexposed file whose EXIF puts it at the short end becomes the
+            # shortest tier, and the map built from it found ZERO defects on a
+            # sensor with 434 -- silently turning off hot-pixel repair for the
+            # whole run. Measured on a synthetic bracket: 434 -> 0. So a tier
+            # that is mostly clipped is skipped and the next one is tried.
+            _sf = float(np.mean([float((b >= sl).mean())
+                                 for _, b, sl in raw_bayers[:4]]))
+            if _sf > 0.5:
+                progress.log(f"sensor defect map: not from the {_exp_name(s)} "
+                             f"tier — {100 * _sf:.0f}% of it is saturated, which "
+                             f"cannot show a hot pixel; trying the next tier",
+                             None)
+            else:
+                hot = hot_pixel_map([b for _, b, _ in raw_bayers[:4]])
+                nhot = int(hot.sum()) if hot is not None else 0
+                progress.log(f"sensor defect map: {nhot} hot/dead photosites "
+                             f"({100.0 * nhot / max(hot.size, 1):.4f}%)", None)
+                if nhot > 0.002 * hot.size:  # implausible -> distrust and disable
+                    progress.log("defect count implausibly high — skipping repair",
+                                 None)
+                    hot = np.zeros_like(hot)
+                    nhot = 0
+                stats["hot_pixels"] = nhot
         for p, bay, sat_level in raw_bayers:
             if hot is not None:
                 repair_hot(bay, hot)
@@ -987,6 +1114,21 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                      0.03 + 0.37 * n_done / len(secs))
         del lums, sats, bayers
 
+    # The shot span and the ISO list were taken from every FILE in the folder,
+    # before any frame was rejected -- so one stray file dropped as "not a
+    # totality frame" still set them. A test frame shot 20 days after the
+    # eclipse made the report say the bracket ran
+    # "2026:08:12 21:30:12 .. 2026:09:01 13:35:30": three weeks of totality.
+    # Recompute from the frames actually stacked.
+    _used = {q for s_ in quality for q in quality[s_]["used"]}
+    _um = [p for p in paths if os.path.basename(p) in _used]
+    if _um:
+        _ts = sorted(x for x in (meta[p]["ts"] for p in _um) if x)
+        if _ts:
+            stats["shot_first"], stats["shot_last"] = _ts[0], _ts[-1]
+        _is = sorted({meta[p]["iso"] for p in _um if meta[p]["iso"]})
+        stats["iso"] = ", ".join(str(i) for i in _is) if _is else None
+
     json.dump({str(k): v for k, v in quality.items()},
               open(os.path.join(wd, "quality.json"), "w"), indent=1)
 
@@ -1071,17 +1213,45 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             out.append(x * wgt * np.hanning(S)[:, None] * np.hanning(S)[None, :])
         return out
 
+    # A tier whose correlation window carries no usable signal produces an
+    # all-zero prepped image -- prep_pair masks out saturated pixels, and when
+    # the whole window is saturated the weight map is zero everywhere. Phase
+    # correlation on a zero image returns a finite but meaningless shift and an
+    # err of NaN, so the weight 1/(err+0.05) is NaN, and ONE such weight poisons
+    # a whole row of the design matrix below: LAPACK then reports "DLASCL
+    # parameter number 4 had an illegal value" and numpy raises "SVD did not
+    # converge in Linear Least Squares". That was a hard crash on any bracket
+    # wide enough to blow its longest tier -- 14.3 EV in the report that found
+    # it -- and the message named none of it.
+    def _usable(x):
+        return np.isfinite(x).all() and float(np.abs(x).max()) > 0
+
     pairs = []
+    _dead = {}
     for lag in (1, 2):
         for i in range(len(secs) - lag):
-            p1, p2 = prep_pair(secs[i], secs[i + lag])
+            _a, _b = secs[i], secs[i + lag]
+            p1, p2 = prep_pair(_a, _b)
+            if not _usable(p1) or not _usable(p2):
+                for _t, _p in ((_a, p1), (_b, p2)):
+                    if not _usable(_p):
+                        _dead[_t] = _dead.get(_t, 0) + 1
+                del p1, p2
+                continue
             sh, err, _ = phase_cross_correlation(p1, p2, upsample_factor=20,
                                                  normalization=None)
+            if not (np.isfinite(sh).all() and np.isfinite(err)):
+                continue
             if _percentre:      # add back where the two windows were taken
-                _a, _b = secs[i], secs[i + lag]
                 sh = np.array([sh[0] + _org[_a][0] - _org[_b][0],
                                sh[1] + _org[_a][1] - _org[_b][1]], float)
             pairs.append((i, i + lag, sh, 1.0 / (err + 0.05)))
+    for _t in sorted(_dead):
+        progress.log(f"{_exp_name(_t)}: no usable signal in the correlation "
+                     f"window (saturated, or nothing above the noise) — this "
+                     f"tier cannot be aligned by correlation", None)
+    if _dead:
+        stats["align_dead_tiers"] = [_exp_name(t) for t in sorted(_dead)]
     n = len(secs)
     ref = n // 2
 
@@ -1200,16 +1370,51 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                      f"corona correlation only", None)
     stats["prom_align"] = prom_info
 
+    # Every link is checked before it can enter the solve. One non-finite shift
+    # or weight makes the whole least-squares problem unsolvable, and the error
+    # LAPACK raises names neither the tier nor the reason.
+    _links = [(i, j, sh, w) for i, j, sh, w in pairs + prom_links
+              if np.isfinite(w) and np.isfinite(sh).all()]
+    _drop = len(pairs) + len(prom_links) - len(_links)
+    if _drop:
+        progress.log(f"{_drop} alignment link(s) discarded as non-finite", None)
     A, by, bx, ws = [], [], [], []
-    for i, j, sh, w in pairs + prom_links:
+    for i, j, sh, w in _links:
         row = np.zeros(n); row[j] = 1; row[i] = -1
         A.append(row); by.append(sh[0]); bx.append(sh[1]); ws.append(w)
     row = np.zeros(n); row[ref] = 1
     A.append(row); by.append(0); bx.append(0); ws.append(100.0)
     A = np.array(A); ws = np.array(ws)
     Aw = A * ws[:, None]
-    ay = np.linalg.lstsq(Aw, np.array(by) * ws, rcond=None)[0]
-    ax = np.linalg.lstsq(Aw, np.array(bx) * ws, rcond=None)[0]
+    try:
+        ay = np.linalg.lstsq(Aw, np.array(by) * ws, rcond=None)[0]
+        ax = np.linalg.lstsq(Aw, np.array(bx) * ws, rcond=None)[0]
+    except np.linalg.LinAlgError as e:
+        progress.log(f"WARNING: the alignment network could not be solved ({e}). "
+                     f"Falling back to no cross-tier shift — check the limb in "
+                     f"the render before trusting it.", None)
+        ay = np.zeros(n); ax = np.zeros(n)
+        stats["align_failed"] = str(e)
+    ay = np.nan_to_num(ay, nan=0.0, posinf=0.0, neginf=0.0)
+    ax = np.nan_to_num(ax, nan=0.0, posinf=0.0, neginf=0.0)
+    # A tier nothing could link to is not solved for -- least squares would hand
+    # back a minimum-norm number for it, which looks like an answer and is not.
+    # It takes the shift of the nearest tier that WAS linked: the Moon moves a
+    # few px across a whole bracket, so a neighbour's shift is right to within
+    # far less than the error of inventing one.
+    _linked = sorted({i for i, j, _, _ in _links} | {j for i, j, _, _ in _links})
+    if _linked and len(_linked) < n:
+        for i in range(n):
+            if i not in _linked:
+                k = min(_linked, key=lambda t: abs(t - i))
+                ay[i], ax[i] = ay[k], ax[k]
+                progress.log(f"{_exp_name(secs[i])}: no usable alignment link — "
+                             f"taking the shift measured for {_exp_name(secs[k])}",
+                             None)
+    elif not _linked:
+        progress.log("WARNING: no tier could be linked to any other. The tiers "
+                     "are merged unshifted; if the mount moved, the limb will "
+                     "be smeared.", None)
     abs_shift = {s: (float(ay[i]), float(ax[i])) for i, s in enumerate(secs)}
     # both axes: a network that is perfect in y and 15px inconsistent in x used
     # to report a residual of 0. A[:-1] is empty when every frame shares one
@@ -1636,16 +1841,28 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # only a soft warning.
     _rc = stats.get("R_consensus")
     if _rc and R > 0 and abs(R - _rc) / _rc > 0.15:
-        progress.log(f"WARNING: the merged limb fit says R={R:.0f}px but the "
-                     f"individual tiers agree on R={_rc:.0f}px "
-                     f"({100 * (R / _rc - 1):+.0f}%). Using the tiers' value — "
-                     f"the merge probably contains frames of different scenes.",
-                     None)
-        if fit is None or abs(R - _rc) / _rc > 0.30:
+        # This used to say "Using the tiers' value" unconditionally, and then
+        # only actually use it past 30% or with no per-azimuth fit -- so between
+        # 15% and 30% the log claimed an override that had not happened, on the
+        # one line a user reads when the disc mask comes out wrong. Each branch
+        # now says what it did.
+        _took = fit is None or abs(R - _rc) / _rc > 0.30
+        _head = (f"WARNING: the merged limb fit says R={R:.0f}px but the "
+                 f"individual tiers agree on R={_rc:.0f}px "
+                 f"({100 * (R / _rc - 1):+.0f}%). ")
+        if _took:
+            progress.log(_head + "Using the tiers' value — the merge probably "
+                         "contains frames of different scenes.", None)
             R = float(_rc)
             limb_prof = np.full(720, R, np.float32)
             rms = 0.02 * R
             fit = None
+        else:
+            progress.log(_head + "KEEPING the merged fit: it is a per-azimuth "
+                         "measurement and the disagreement is under 30%, where "
+                         "the tiers' single number is not clearly the better "
+                         "one. Check the disc mask on the preview — if it is "
+                         "the wrong size, the tiers were right.", None)
     progress.log(f"lunar limb: center ({cyf:.1f},{cxf:.1f}) R={R:.1f}px", 0.91)
     # The real limb is not a circle: lunar relief, seeing, and the moon's drift
     # between tiers make it wander a few px about the fitted circle. Masks keyed
@@ -1751,7 +1968,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                "limb_prof": [float(x) for x in limb_prof],
                "secs": [float(s) for s in secs],
                "cal": {str(k): v for k, v in cal.items()},
-               "abs_shift": {str(k): v for k, v in abs_shift.items()}},
+               "abs_shift": {str(k): v for k, v in abs_shift.items()},
+               # where the layer grid sits inside the SENSOR frame. The master
+               # flat is the one cached product that is neither aligned nor
+               # trimmed, so the preview needs this to line it up.
+               "crop_origin": [int(crop_origin[0]), int(crop_origin[1])]},
               open(os.path.join(wd, "geometry.json"), "w"), indent=1)
     del short_lum
 
@@ -1867,6 +2088,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
               open(os.path.join(wd, "opts.json"), "w"))
     import datetime
     stats["finished"] = datetime.datetime.now().isoformat(timespec="seconds")
+    _tm = _timing_summary(progress)
+    if _tm:
+        stats["timing"] = _tm
+        progress.log("run time " + _fmt_dur(_tm["total_s"]) + " — slowest: "
+                     + "; ".join(f"{m} {_fmt_dur(d)}" for d, m in _tm["slowest"]),
+                     None)
     txt = _report.write(wd, stats)
     for line in txt.split("\n"):
         progress.log(line, None)

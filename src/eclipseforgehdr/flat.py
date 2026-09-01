@@ -142,6 +142,50 @@ def _chain(a, sigma_full, median3=True):
     return out
 
 
+def _repair_border(m, frac=0.01, tol=0.02, look=8):
+    """Replace edge rows/columns that do not belong to the optical field.
+
+    A masked or transition line is a DISCONTINUITY; vignetting is not. So each
+    edge line is judged against the block of lines just inward of it, never
+    against the frame as a whole -- a 30% vignette changes by ~0.04% per row,
+    while the reference sensor's row 0 sits 13% below rows 8-16. Comparing to a
+    global interior median instead would erase real falloff on any strongly
+    vignetted lens, which is what the first version of this did: it replaced 7
+    to 9 lines on every edge of a perfectly good 30% vignette.
+
+    Returns lines replaced per edge, (top, bottom, left, right). A clean flat
+    gives zeros and nothing is touched.
+    """
+    fixed = []
+    for axis in (0, 1):
+        n = m.shape[axis]
+        lim = max(2, int(frac * n))
+        med = np.median(m, axis=1 - axis)
+        for side in (0, 1):
+            k = 0
+            for i in range(lim):
+                j = i if side == 0 else n - 1 - i
+                nb = (slice(j + 1, j + 1 + look) if side == 0
+                      else slice(max(j - look, 0), j))
+                ref = float(np.median(med[nb])) if med[nb].size else float(np.median(med))
+                if abs(med[j] / max(ref, 1e-6) - 1.0) <= tol:
+                    break
+                k += 1
+            if k:
+                if axis == 0:
+                    if side == 0:
+                        m[:k, :] = m[k:k + 1, :]
+                    else:
+                        m[n - k:, :] = m[n - k - 1:n - k, :]
+                else:
+                    if side == 0:
+                        m[:, :k] = m[:, k:k + 1]
+                    else:
+                        m[:, n - k:] = m[:, n - k - 1:n - k]
+            fixed.append(int(k))
+    return fixed
+
+
 def _robust_sd(d):
     m = float(np.median(d))
     return float(1.4826 * np.median(np.abs(d - m)))
@@ -332,6 +376,14 @@ def build_master(flat_dir, shape=None, progress=None, target=NOISE_TARGET):
     if med3 or sigma > 0:
         master = _chain(master, sigma, med3)
 
+    # Repair the outermost rows and columns before renormalising. Some decoders
+    # hand back a row or two of masked/transition photosites at the edge of what
+    # they call the visible area -- on the reference sensor row 0 comes out at
+    # 0.644 against 0.936 four rows in. Dividing by that brightens the top rows
+    # of every light frame by up to 55%. It usually falls inside the alignment
+    # trim, but "usually" depends on how much the mount moved, so it is fixed
+    # here rather than left to luck.
+    info["border_fixed"] = _repair_border(master)
     # Renormalise after smoothing so the centre is exactly 1.0 per channel: the
     # correction must not change the white balance or the overall level of the
     # lights, only their spatial structure.
@@ -385,6 +437,11 @@ def describe(info):
     out.append(f"flat: corrects a {100 * (info.get('vignette', 1) - 1):.1f}% "
                f"falloff — the dimmest part of the field sits at "
                f"{info.get('corner', 1):.3f} of the brightest")
+    if any(info.get("border_fixed") or []):
+        _b = info["border_fixed"]
+        out.append(f"flat: {_b[0]}/{_b[1]} top/bottom and {_b[2]}/{_b[3]} "
+                   f"left/right edge line(s) replaced — the decoder handed back "
+                   f"masked photosites there, not optics")
     if info.get("clipped"):
         out.append(f"flat: {info['clipped']} photosite(s) clipped to the "
                    f"[0.2, 5.0] safety range")

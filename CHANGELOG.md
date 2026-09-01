@@ -5,7 +5,339 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
-## 0.13.1 — the disc is found by its edge, not by its brightest pixels
+## 0.14.4 — Progress weights from a measured run; report span excludes rejects
+
+### The progress split, measured instead of assumed
+
+0.14.1 gave the detail stage 22% of the bar on an assumption — that stacking
+costs about 3.5× the detail stage — because the stacking side had never been
+timed on real RAWs. The run-time summary added in that same release then
+measured it, on a 50-frame 14-tier bracket from a 45 Mpx body, 12m27s end to
+end:
+
+| step | time | share of run |
+|---|---:|---:|
+| inner corona: raw pass | 141 s | 19% |
+| inner corona: denoised pass | 140 s | 19% |
+| MGN | 31 s | 4% |
+| **three named detail steps** | **312 s** | **42%** |
+
+The remaining detail steps are each below the report's 6th entry (21 s), which
+brackets the whole stage between 42% and 64% of the run. So stacking and detail
+are roughly equal, not 3.5:1, and the bar was reaching 78% around the halfway
+mark and then crawling. The detail stage now starts at 52% of the bar rather
+than 78% — the low end of the measured bracket, since a bar that lags is better
+than one that arrives at 100% and waits.
+
+This is one dataset, so it is an estimate with a range rather than a constant,
+and it will move with frame count (more frames, more stacking) and sensor size
+(detail grows faster than pixel count). To let the next runs settle it without
+extrapolation, the report now lists **every step over a second** with its
+percentage, plus a line for what the listed steps do not account for — instead
+of stopping at the slowest four and leaving the rest of the run unexplained.
+
+### The report's shot span counted rejected frames
+
+The bracket's time span and ISO list were taken from every *file* in the
+folder, before any frame was rejected. A test frame shot three weeks after the
+eclipse and correctly dropped as "not a totality frame" still set the span, so
+the report read:
+
+    frames taken : 2026:08:12 21:30:12  ..  2026:09:01 13:35:30
+
+Three weeks of totality. Both are now computed from the frames actually
+stacked. Verified against a control: with the stray frame dropped, the span
+matches the clean run exactly (10:20:00–10:23:14 rather than 10:20:00–10:59:00);
+where a stray frame is genuinely used, it still counts.
+
+## 0.14.3 — A stray overexposed frame in the raw folder
+
+Found by testing what happens when one blown file is dropped into an otherwise
+healthy folder. The 0.14.0 guard covers a saturated *tier*; a stray frame is
+the same problem in three positions, and where it lands decides what it can
+damage. All three finish without raising, both before and after this release —
+the crash guard holds — but two of them were quietly doing the wrong thing.
+
+### A saturated shortest tier disabled hot-pixel repair
+
+Hot pixels are mapped once, on the shortest tier, because its sky is darkest.
+A hot pixel is a photosite far above its neighbours — and in a saturated frame
+there is no "above": everything sits at the clip. A stray overexposed file
+whose EXIF puts it at the short end becomes the shortest tier on its own, and
+the map built from it found **zero** defects on a sensor carrying 434. The
+existing guard only caught an implausibly *high* count, so this passed silently
+and hot-pixel repair was off for the entire run.
+
+A tier that is more than half clipped is now skipped for this purpose and the
+next tier is used, with a line saying so.
+
+| defect map built from | before | after |
+|---|---:|---:|
+| healthy shortest tier (control) | 434 | 434 |
+| stray blown frame as the shortest tier | **0** | 434 |
+
+### The limb-radius warning claimed an override it had not made
+
+When the merged limb fit disagrees with the per-tier consensus by more than
+15%, the log said:
+
+> ... the individual tiers agree on R=80px (+22%). **Using the tiers' value** —
+> the merge probably contains frames of different scenes.
+
+The code only actually adopts the tiers' value past **30%**, or when there is
+no per-azimuth fit. Between 15% and 30% it printed that sentence and then kept
+the merged fit. This is the one line a user reads when the disc mask comes out
+the wrong size, so it was misdirecting exactly when it mattered.
+
+The behaviour is unchanged — a per-azimuth measurement is not obviously worse
+than the tiers' single number at 22% — but each branch now says what it did,
+and the keeping branch points at what to check:
+
+> ... **KEEPING the merged fit**: it is a per-azimuth measurement and the
+> disagreement is under 30%, where the tiers' single number is not clearly the
+> better one. Check the disc mask on the preview — if it is the wrong size, the
+> tiers were right.
+
+Whether 30% is the right place for that line is a separate question, and not
+one a synthetic frame can answer.
+
+### Unchanged, and confirmed
+
+A stray blown frame *inside* a healthy tier was already handled correctly and
+still is — it is identified against its own tier and dropped by name:
+
+    1/30s: dropping ZSTRAY.rw2 — 100.00% of the frame is saturated vs 5.11%
+    for this tier; this is not a totality frame
+
+Cached products from 0.14.2 and earlier are **not** reused by this release: the
+defect map and the limb radius both feed the merge, so the products genuinely
+differ. Re-running is required.
+
+## 0.14.2 — Flat view rendered the prominence gate
+
+0.14.1 got the button back and then drew the wrong layer into it. The server
+was serving the flat correctly — `/api/layer/flat` and the export path were
+both right — but the browser's preview picked its single-layer source with a
+ternary chain that ended in a bare fallback to the prominence gate:
+
+    VIEW==="pellett" ? L.pel[j]/255 : pr[j]/255
+
+Every view spelled out in that chain worked, and `prom` "worked" only by being
+the fallback. Any view added later — Flat, when it arrived — silently drew the
+prominence gate instead. Measured, before and after, as the mean absolute
+difference between what each button draws:
+
+| | before | after |
+|---|---:|---:|
+| Flat vs Prom gate | **0.00** (identical) | 160.69 |
+| Flat vs what `/api/layer/flat` serves | — | r = 1.0000 |
+
+Each view now names its own source, and a view whose layer is missing falls
+back to the composite with a console warning rather than to whichever layer
+happened to sit last in the chain. All eight views were checked pairwise; none
+of them draws the same thing as any other.
+
+This is the second bug in three days where the flat preview failed by showing
+something plausible instead of nothing. Both were invisible for the same
+reason: no test compared what the user sees against what the pipeline built.
+There is one now (`viewtest.py`), and it drives the real page in a real browser
+rather than the functions underneath it.
+
+## 0.14.1 — Master-flat preview and progress reporting
+
+### Master-flat preview failed to load
+
+0.14.0 added the master flat as a quality-control preview and the button for it
+never showed up on the first real run. The loader reduced the flat to
+superpixels — correctly, to kill the Bayer checkerboard — and then cropped that
+half-resolution array to the **full-resolution** layer grid. On the reporting
+frame that meant asking for 5358×8100 out of a 2716×4076 array, which can never
+match, so the size check failed and the loader returned `False`. It failed
+silently, which is why it shipped: a missing button looks exactly like a run
+with no flats.
+
+Fixed by putting the reduced flat back on the full grid (crop on the superpixel
+grid first, then expand, so the temporary is the size of the view and not of
+the sensor). Verified on the reporting shapes and three others — uncropped, an
+odd-sized layer grid, and an old cache with no `crop_origin`:
+
+| case | before | after |
+|---|---|---|
+| 5432×8152 sensor, 5358×8100 grid, crop (32,34) | no button | loads, dust visible, no checkerboard |
+| no autocrop | loads | loads |
+| odd layer grid | loads | loads |
+| old cache, no `crop_origin` | loads (centred) | loads (centred) |
+
+And it no longer fails silently: the reason goes to the log and to
+`/api/geometry`, so the next one of these is visible rather than invisible.
+
+### Progress reporting reweighted by measured time
+
+Reported from the field: the bar sits nearly full for a long time, and the only
+sign the run is alive is the terminal. Both halves of that are now addressed.
+
+**Where the time actually goes.** The detail stage was timed step by step on
+synthetic corona frames at two sizes:
+
+| step | 10.8 Mpx | 43.4 Mpx |
+|---|---:|---:|
+| denoise HDR master | 2.9 s | 18.2 s |
+| MGN | 26.9 s | 197.9 s |
+| FNRGF | 7.6 s | 22.9 s |
+| NAFE | 11.1 s | 56.3 s |
+| **inner corona** | **135.3 s** | **1001.1 s** |
+| prominence colour | 0.9 s | 3.6 s |
+| Pellett | 11.1 s | 31.7 s |
+| **total** | **198.7 s** | **1343.9 s** |
+
+Two things came out of that. The inner-corona block is two thirds to three
+quarters of the stage on its own — it runs the multiscale normalisation twice
+at full resolution, once raw and once denoised (61.0 s and 61.7 s of its 135.3 s
+at 10.8 Mpx) — and it had no logging inside it at all, so the bar and the log
+both stood still through most of the stage. And the stage does not scale with
+pixel count: 4× the pixels cost 6.8× the time, so on a 45 Mpx body the detail
+layers alone are 22 minutes. The bar was giving all of that 6.5% of its width.
+
+So: the detail stage now gets 22% of the bar instead of 6.5%, divided by
+measured wall time rather than evenly, and the inner-corona block reports its
+four sub-steps. Its two long passes get 7.4% of the bar each, where before the
+pair got about 1%. The 22% is still an estimate — it assumes stacking takes
+about 3.5× the detail stage, and the stacking side has never been timed on real
+RAWs — so it errs towards lagging, because a bar that arrives at 100% and waits
+is worse than one that arrives late.
+
+**A run that says how long it took.** Every finished run now prints its own
+timing summary — total, and the slowest steps by name — to the log and to
+`report.txt`. That is what will replace the estimate above with real numbers
+from real cameras.
+
+**Signs of life.** Beside the bar there is now a spinner, an elapsed clock
+counting from the server's own start time, and the name of the current step.
+Once a step has been running for more than 45 seconds the line says which step
+it is and for how long, so a long wait is legible instead of alarming. The bar
+itself carries moving stripes while a run is live (and doesn't, when it isn't).
+The importing and diamond-ring paths get the same treatment; import lowers the
+detail band to 12%, since it skips stacking and the detail layers are nearly
+the whole job there.
+
+### Cache compatibility
+
+0.14.1 changes nothing that is written into the work directory, so a folder
+already processed with 0.14.0 is still reusable and does not need re-stacking
+for the sake of a version number. Builds are declared interchangeable
+explicitly, in `CACHE_COMPAT`, rather than by relaxing the check.
+
+## 0.14.0 — Alignment crash guard, HDR import, NAFE input flattening
+
+### Alignment failure on a fully saturated tier
+
+Two people hit `SVD did not converge in Linear Least Squares` partway through a
+run, on Windows, and the theory going round was that it was a Windows problem.
+It is not, and it is not memory either.
+
+`prep_pair` masks out saturated pixels before correlating a pair of tiers. When
+a tier's whole correlation window is saturated the weight map is zero
+everywhere, so the prepped image is exactly zero. Phase correlation on a zero
+image returns a finite but meaningless shift and an **`err` of NaN** — and the
+weight `1/(err+0.05)` is therefore NaN. One NaN weight poisons a full row of the
+design matrix, and both `lstsq` calls die:
+
+| input | returned shift | returned `err` | weight |
+|---|---|---|---|
+| two real images | [0, 0] | 0.0009 | 19.6 |
+| one all-zero | [−0.75, −0.75] | **nan** | **NaN** |
+
+Reproduced with a synthetic bracket whose longest tier is blown — same warning,
+same `DLASCL parameter number 4 had an illegal value`, same exception, on Linux.
+It takes a bracket wide enough to blow one end; the report that found it spans
+14.3 EV with single frames at 4.2, 11.9 and 20 s.
+
+Now: degenerate windows are detected before correlating, non-finite shifts and
+weights can never enter the solve, the solve itself is wrapped, and a tier that
+nothing could link to takes the shift of its nearest linked neighbour rather
+than a minimum-norm number that looks like an answer. Every one of those says so
+in the log, naming the tier.
+
+### Import of a finished HDR
+
+A folder of raws is no longer the only way in. Point the new box at one 16-bit
+TIFF or FITS — from Siril, PixInsight, Photoshop, or this app's own aligned tier
+exports — and it runs the disc fit, the sky-gradient fit and every detail layer
+on that image. All seven views export exactly as they do from a stack.
+
+**The tone curve is read from the file, not guessed.** MGN, FNRGF and NAFE all
+work on log luminance and assume the value is proportional to coronal
+brightness. Measured on a Photoshop mean stack of this app's own sRGB tier
+exports: the corona's log-log radial slope read **−1.72** against **−3.38** for
+the same scene linear, a ratio of 0.510 where sRGB predicts ~0.45. Applying the
+inverse the embedded ICC profile declares brought it to **−3.17**, within 6% of
+the truth. Files with no profile must declare themselves; 8-bit input is
+refused, because the corona spans several thousand to one.
+
+The report says plainly what an imported image gives up — no alignment,
+photometry or per-tier lunar masking, no earthshine, the inner-corona layer is a
+second view of the same pixels rather than an independent measurement, and the
+prominence gate is weaker because a merged image has usually compressed the
+H-alpha contrast it keys on (R/GB 1.84 against 3.02 from a real fast tier).
+
+### NAFE input flattening
+
+NAFE was the only detail layer whose input still carried the full radial
+falloff — MGN and FNRGF both subtract it first. It paid twice: **60% of its
+output range** went on a large-scale gradient instead of structure, and the
+steep falloff outside the limb drove the equalisation into a dark ring.
+
+The envelope now comes off with a plain Gaussian high-pass at 0.08 R, which
+needs no circle and no limb — NAFE keeps the independence that makes it the
+layer to trust when the limb fit is shaky. Measured three ways on the same
+image, against the fitted radial profile MGN uses:
+
+| | large-scale range | detail 1.05–1.5 R | ripple outside the mask |
+|---|---|---|---|
+| as shipped | 68.3% | 0.0611 | 0.3451 |
+| fitted radial profile (needs the limb) | 5.4% | 0.1328 | 0.2543 |
+| **Gaussian 0.08 R (no geometry)** | **3.6%** | **0.1360** | **0.1210** |
+
+**2.2× the near-limb detail and 2.9× less ripple** where the dark ring used to
+be — and the geometry-free option turned out to be the better one on every
+count. The fitted profile also extrapolates inward and leaves a wedge across the
+disc, which would have shown in an exported NAFE layer.
+
+Worth recording what does *not* work, since it is the obvious thing to try:
+subtracting a smooth model from the finished layer flattens it (68% → 9%) but
+recovers **exactly zero** detail — identical to four decimals. The damage is
+done by a nonlinear equalisation; a linear correction afterwards cannot undo it.
+
+### Resolution-adaptive MGN scales
+
+The scale ladders were fixed pixel counts. Now the top is tied to R — `0.0643 *
+622 = 40 px` reproduces the reference set exactly — and the bottom is raised to
+whatever the image actually resolves, measured from the band-pass falloff (white
+noise falls as ~1/s, structure more slowly). At 3.19 arcsec/px behind a 240 mm
+consumer zoom the old 1.25 and 2.5 px scales sat entirely below the optics: the
+pixel-scale band carried 9.6% of the local mean against 1.9–2.7% for the bands
+where the real structure lives. The reference ladder is unchanged.
+
+### Other changes
+
+- **Master flat preview.** Its own view button, cut to the layer grid via a new
+  `crop_origin` in geometry.json, stretched to its own 0.5–99.5 percentile —
+  a 16% falloff shown linearly over 0..1 is invisible, which is the point. Min,
+  max and the stretch bounds are in the tooltip.
+- **The master flat repairs its own outer border.** Some decoders hand back a
+  row of masked photosites inside what they call the visible area; on the
+  reference sensor row 0 reads 0.644 against 0.936 four rows in, which would
+  brighten the top rows of every light frame by up to 55%. Edge lines are judged
+  against their inward neighbours, never against a global median — the first
+  version of this compared globally and erased 7–9 lines of perfectly good
+  vignetting on every edge.
+- Exported detail views carry their own p1/p99 range in the TIFF description.
+  A view is rendered at the setting it contributes to the composite, not one
+  that fills a histogram: MGN occupies 14% of the 16-bit range where FNRGF
+  occupies 81%, and anyone compositing by hand needs to know before stretching.
+- "Cached pipeline products found" now checks the build version, as Start does.
+
+## 0.13.1 — Edge-based lunar disc detection
 
 Fixes two failures that both came from the same wrong assumption: that you can
 guess where the Moon is, and how big it is, from brightness and from the frame
@@ -206,7 +538,7 @@ flatten 0.5, FNRGF share 0.17 / strength 0.9, MGN contrast 0.04, NAFE-VN mix
 1.205, neutralise sky cast 1.0, saturation 1.0, highlight compression 0.1,
 output gamma 1.0, black point 0.005.
 
-## 0.11.5 — the "vignetting" was the black point
+## 0.11.5 — Black-point correction, previously misdiagnosed as vignetting
 
 Setting every structure slider to zero and still seeing it was the decisive
 clue: it was never NAFE, or any detail layer. It was the base envelope.
@@ -250,7 +582,7 @@ About 0.11 reproduces the old background darkness — but note the corona-to-sky
 contrast *improves* as you crush, which it could not do before, because the
 crush used to take the shape with it.
 
-## 0.11.4 — the sky's colour, and a slider that did nothing
+## 0.11.4 — Sky colour neutralisation; inoperative slider corrected
 
 **Neutralise sky cast had no effect at any setting, and never had.** It divides
 the chroma field by the measured background colour — but that colour was being
@@ -297,7 +629,7 @@ radial flatten 0.2 → 0.35, base lift 0.18 → 0.255, grain smoothing 0 → 0.2
 neutralise sky cast 0.7 → 0.5, and a few smaller moves. They are starting
 points, not truths — every one is a taste call and every one is a slider.
 
-## 0.11.3 — the sky curves; a plane was the wrong order
+## 0.11.3 — Second-order sky gradient model
 
 0.11.2 took out the tilt and left a curved remainder, which then read as
 darkening on the *other* side and around the corners. Measured on what the
@@ -324,7 +656,7 @@ Six terms need plenty of sky to be stable, so it falls back to the plane below
 outright — that is not sky. And the full-resolution evaluation is done in row
 blocks, since six term arrays at 45 MP would be a gigabyte.
 
-## 0.11.2 — the dark wedge is the sky, not the lens
+## 0.11.2 — Sky gradient removal
 
 A broad dark gradient across one side of the frame, strongest at low solar
 altitude. Measured on the reference set it is **1.20× corner to corner**.
@@ -361,7 +693,7 @@ and `log1p` compresses exactly where the sky sits. Fitted that way the
 correction came out at half strength (sky residual 0.105 → 0.063 instead of
 → 0.017).
 
-## 0.11.1 — the white rim, and the contrast
+## 0.11.1 — Limb rim artefact and composite contrast
 
 Both of these turned out to be the same thing.
 
@@ -395,7 +727,7 @@ Note the sky looks grainier than in 0.11.0 — everything is stretched three
 times, sky included. That is honest, and the mix slider plus the composite's
 own envelope decide how much of it reaches the image.
 
-## 0.11.0 — NAFE-VN, in the paper's units
+## 0.11.0 — NAFE-VN in the published parameter units
 
 You were right to send the paper. The variable neighbourhood was implemented
 correctly — eqs. 11–12 are there, and the ratio this code computes,
@@ -446,7 +778,7 @@ Three other things the re-reading turned up:
   every `grid` px — and grid 8 against grid 4 agrees to three decimals in every
   annulus, so it is free. K=64 was the shortcut that was not free.
 
-## 0.10.4 — reverting 0.10.3
+## 0.10.4 — Revert of 0.10.3
 
 **0.10.3 broke the NAFE layer and should not be used.** Reverted; this build is
 0.10.2 behaviour.
@@ -475,7 +807,7 @@ annulus from 1.05 R to 4 R.
 The 0.10.2 changes (ε, noise σ, a working `sigma_sp`) are kept — they were
 measured on the same footing and are small.
 
-## 0.10.3 — NAFE's histogram was being spent on sky (REVERTED in 0.10.4)
+## 0.10.3 — NAFE histogram range (reverted in 0.10.4)
 
 Testing the "crop the field" hypothesis from 0.10.2 turned into a real fix.
 
@@ -514,7 +846,7 @@ Two things this test also caught:
   share a noise realisation, so part of that agreement was agreement on noise.
   The added-noise repeatability test replaces it.
 
-## 0.10.2 — NAFE parameters, derived rather than guessed
+## 0.10.2 — NAFE parameters derived from measurement
 
 Two of the three NAFE constants had never been swept. Both moved, both measured
 on the reference set (corona = 1.05–2.2 R, sky = beyond 3.2 R):
@@ -549,7 +881,7 @@ End to end on the reference set, detail-to-sky-grain improves 0.094 → 0.124.
 That is real but modest, and it does not close the gap to the paper's Fig. 5 —
 see the note in `nafe.py` on why.
 
-## 0.10.1 — NAFE was shipping the wrong term
+## 0.10.1 — NAFE output term corrected
 
 - **The NAFE layer was 99% a gamma stretch.** The 2014 paper's output is
   `B = (1−w)·T_γ(A) + w·E` (eq. 2) with w in 0.05–0.3, and that is what was
@@ -573,7 +905,7 @@ see the note in `nafe.py` on why.
   bottom third. `nafe_vn(..., combine=True)` still returns the paper's B for
   anyone who wants the standalone image.
 
-## 0.10.0 — full code audit
+## 0.10.0 — Full code audit
 
 A line-by-line review of every module, with a specific eye on datasets other
 than the two this was built against. Nothing here changes how the reference
