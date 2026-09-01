@@ -54,6 +54,40 @@ NAFE_GRID = 8
 # near-limb detail and 2.9x less ripple where the ring used to be. Sigma was
 # swept over 0.08-0.35 R; smaller is better near the limb and the far field is
 # flat across the range. Tied to R, so it means the same on any focal length.
+#
+# ...but that ring was reduced, not removed, and 0.14.4 got a render showing a
+# thick black annulus hugging the disc where FNRGF was clean. The measurement
+# above missed it because "ripple" was an RMS, and a broad smooth depression
+# barely moves an RMS. It is plainly visible as the MEAN of the layer per radial
+# ring, which is how it is measured now.
+#
+# The cause is the kernel, not the idea. A symmetric Gaussian mean is a bad
+# background estimate beside a huge dark hole: near the limb the mean is dragged
+# down by the disc, so L - mean overshoots bright at the limb and undershoots
+# dark just outside it, ~2 sigma wide -- an unsharp halo, 100 px of black on a
+# 622 px disc. The fix is to build the mean by NORMALIZED CONVOLUTION over
+# non-disc pixels only, exactly as MGN already does. Measured on a synthetic
+# corona carrying a KNOWN fine modulation, so "detail" is a correlation with the
+# truth rather than a variance that the artifact itself inflates:
+#
+#                       ring depth   correlation with the true structure
+#   plain Gaussian        0.1684                  0.468
+#   normalized conv.      0.0713                  0.814
+#
+# Two other candidates did better still on a perfect limb fit -- subtracting the
+# Fourier radial background reached 0.0047 and 0.938 -- but they need a centre
+# and a radius, and with the centre 0.05 R out that option is WORSE than the
+# plain Gaussian (0.2267 / 0.542): it manufactures its own artifact. Normalized
+# convolution needs only the disc mask, which the renderer already uses to fill
+# the disc, so it adds no dependency that is not already there -- and it
+# degrades gently: with the centre 0.10 R out it still scores 0.1135 / 0.731,
+# better than the plain Gaussian with a perfect fit.
+#
+# Sigma is left at 0.08 R deliberately. Re-swept with the disc excluded, 0.15 R
+# measured a little better (0.0576 / 0.863), but the sigma choice interacts with
+# the real scale of coronal structure, which a synthetic of azimuthal cosines
+# does not faithfully represent; the kernel correction does not. One change,
+# and the sweep is worth repeating on real data.
 NAFE_FLATTEN_R = 0.08
 
 # --- progress weighting for the detail stage -------------------------------
@@ -573,9 +607,19 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         # second copy of the base image and diluted MGN and FNRGF with it. The
         # eq. 2 mix happens in render.py instead, where the composite envelope
         # is T_gamma and the nafeMix slider is w.
-        # flatten the envelope first -- see NAFE_FLATTEN_R
-        _Lnf = (Ldn - ndimage.gaussian_filter(Ldn, max(NAFE_FLATTEN_R * R, 4.0))
-                ).astype(np.float32)
+        # Flatten the envelope first -- see NAFE_FLATTEN_R. The local mean is
+        # built by normalized convolution over non-disc pixels only: a plain
+        # Gaussian straddling the dark disc is what produced the black annulus.
+        _s = max(NAFE_FLATTEN_R * R, 4.0)
+        _w = (~disc_m).astype(np.float32)
+        _num = ndimage.gaussian_filter(Ldn * _w, _s)
+        _den = ndimage.gaussian_filter(_w, _s)
+        del _w
+        np.maximum(_den, 1e-6, out=_den)
+        _num /= _den
+        del _den
+        _Lnf = (Ldn - _num).astype(np.float32)
+        del _num
         nv = nafe_vn(_Lnf, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
                      sigma_sp=max(NAFE_NEIGH_R * R, 8.0) / NAFE_GRID,
                      noise_mult=NAFE_NOISE_MULT,
@@ -584,6 +628,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         del _Lnf
         lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E",
                           "flatten_px": round(max(NAFE_FLATTEN_R * R, 4.0), 1),
+                          "flatten": "normalized convolution, disc excluded",
                           "noise_mult": NAFE_NOISE_MULT,
                           "neigh_px": round(NAFE_NEIGH_R * R, 1),
                           }

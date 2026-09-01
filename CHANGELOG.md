@@ -5,6 +5,65 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.14.5 — The black annulus in the NAFE layer
+
+Reported from a real render: NAFE showed a thick black ring hugging the disc
+and extending well outside it, with a bright rim at the limb, where FNRGF was
+clean.
+
+The cause is the envelope flattening added in 0.14.0, and specifically its
+kernel rather than its idea. A symmetric Gaussian mean is a poor background
+estimate beside a large dark hole: near the limb the mean is pulled down by the
+occulted disc, so `L − mean` overshoots bright at the limb and undershoots dark
+just outside it, roughly 2σ wide. At 0.08 R on a 622 px disc that is about
+100 px of black — an unsharp halo, textbook.
+
+0.14.0's own measurement missed it because "ripple" was an RMS, and a broad
+smooth depression barely moves an RMS. It is obvious in the **mean of the layer
+per radial ring**, which is how it is measured now.
+
+The local mean is now built by **normalized convolution over non-disc pixels
+only** — the same treatment MGN already gives its statistics. Measured on a
+synthetic corona carrying a *known* fine modulation, so that "detail" is a
+correlation with the truth rather than a variance the artifact itself inflates:
+
+| flattening | ring depth | correlation with the true structure |
+|---|---:|---:|
+| plain Gaussian (0.14.0–0.14.4) | 0.1684 | 0.468 |
+| normalized convolution | **0.0713** | **0.814** |
+
+Mean layer value at 1.15 R went from 0.333 to 0.445 against a far-field 0.50 —
+the visible depth of the ring, more than halved — and the streamers now run
+cleanly down to the limb instead of stopping at a dark band.
+
+### Why not the option that scored better
+
+Subtracting the Fourier radial background (what FNRGF and the inner corona use)
+scored far better still on a perfect limb fit — 0.0047 and 0.938 — but it needs
+a centre and a radius, and it fails hard when they are wrong:
+
+| centre error | ring depth | correlation |
+|---|---:|---:|
+| exact | 0.0047 | 0.938 |
+| 0.02 R | 0.1347 | 0.666 |
+| 0.05 R | 0.2267 | 0.542 |
+| 0.10 R | 0.2533 | 0.416 |
+
+Past about 0.05 R it is **worse than what it replaces**: it manufactures its own
+artifact. Normalized convolution needs only the disc mask, which the renderer
+already uses to fill the disc, so it adds no dependency that was not already
+there — and it degrades gently rather than inverting. With the centre 0.10 R out
+it still scores 0.1135 / 0.731, better than the plain Gaussian with a *perfect*
+fit. Across every error tested it was never worse than the version it replaces.
+
+σ stays at 0.08 R. Re-swept with the disc excluded, 0.15 R measured slightly
+better (0.0576 / 0.863), but σ interacts with the real scale of coronal
+structure, which a synthetic built from azimuthal cosines does not faithfully
+represent, while the kernel correction does not. One change at a time; the sweep
+is worth repeating on real data.
+
+Re-running is required — the NAFE layer itself changes.
+
 ## 0.14.4 — Progress weights from a measured run; report span excludes rejects
 
 ### The progress split, measured instead of assumed
