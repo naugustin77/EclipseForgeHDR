@@ -5,6 +5,21 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.14.6 — The last step of a run was never timed
+
+A step's cost is the gap to the next log line, so the final step of a run has
+never had one — and has therefore never been measured. On the first full
+step-by-step report from a real run, the entire Pellett layer was simply absent
+from the list and the "steps under 1s" remainder quietly absorbed it. Since the
+whole point of that report is to let real runs replace estimated progress
+weights, a hole in it is worth closing before it collects any more data. The
+interval is now closed before it is measured.
+
+The same report confirmed the 0.14.4 weighting from the other direction. With
+every step over a second listed, the detail stage on a 50-frame 45 Mpx run comes
+to 343 s of 734 s — **47%** — against the 48% the bar now allocates. The earlier
+top-six estimate could only bracket it between 42% and 64%.
+
 ## 0.14.5 — The black annulus in the NAFE layer
 
 Reported from a real render: NAFE showed a thick black ring hugging the disc

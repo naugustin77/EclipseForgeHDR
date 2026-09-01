@@ -2088,6 +2088,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
               open(os.path.join(wd, "opts.json"), "w"))
     import datetime
     stats["finished"] = datetime.datetime.now().isoformat(timespec="seconds")
+    # A step's cost is the gap to the NEXT log line, so the last step of the run
+    # has never had one and has never been timed. On the first full report from
+    # a real run the whole Pellett layer was simply absent from the list, and
+    # the "steps under 1s" remainder quietly absorbed it. Close the interval
+    # before measuring it.
+    progress.log("assembling the run report", None)
     _tm = _timing_summary(progress)
     if _tm:
         stats["timing"] = _tm
