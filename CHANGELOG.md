@@ -5,6 +5,95 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.15.1 — Browse buttons, so nobody has to type a path
+
+Every field that wants a location now has a **Browse…** next to it: the raw
+folder, the flats folder, the single-HDR import and the diamond-ring frame.
+Folders list how many frames each one holds, so the bracket is obvious among
+twenty subfolders; the file pickers offer only files of the right type. Escape
+or a click outside closes it. Picking the raw folder loads it straight away.
+
+Both testers lost time to typed paths — one pasted a perfectly good path into a
+field whose Start button could never light up — so this is worth more than it
+looks.
+
+**Why it is not a native OS dialog.** The obvious answer, `<input type="file">`,
+is the one thing that cannot work here: for security a browser hands JavaScript
+the file's *content* and never its location, and the pipeline needs the path —
+it reads 250 raw files off the disk, it does not want them uploaded to itself. A
+native dialog opened by the server would give a real path, but Tk must own the
+main thread on macOS while this server is threaded, so that trades a paste for a
+hang. The server therefore lists directories and the page draws the picker:
+plainer than a native dialog, and identical on all three platforms, which for a
+tool being tested on machines its author cannot reach is the better trade.
+
+## 0.15.0 — First external FITS run: four defects it found
+
+The first tester to complete a run did it on FITS from a 249-frame bracket, and
+found four things at once. All four are fixed; two more are diagnosed and not.
+
+### FITS came out upside down
+
+FITS row 1 is the **bottom** of the frame — the standard's origin is lower-left
+— and every other format the pipeline touches has row 0 at the top. Read
+straight through, a FITS bracket comes out vertically mirrored. It now reads
+`ROWORDER` when the capture software wrote one and follows the standard when it
+did not, and says which in the log.
+
+The fix has a trap in it, and the trap is worse than the bug. Flipping an image
+with an **even** number of rows swaps the Bayer row parity — RGGB becomes GBRG —
+so the obvious fix trades an upside-down picture for a miscoloured one. The
+parity shift now travels with the data and is added to the Bayer y-offset.
+Tested at even and odd heights, with `ROWORDER` absent, `BOTTOM-UP` and
+`TOP-DOWN`: bar at the top and red on the red photosites in all four.
+
+### One OneDrive folder silently disabled three features
+
+    sky gradient removal skipped ([Errno 22] Invalid argument:
+    'C:\Users\...\OneDrive\Desktop\...\hdr_rgb.npy')
+
+`np.load(mmap_mode="r")` fails on a cloud-synced Windows folder. Memory-mapping
+keeps a 45 Mpx three-channel float32 out of RAM, which is worth having — but the
+same call sat in **three** places: the sky-gradient fit, the contact-frame
+loader, and the renderer's colour estimate. So one folder could take out three
+unrelated features, and only one of them said so. It now falls back to a plain
+read, which costs memory and keeps the feature.
+
+That also explains the intermittent contact frame: the same error, on a code
+path whose failure the GUI reported only as nothing happening.
+
+### The diamond ring did nothing — for both testers
+
+The contact-frame path field had no Enter handler. The folder field directly
+above it loads on Enter, so pasting a path and pressing Enter is the obvious
+move, and it did precisely nothing. Both testers reported this independently,
+in the same words, and neither had a broken file. Enter now loads it, and stays
+inert while the button is disabled.
+
+### Importing one HDR needed a raw folder that an import does not use
+
+Start was enabled only by a successful folder load, so pasting a TIFF path and
+nothing else left the button greyed out forever — reported verbatim. An import
+needs no raw folder: its products belong beside the image. Typing an import path
+now enables Start, and the server falls back to the image's own directory.
+
+### Diagnosed, not yet fixed
+
+**Prominences cut off by the disc mask.** The merged limb fit came out
+R = 542 px against a per-tier consensus of 526 — 3% large — and the mask sits at
+R + 25, so it lands about 41 px beyond the real Moon and eats the prominences.
+The tier-consensus cross-check exists for exactly this but only fires past 15%.
+Shrinking the mask reveals a grey ring, which is the merged limb's own 26 px
+transition; that transition is the real fault and 3% is a symptom, not the
+cause.
+
+**Photometric calibration ran away on this set** — factors 9.40, 7.08, 5.36,
+4.07 on the four shortest tiers, a smooth geometric progression rather than
+noise. The pipeline detected it and said the merge would be unreliable, which is
+the check working. What it means for a FITS bracket from this capture chain is
+not yet known, and a wide limb transition is exactly what a bad photometric
+merge produces — so this and the mask are probably one problem, not two.
+
 ## 0.14.6 — The last step of a run was never timed
 
 A step's cost is the gap to the next log line, so the final step of a run has

@@ -29,6 +29,89 @@ def version():
     return jsonify({"version": __version__})
 
 
+# ---------- file browser ----------
+#
+# Pasting an absolute path is fine once you know what the app wants and awkward
+# every other time -- both testers lost time to it, one of them pasting a
+# perfectly good path into a field whose Start button could never light up.
+#
+# This is a browser served from 127.0.0.1, so the obvious answer -- <input
+# type="file"> -- is the one thing that cannot work: for security a browser
+# hands JavaScript the file's CONTENT and never its path, and the pipeline needs
+# a path (it reads 250 raw files off disk, it does not want them uploaded to
+# itself). A native OS dialog opened by the server would give a real path, but
+# Tk has to own the main thread on macOS and this server is threaded, so that
+# trades a paste for a hang.
+#
+# So the server lists directories and the page draws the picker. It is less
+# pretty than a native dialog and it behaves identically on all three platforms,
+# which for a tool being tested on machines I cannot reach is the better trade.
+_PICK_EXT = {
+    "image": {".tif", ".tiff", ".fit", ".fits", ".fts"},
+    "any": None,
+}
+
+
+def _drives():
+    r"""Windows drive letters, so the picker can get above C:\Users."""
+    if os.name != "nt":
+        return []
+    out = []
+    for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        d = f"{c}:\\"
+        if os.path.exists(d):
+            out.append(d)
+    return out
+
+
+@app.get("/api/browse")
+def browse():
+    from .raw import RAW_EXTS, list_raws
+    kind = request.args.get("kind", "dir")
+    path = request.args.get("path", "") or os.path.expanduser("~")
+    path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.isdir(path):
+        path = os.path.expanduser("~")
+    exts = _PICK_EXT.get(kind)
+    if kind == "raw":
+        exts = set(RAW_EXTS) | _PICK_EXT["image"]
+    dirs, files = [], []
+    try:
+        with os.scandir(path) as it:
+            for e in it:
+                if e.name.startswith("."):
+                    continue
+                try:
+                    if e.is_dir():
+                        dirs.append(e.name)
+                    elif kind != "dir" and (exts is None or
+                                            os.path.splitext(e.name)[1].lower() in exts):
+                        files.append(e.name)
+                except OSError:
+                    continue
+    except PermissionError:
+        return jsonify({"ok": False, "error": f"no permission to read {path}"}), 400
+    except OSError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    # How many raw frames each subfolder holds -- the one number that tells you
+    # which of twenty folders is the bracket. Capped, so a huge tree stays fast.
+    counts = {}
+    if kind == "dir" and len(dirs) <= 60:
+        for n in dirs:
+            try:
+                counts[n] = len(list_raws(os.path.join(path, n)))
+            except Exception:
+                counts[n] = 0
+    parent = os.path.dirname(path)
+    return jsonify({"ok": True, "path": path,
+                    "parent": parent if parent and parent != path else None,
+                    "sep": os.sep, "drives": _drives(),
+                    "dirs": sorted(dirs, key=str.lower)[:2000],
+                    "files": sorted(files, key=str.lower)[:2000],
+                    "counts": counts,
+                    "here_raws": len(list_raws(path)) if kind == "dir" else 0})
+
+
 @app.post("/api/folder")
 def set_folder():
     if STATE["thread"] and STATE["thread"].is_alive():
@@ -75,8 +158,19 @@ def set_folder():
 
 @app.post("/api/run")
 def start_run():
+    # An import needs no raw folder: its products belong beside the image. The
+    # folder was required unconditionally, so pasting a TIFF path and nothing
+    # else was a dead end -- reported from the field as "the start button is
+    # greyed out". Fall back to the image's own directory.
     if STATE["folder"] is None:
-        return jsonify({"ok": False, "error": "choose a folder first"}), 400
+        _ip = (request.json.get("importPath", "") if request.is_json else "") or ""
+        _ip = os.path.expanduser(str(_ip).strip())
+        if _ip and os.path.isfile(_ip):
+            STATE["folder"] = os.path.dirname(os.path.abspath(_ip))
+        else:
+            return jsonify({"ok": False,
+                            "error": "choose a folder first, or paste the path "
+                                     "of one finished HDR to import"}), 400
     if STATE["thread"] and STATE["thread"].is_alive():
         return jsonify({"ok": False, "error": "already running"}), 400
     force = bool(request.json.get("force", False)) if request.is_json else False

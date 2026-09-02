@@ -56,21 +56,61 @@ button:disabled{opacity:.45;cursor:default}
 .export input[type=text]{background:#0e1013;color:var(--text);border:1px solid var(--line);
   border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace}
 .hint{color:var(--muted);font-size:12px}
+.brw{padding:7px 9px;font-size:12px}
+.pick{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;
+  align-items:center;justify-content:center;z-index:50}
+.pick.on{display:flex}
+.pickbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  width:min(760px,92vw);max-height:82vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.pickhead{padding:12px 16px;border-bottom:1px solid var(--line)}
+.pickhead h3{margin:0 0 6px;font-size:13px;color:var(--gold);font-weight:600}
+.crumb{font:12px ui-monospace,monospace;color:var(--muted);word-break:break-all}
+.picklist{flex:1;overflow-y:auto;padding:6px 8px;min-height:200px}
+.pickrow{display:flex;gap:10px;align-items:center;
+  padding:7px 9px;border-radius:4px;cursor:pointer;font:12px ui-monospace,monospace}
+/* the name takes the slack, so it sits hard left and the count hard right --
+   with space-between and the icon as a third flex item the name floated to
+   the middle of the row */
+.pickrow>span:first-of-type{flex:1;text-align:left;word-break:break-all}
+.pickrow:hover{background:var(--panel2)}
+.pickrow .tag{color:var(--muted);font-size:11px;flex:none}
+.pickrow.dir::before{content:"\1F4C1";margin-right:8px;flex:none}
+.pickrow.file::before{content:"\1F4C4";margin-right:8px;flex:none}
+.pickrow.up::before{content:"\21B0";margin-right:8px;flex:none}
+.pickfoot{padding:10px 16px;border-top:1px solid var(--line);display:flex;
+  gap:8px;justify-content:flex-end;align-items:center}
+.pickfoot .sp{flex:1;color:var(--muted);font-size:12px}
 </style>
 </head>
 <body>
+<div class="pick" id="pick">
+  <div class="pickbox">
+    <div class="pickhead"><h3 id="pickTitle">Choose a folder</h3>
+      <div class="crumb" id="pickCrumb"></div></div>
+    <div class="picklist" id="pickList"></div>
+    <div class="pickfoot">
+      <span class="sp" id="pickNote"></span>
+      <button id="pickCancel">Cancel</button>
+      <button id="pickUse" class="primary">Use this folder</button>
+    </div>
+  </div>
+</div>
 <div class="app">
   <div class="stage">
     <div class="topbar">
       <h1 title="High-Dynamic-Range Solar Eclipse Image Processing">EclipseForgeHDR</h1>
       <input type="text" id="folder" placeholder="/path/to/folder/with/RAWs" spellcheck="false">
+      <button id="brwFolder" class="brw" title="Pick the folder of raw frames">Browse…</button>
       <button id="load">Load folder</button>
       <input type="text" id="flatDir" spellcheck="false" style="width:190px"
         placeholder="flats: auto"
         title="Folder of flat-field frames. Left empty, a subfolder of the raw folder called flats/ is used if there is one, and no flat correction is applied if there is not. Type a path to use flats from somewhere else, or 'off' to ignore them. A master flat divides out lens vignetting, dust shadows and per-photosite sensitivity; it is smoothed only as much as its own measured noise requires, and the numbers are printed in the log.">
+      <button id="brwFlat" class="brw" title="Pick the folder of flat frames">Browse…</button>
       <input type="text" id="importPath" spellcheck="false" style="width:210px"
         placeholder="or import one HDR"
         title="Skip stacking entirely and run the enhancement layers on one finished HDR image you already have - from Siril, PixInsight, Photoshop, or this app's own aligned tier TIFFs. 16-bit TIFF or FITS. The tone curve is read from the file's embedded colour profile, so an sRGB export is linearised correctly; a file with no profile must say 'linear' in its name. What you give up: the inner-corona layer is no longer an independent source, the prominence gate is weaker, and there is no alignment or photometry section in the report.">
+      <button id="brwImport" class="brw" title="Pick one finished HDR image">Browse…</button>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
         Denoise
         <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -138,6 +178,7 @@ button:disabled{opacity:.45;cursor:default}
       <input type="text" id="ringpath" placeholder="/path/to/contact_frame.RW2" spellcheck="false"
         style="width:100%;background:#0e1013;color:var(--text);border:1px solid var(--line);
         border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace">
+      <button id="brwRing" class="brw" style="margin-top:6px">Browse…</button>
       <button id="ringload" style="margin-top:6px" disabled>Load contact frame</button>
       <div id="g-ring"></div>
     </div>
@@ -225,6 +266,14 @@ async function loadFolder(){
   $("start").disabled = false;
   ready = false; $("export").disabled = true;
 }
+
+// Importing one finished HDR needs no raw folder -- the products go beside the
+// image. Start was enabled only by a successful loadFolder(), so a tester who
+// pasted a TIFF and nothing else found the button greyed out forever.
+function syncStart(){
+  if ($("importPath").value.trim()) $("start").disabled = false;
+}
+$("importPath").addEventListener("input", syncStart);
 
 async function startRun(){
   $("start").disabled = true;
@@ -582,10 +631,106 @@ $("ringload").addEventListener("click", async () => {
 fetch("/api/version").then(r => r.json()).then(j => {
   $("credit").textContent = `EclipseForgeHDR ${j.version} · \u00a9 2026 N. Augustin with ClaudeAI`;
 }).catch(() => {});
+
+/* ---- file / folder picker -----------------------------------------------
+   A browser cannot hand a local web app a real filesystem path -- <input
+   type="file"> gives content, never a location -- and the pipeline needs the
+   path, not 250 uploaded raw files. So the server lists directories and this
+   draws them. Same behaviour on every platform, which matters more here than
+   looking native.                                                          */
+let PICK = null;   // {kind, target, onPick}
+
+async function pickOpen(kind, targetId, title, note){
+  PICK = {kind, target: targetId};
+  $("pickTitle").textContent = title;
+  $("pickNote").textContent = note || "";
+  $("pickUse").style.display = (kind === "dir") ? "" : "none";
+  $("pick").classList.add("on");
+  const start = $(targetId).value.trim();
+  await pickGo(start || "");
+}
+
+async function pickGo(path){
+  let j;
+  try {
+    const r = await fetch("/api/browse?kind=" + encodeURIComponent(PICK.kind)
+                          + "&path=" + encodeURIComponent(path));
+    j = await r.json();
+  } catch (e) { j = {ok:false, error:String(e)}; }
+  if (!j.ok){ $("pickCrumb").textContent = j.error || "cannot read that folder"; return; }
+  PICK.path = j.path; PICK.sep = j.sep;
+  $("pickCrumb").textContent = j.path;
+  const L = $("pickList");
+  L.textContent = "";
+  const row = (cls, label, tag, fn) => {
+    const d = document.createElement("div");
+    d.className = "pickrow " + cls;
+    const a = document.createElement("span"); a.textContent = label;
+    const b = document.createElement("span"); b.className = "tag"; b.textContent = tag || "";
+    d.appendChild(a); d.appendChild(b);
+    d.addEventListener("click", fn);
+    L.appendChild(d);
+  };
+  if (j.parent) row("up", "..", "", () => pickGo(j.parent));
+  for (const d of (j.drives || []))
+    if (d !== j.path) row("dir", d, "drive", () => pickGo(d));
+  for (const d of j.dirs){
+    const n = j.counts ? j.counts[d] : undefined;
+    row("dir", d, (n ? n + (n === 1 ? " frame" : " frames") : ""),
+        () => pickGo(j.path + j.sep + d));
+  }
+  for (const f of j.files)
+    row("file", f, "", () => { pickChoose(j.path + j.sep + f); });
+  if (!j.dirs.length && !j.files.length)
+    $("pickNote").textContent = "nothing here";
+  else if (PICK.kind === "dir")
+    $("pickNote").textContent = j.here_raws
+      ? `this folder holds ${j.here_raws} frame` + (j.here_raws === 1 ? "" : "s")
+      : "no frames in this folder";
+}
+
+function pickChoose(p){
+  const t = $(PICK.target);
+  t.value = p;
+  t.dispatchEvent(new Event("input", {bubbles:true}));
+  const k = PICK.target;
+  $("pick").classList.remove("on");
+  PICK = null;
+  if (k === "folder") loadFolder();
+  else if (k === "flatDir" && $("folder").value.trim()) loadFolder();
+}
+
+$("pickCancel").addEventListener("click", () => {
+  $("pick").classList.remove("on"); PICK = null;
+});
+$("pickUse").addEventListener("click", () => { if (PICK) pickChoose(PICK.path); });
+$("pick").addEventListener("click", e => {
+  if (e.target === $("pick")){ $("pick").classList.remove("on"); PICK = null; }
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && PICK){ $("pick").classList.remove("on"); PICK = null; }
+});
+$("brwFolder").addEventListener("click", () =>
+  pickOpen("dir", "folder", "Choose the folder holding your raw frames"));
+$("brwFlat").addEventListener("click", () =>
+  pickOpen("dir", "flatDir", "Choose the folder holding your flat frames"));
+$("brwImport").addEventListener("click", () =>
+  pickOpen("image", "importPath", "Choose one finished HDR image",
+           "16-bit TIFF or FITS"));
+$("brwRing").addEventListener("click", () =>
+  pickOpen("raw", "ringpath", "Choose the diamond-ring / contact frame",
+           "a single raw, TIFF or FITS frame"));
+
 $("load").addEventListener("click", loadFolder);
 $("folder").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
 $("flatDir").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
 $("importPath").addEventListener("keydown", e => {if (e.key==="Enter") startRun();});
+// Enter here too. The folder field right above it loads on Enter, so pasting
+// a path and pressing Enter is the obvious move -- and it did nothing, which
+// is what both testers reported as "the diamond ring will not load".
+$("ringpath").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !$("ringload").disabled) $("ringload").click();
+});
 $("start").addEventListener("click", startRun);
 $("export").addEventListener("click", async () => {
   const fmt = document.querySelector("input[name=fmt]:checked").value;

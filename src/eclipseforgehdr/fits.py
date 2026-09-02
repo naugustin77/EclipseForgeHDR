@@ -108,8 +108,59 @@ def _read_builtin(path):
     return data, hdr
 
 
+def _orient(data, hdr):
+    """Put a FITS image the same way up as every other image the pipeline sees.
+
+    FITS row 1 is the BOTTOM of the frame (the standard's origin is lower-left);
+    every raster format the rest of this code touches has row 0 at the top. Read
+    straight through, a FITS bracket therefore comes out vertically mirrored --
+    which is exactly what the first person to feed it FITS reported: "the image
+    came out upside down".
+
+    Astro capture software knows this is a trap and most of it writes ROWORDER.
+    Honour that when it is there, and otherwise follow the standard.
+
+    THE BAYER TRAP. Flipping an image with an EVEN number of rows swaps the
+    CFA's row parity -- RGGB becomes GBRG -- because the new row 0 was the old
+    row H-1, which is odd. Getting the flip right and the pattern wrong would
+    trade an upside-down picture for a miscoloured one, so the parity shift is
+    returned with the data and added to the Bayer y-offset below.
+
+    Returns (data, what it did, the row-parity shift the flip introduced).
+    """
+    ro = str(hdr.get("ROWORDER", hdr.get("ROW_ORDER", "")) or "").strip().upper()
+    if ro.startswith("TOP"):          # already top-down; leave it alone
+        return data, "TOP-DOWN (ROWORDER)", 0
+    why = "BOTTOM-UP (ROWORDER)" if ro.startswith("BOTTOM") else \
+          "BOTTOM-UP (FITS default, no ROWORDER)"
+    return data[::-1].copy(), why, (data.shape[0] - 1) % 2
+
+
+# Where the parity shift rides from the reader to the Bayer code. Private, and
+# in the header dict so it cannot be separated from the data it belongs to.
+_YPAR = "_EFH_YPARITY"
+_ROW = "_EFH_ROWORDER"
+
+
 def read_fits(path):
-    """(data, header dict). astropy, then fitsio, then the built-in reader."""
+    """(data, header dict), the data top-down. See _orient."""
+    d, h = _read_fits_raw(path)
+    d, why, par = _orient(d, h)
+    h = dict(h)
+    h[_YPAR], h[_ROW] = par, why
+    return d, h
+
+
+def row_order(path):
+    """Which way up the file said it was; for the log."""
+    try:
+        return read_fits(path)[1].get(_ROW, "unknown")
+    except Exception:
+        return "unknown"
+
+
+def _read_fits_raw(path):
+    """(data, header dict), exactly as stored. astropy, fitsio, then built-in."""
     try:
         from astropy.io import fits as _af
         with _af.open(path, memmap=False) as hd:
@@ -156,7 +207,7 @@ def _first(hdr, *keys):
 
 def fits_exif(path):
     """(exposure_seconds, gain, timestamp) in the shape read_exif returns."""
-    _, hdr = read_fits(path)
+    _, hdr = _read_fits_raw(path)          # header only; no need to flip pixels
     return _exif_from_header(hdr, path)
 
 
@@ -238,7 +289,10 @@ class FitsFrame:
             if pat in ("RGGB", "BGGR", "GRBG", "GBRG"):
                 # Bayer origin offsets, if the writer records them
                 ox = int(_first(hdr, "XBAYROFF", "XBAYERPAT") or 0) % 2
-                oy = int(_first(hdr, "YBAYROFF", "YBAYERPAT") or 0) % 2
+                # + the parity the top-down flip introduced. Addition mod 2 is
+                # correct whichever direction each shift ran in.
+                oy = (int(_first(hdr, "YBAYROFF", "YBAYERPAT") or 0)
+                      + int(hdr.get(_YPAR, 0))) % 2
                 if ox or oy:
                     d = np.roll(np.roll(d, -oy, axis=0), -ox, axis=1)
                 # roll so the pattern starts on R, exactly as raw.py does

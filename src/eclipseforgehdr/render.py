@@ -152,7 +152,8 @@ class Layers:
         gate = np.load(os.path.join(wd, "prom.npy"))
         pelp = os.path.join(wd, "pellett.npy")
         pel = np.load(pelp) if os.path.exists(pelp) else np.full(lum.shape, 0.5, np.float32)
-        hdr = np.load(os.path.join(wd, "hdr_rgb.npy"), mmap_mode="r")
+        from .pipeline import load_big
+        hdr = load_big(os.path.join(wd, "hdr_rgb.npy"))
         Ls = ndimage.gaussian_filter(lum, 6)
         # Colour is only meaningful where something was actually detected.
         #

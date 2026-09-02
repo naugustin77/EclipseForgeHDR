@@ -171,6 +171,28 @@ def _timing_summary(progress, top=5, floor=1.0):
             "accounted_s": round(acc, 1)}
 
 
+def load_big(path):
+    """np.load, memory-mapped when the filesystem allows it.
+
+    mmap keeps a 45 Mpx three-channel float32 out of RAM, but it is not
+    universally available: on Windows, a file inside a OneDrive-synced folder
+    raises `[Errno 22] Invalid argument`. The first FITS tester hit exactly that
+    and lost the sky-gradient correction to it -- silently, because the caller
+    only reported that the step was skipped:
+
+        sky gradient removal skipped ([Errno 22] Invalid argument:
+        'C:\\Users\\...\\OneDrive\\Desktop\\...\\hdr_rgb.npy')
+
+    The same call sits in the contact-frame path and in the renderer, so one
+    cloud-synced folder could take out three unrelated features. Falling back to
+    a plain read costs memory and keeps the feature.
+    """
+    try:
+        return np.load(path, mmap_mode="r")
+    except (OSError, ValueError):
+        return np.load(path)
+
+
 def workdir(folder):
     d = os.path.join(folder, ".eclipseforgehdr")
     os.makedirs(d, exist_ok=True)
@@ -672,7 +694,7 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     hp = os.path.join(wd, "hdr_rgb.npy")
     if not os.path.exists(hp):
         return
-    hdr = np.load(hp, mmap_mode="r")
+    hdr = load_big(hp)
     H, W, _ = hdr.shape
     d = 6
     S = np.asarray(hdr[::d, ::d], np.float32)
@@ -890,6 +912,19 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
 
     progress.log(f"{len(secs)} exposure tiers: " +
                  ", ".join(f"{s:g}s x{len(tiers[s])}" for s in secs), 0.03)
+    # FITS is stored bottom-up and every other format is not, so say which way
+    # up these were read. The first FITS run came out mirrored and the log gave
+    # no hint why -- there was nothing about orientation in it at all.
+    try:
+        from .fits import is_fits as _isf, row_order as _row
+        if paths and _isf(paths[0]):
+            _ro = _row(paths[0])
+            stats["fits_row_order"] = _ro
+            progress.log(f"FITS row order: {_ro} — flipped to top-down"
+                         if not _ro.startswith("TOP") else
+                         f"FITS row order: {_ro} — used as stored", None)
+    except Exception:
+        pass
 
     # --- per-tier: decode, quality, intra-align, stack (half-res + full-res bayer) ---
     _edge = {}          # per tier: invalid border (top, bottom, left, right), full-res px
@@ -2319,7 +2354,7 @@ def prepare_contact(folder, raw_path, progress):
     top = np.percentile(lum, 99.9)
     disp = np.clip(rgb / max(top, 1e-6), 0, 1) ** (1 / 2.2)
     # match the composite frame size if the sensor crop differs slightly
-    Hc, Wc = np.load(os.path.join(wd, "hdr_lum.npy"), mmap_mode="r").shape
+    Hc, Wc = load_big(os.path.join(wd, "hdr_lum.npy")).shape
     out = np.zeros((Hc, Wc, 3), np.float32)
     out[:min(H, Hc), :min(W, Wc)] = disp[:min(H, Hc), :min(W, Wc)]
     np.save(os.path.join(wd, "contact_rgb.npy"), out.astype(np.float16))
