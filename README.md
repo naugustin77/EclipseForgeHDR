@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.15.3
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.16.1
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
@@ -408,13 +408,25 @@ respected.
 exposure tiers, so it cannot be guessed. `DATE-OBS`, `GAIN`, `PEDESTAL` and
 `SATURATE` are used when present.
 
-Two things to know. FITS headers carry no colour matrix and no white balance,
-so both are identity: a colour-camera frame comes out green-dominant as
-captured, and Warmth, Tint and Neutralise sky cast are the controls for that.
-Inventing a white balance would hide a colour error inside the photometry. And
-where no `SATURATE` keyword exists the saturation ceiling is recovered from the
-data — a real ceiling shows as a minority of pixels sharing the maximum — with
-the bit depth as a fallback; the run report says which was used.
+Three things to know. FITS headers carry no colour matrix and no white balance,
+so the frames stay in raw sensor colour through the merge — inventing one
+earlier would hide a colour error inside the photometry. A sensor is far more
+sensitive in green than in red, though, so raw-sensor white is not white, and
+left alone it comes out blue-cyan. The balance is therefore measured **after**
+the merge, from the inner corona: the K-corona is sunlight scattered off free
+electrons, and that scattering is wavelength-independent, so the inner corona
+carries the Sun's own spectrum. It is the one thing in the frame that is white
+by physics rather than by convention.
+
+FITS also cannot say which way up the camera was. `ROWORDER` describes row
+order, not camera rotation, and there is no orientation keyword in the format —
+so a portrait-shot bracket arrives on its side, and nothing in a corona can
+reveal that. Use **Orientation** with the export settings; it applies to the
+view and the export, costs no re-run and changes nothing in the report.
+
+And where no `SATURATE` keyword exists the saturation ceiling is recovered from
+the data — a real ceiling shows as a minority of pixels sharing the maximum —
+with the bit depth as a fallback; the run report says which was used.
 
 Reading needs no extra package: there is a built-in reader for plain
 uncompressed FITS, which is what cameras write. `astropy` is used automatically
