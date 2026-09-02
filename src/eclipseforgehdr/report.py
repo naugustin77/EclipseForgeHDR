@@ -204,6 +204,19 @@ def build(stats):
         A(f"alignment trim: {ac['top']}/{ac['bottom']} top/bottom, "
           f"{ac['left']}/{ac['right']} left/right removed — the border each "
           f"shift vacated; {ac['kept']} px kept")
+    _mw = stats.get("merge_weight") or {}
+    if _mw.get("alpha") is not None:
+        _al = float(_mw["alpha"])
+        if abs(_al - 1.0) < 1e-9:
+            A(f"merge weight : exposure exponent 1.00 (unchanged) — no tilt "
+              f"toward the short tiers measurably beat it")
+        else:
+            A(f"merge weight : exposure exponent {_al:.2f} — tilted toward the "
+              f"shorter, sharper tiers, {100 * _mw.get('gain_limb', 0):+.0f}% "
+              f"coherent detail at 1.02-1.12 R")
+            A(f"             : accepted only because the mid and outer shells "
+              f"kept their radial coherence; that guard is what separates "
+              f"detail from grain")
     _ish = [max(q.get("intra_shift_px") or [0]) for q in (stats.get("quality") or {}).values()]
     if _ish and max(_ish) > 0:
         A(f"frame motion : up to {max(_ish):.0f} px between frames within a tier "

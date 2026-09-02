@@ -581,6 +581,185 @@ def _moon_mask_helps(stacks_half, sat_half, secs, cal, abs_shift,
     return ok, info
 
 
+def _fine_structure(img, cy, cx, R, r0, r1):
+    """Radially-coherent azimuthal fine structure in a shell, as (amp, coh).
+
+    The point of splitting the two is that grain and corona both raise the
+    amplitude of a high-pass, and only one of them is worth having. Real
+    coronal structure is radially CONTINUOUS -- a streamer at 1.4 R is still
+    there at 1.41 R -- while photon noise is independent from one radial
+    sample to the next. So the correlation between adjacent radii separates
+    them, and amp * coh is the part that is signal.
+
+    Measured on the reference bracket, this is what says the four shortest
+    tiers hold real detail at the limb and nothing but noise further out:
+
+        shell          source        amp     coh     amp*coh
+        1.01-1.10 R    merged     0.0326   0.995      0.0325
+        1.01-1.10 R    short      0.2101   0.993      0.2086
+        1.30-1.80 R    merged     0.0212   0.976      0.0207
+        1.30-1.80 R    short      0.0576   0.186      0.0107
+        1.80-2.60 R    merged     0.0135   0.874      0.0118
+        1.80-2.60 R    short      0.1560   0.013      0.0020
+    """
+    # SAMPLE AT ONE PIXEL, NOT AT A FIXED COUNT.
+    #
+    # The coherence term only means anything if adjacent radial samples are
+    # independent in the data. A fixed nr over a narrow shell samples far finer
+    # than a pixel on a small disc -- 0.125 px at R=60 -- and then bilinear
+    # interpolation makes even white noise look perfectly correlated, so a
+    # noise-dominated merge scores as if it were full of structure. Caught by
+    # the trial's own test case: with the short tiers replaced by pure noise it
+    # reported "+174% at the limb" and would have tilted the merge toward them.
+    nr = int(np.clip(round((r1 - r0) * R), 8, 256))
+    na = int(np.clip(round(2 * np.pi * r1 * R), 256, 4096))
+    rr = np.linspace(r0 * R, r1 * R, nr)
+    th = np.linspace(0, 2 * np.pi, na, endpoint=False)
+    ys = cy + rr[None, :] * np.sin(th)[:, None]
+    xs = cx + rr[None, :] * np.cos(th)[:, None]
+    P = ndimage.map_coordinates(np.asarray(img, np.float32),
+                                [ys.ravel(), xs.ravel()], order=1).reshape(na, nr)
+    P = P / np.maximum(np.median(P, axis=0, keepdims=True), 1e-9)
+    # 2 degrees, expressed in samples, so the scale measured does not change
+    # with the disc size either
+    _sig = max(2.0, na * 2.0 / 360.0)
+    hp = P - ndimage.gaussian_filter1d(P, _sig, axis=0, mode="wrap")
+    amp = float(np.std(hp))
+    if not np.isfinite(amp) or amp <= 0:
+        return 0.0, 0.0
+    a, b = hp[:, :-1].ravel(), hp[:, 1:].ravel()
+    if a.size < 100 or np.std(a) <= 0 or np.std(b) <= 0:
+        return amp, 0.0
+    coh = float(np.corrcoef(a, b)[0, 1])
+    return amp, (coh if np.isfinite(coh) else 0.0)
+
+
+def _pick_weight_alpha(stacks_half, sat_half, secs, cal, abs_shift, track,
+                       Rmoon, progress, alphas=(1.0, 0.85, 0.7, 0.55)):
+    """Choose the exposure exponent in the merge weight, by measurement.
+
+    THE PROBLEM. The merge weights each tier by `s * saturation_rolloff`.
+    Weighting by exposure time is statistically optimal for PHOTON NOISE --
+    a tier that collected twice the photons deserves twice the say. It is not
+    optimal for RESOLUTION, because a long exposure beside a blindingly bright
+    edge is degraded by glare and bloom well before it hard-clips, and the
+    rolloff does not start until 0.87 of saturation. So at the limb the
+    picture goes to the longest not-quite-saturated tier, which is also the
+    most smeared one: on the reference bracket that is 67x more weight than
+    the sharpest tier carries.
+
+    Measured there, the four shortest tiers hold 1.9x more radially-coherent
+    fine structure at 1.01-1.10 R than the merge does -- all the way round the
+    disc, 1.38x in the quietest sector and 3.22x in the busiest. That is
+    detail the data contains and the picture does not.
+
+    THE KNOB. `w = s**alpha * rolloff`. alpha = 1 is what the merge has always
+    done; below 1 it tilts toward the shorter, sharper tiers. Dimensionless,
+    so a half-res trial transfers to the full-res merge exactly -- which a
+    knee expressed in raw ADU would not.
+
+    WHY IT IS GATED, NOT SET. The same measurement says a blanket tilt would
+    be a bad trade: beyond 1.3 R the short tiers are noise (coherence 0.19,
+    then 0.013), and giving them weight out there buys limb detail with
+    streamers. So the outer shells are guards -- an alpha that improves the
+    limb but costs more than 2% of the coherent structure at 1.3-1.8 R or
+    1.8-2.6 R does not win. alpha = 1.0 is the default and stays unless
+    something measurably beats it.
+
+    This is the harness 0.16.0 should have had: the merge is not changed on
+    an argument, it is changed on a number from the data in front of it.
+    """
+    if not track or Rmoon is None:
+        return 1.0, {"verdict": "no per-tier lunar track; left at 1.0"}
+    H, W = stacks_half[secs[0]].shape
+    yv = np.arange(H, dtype=np.float32)
+    xv = np.arange(W, dtype=np.float32)
+
+    def build(alpha):
+        acc = np.zeros((H, W), np.float32)
+        wsum = np.zeros((H, W), np.float32)
+        for s in secs:
+            a = stacks_half[s].astype(np.float32) / np.float32(s * cal[s])
+            ady, adx = abs_shift[s]
+            g = (~sat_half[s]).astype(np.float32)
+            a = ndimage.shift(a, (ady, adx), order=1, mode="nearest")
+            g = ndimage.shift(g, (ady, adx), order=1, mode="nearest", cval=0)
+            w = np.float32(s ** alpha) * ndimage.gaussian_filter(g, 10)
+            if s in track:
+                cyt, cxt, Rt = (v / 2.0 for v in track[s])
+                dt = np.hypot(yv[:, None] - cyt, xv[None, :] - cxt)
+                w = w * np.clip((dt - (Rt - 0.5)) / 2.0, 0.0, 1.0)
+            acc += w * a
+            wsum += w
+        return acc / np.maximum(wsum, 1e-9)
+
+    cy0 = float(np.median([track[s][0] for s in track])) / 2.0
+    cx0 = float(np.median([track[s][1] for s in track])) / 2.0
+    R0 = float(np.median([track[s][2] for s in track])) / 2.0
+    if not np.isfinite(R0) or R0 <= 4:
+        return 1.0, {"verdict": "lunar radius not usable; left at 1.0"}
+    SHELLS = ((1.02, 1.12, "limb"), (1.30, 1.80, "mid"), (1.80, 2.60, "outer"))
+    rows, base = {}, None
+    for al in alphas:
+        try:
+            m = np.clip(build(al), 0, None)
+            sc = {}
+            for r0, r1, nm in SHELLS:
+                if r1 * R0 > 0.48 * min(H, W):     # shell off the frame
+                    continue
+                sc[nm] = _fine_structure(m, cy0, cx0, R0, r0, r1)
+            del m
+        except Exception as e:
+            return 1.0, {"verdict": f"weight trial failed ({e}); left at 1.0"}
+        rows[al] = sc
+        if base is None:
+            base = sc
+    if "limb" not in base:
+        return 1.0, {"verdict": "limb shell not measurable; left at 1.0"}
+    # NO GUARD SHELL, NO CHANGE. On a tight crop -- a long lens filling the
+    # frame with the disc -- the mid and outer shells fall off the edge and are
+    # skipped, which would leave the limb score to win unopposed. Tilting the
+    # merge with nothing watching the outer field is exactly the trade this
+    # trial exists to refuse. Caught by its own test case: on a 120 px frame
+    # with R=100 it picked 0.55 on pure noise.
+    if not any(k in base for k in ("mid", "outer")):
+        return 1.0, {"verdict": "no outer shell in frame to guard with; "
+                                "left at 1.0"}
+    # THE GUARD IS COHERENCE, NOT A DROP IN THE SCORE.
+    #
+    # Giving weight to a noise-dominated tier RAISES amp in every shell, so a
+    # test that only asks "did any score fall" passes it happily -- the trial's
+    # own noise case scored +41% at the limb and would have been accepted.
+    # What noise cannot fake is radial continuity. Measured on that case, as
+    # alpha drops from 1.0 to 0.55 the coherence falls 0.933 -> 0.438 at the
+    # limb and 0.398 -> 0.225 in the mid field, monotonically, while in the
+    # genuine glare case it barely moves. So an alpha that costs more than 0.05
+    # of coherence anywhere is buying grain, not detail, and is refused.
+    _score = lambda sc, k: sc[k][0] * max(sc[k][1], 0.0)
+    best, best_gain = 1.0, 0.0
+    for al, sc in rows.items():
+        if al == 1.0 or "limb" not in sc:
+            continue
+        gain = _score(sc, "limb") / max(_score(base, "limb"), 1e-12) - 1.0
+        dcoh = max(base[k][1] - sc[k][1] for k in sc if k in base)
+        if gain > max(best_gain, 0.05) and dcoh <= 0.05:
+            best, best_gain = al, gain
+    info = {"alpha": best, "gain_limb": best_gain,
+            "scores": {str(a): {k: [round(v[0], 5), round(v[1], 3)]
+                                for k, v in sc.items()}
+                       for a, sc in rows.items()}}
+    _fmt = "  ".join(
+        f"a={a:.2f}:" + "/".join(f"{sc[k][0] * max(sc[k][1], 0):.4f}"
+                                 for k in ("limb", "mid", "outer") if k in sc)
+        for a, sc in rows.items())
+    progress.log(f"merge weight trial (coherent detail limb/mid/outer): {_fmt} "
+                 f"-> exposure exponent {best:.2f}"
+                 + (f", {100 * best_gain:+.0f}% at the limb" if best != 1.0
+                    else " (unchanged — nothing beat it without costing the outer field)"),
+                 None)
+    return best, info
+
+
 def tier_headroom(wb, cam2rgb):
     """Largest output value a raw pixel at saturation can reach, in sat units.
 
@@ -1052,6 +1231,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
 
     # --- per-tier: decode, quality, intra-align, stack (half-res + full-res bayer) ---
     _edge = {}          # per tier: invalid border (top, bottom, left, right), full-res px
+    # Exposure exponent in the merge weight. 1.0 is the historical behaviour and
+    # stays unless _pick_weight_alpha measures something better on this data.
+    _walpha = 1.0
     sat_half = {}
     stacks_half = {}
     stacks_bayer = {}
@@ -1828,6 +2010,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             progress.log(f"moon-mask trial skipped ({e})", None)
         if not use_moon_mask:
             Rmoon = None
+        # ...and, with the same half-res merges, how hard the long tiers should
+        # be allowed to outvote the short ones. See _pick_weight_alpha.
+        try:
+            _walpha, _winfo = _pick_weight_alpha(
+                stacks_half, sat_half, secs, cal, abs_shift, track, Rmoon,
+                progress)
+            stats["merge_weight"] = _winfo
+        except Exception as e:
+            progress.log(f"merge weight trial skipped ({e})", None)
 
     # --- full-res merge ---
     wb = np.asarray(color_info["wb"], np.float32)
@@ -1924,7 +2115,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         wsat = 0.5 * (1.0 + np.tanh((knee - cmax) / (0.06 * sat_level)))
         wsat[cmax > 0.97 * sat_level] = 0.0
         wsat = ndimage.shift(wsat, (ady, adx), order=1, mode="nearest", cval=0)
-        w = np.float32(s) * ndimage.gaussian_filter(wsat, _feather)
+        # s**alpha, not s: alpha is 1.0 unless the trial above measured that
+        # tilting toward the shorter, sharper tiers buys limb detail without
+        # costing the outer field. See _pick_weight_alpha.
+        w = np.float32(s ** _walpha) * ndimage.gaussian_filter(wsat, _feather)
         mw = moon_weight(s)
         if mw is not None:
             w *= mw

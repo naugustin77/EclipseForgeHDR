@@ -5,6 +5,80 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.17.0 — Letting the data say how much the short exposures are worth
+
+Nico: "All the detail is in the short exposures. So it is there but somehow got
+lost. Is there a way of weighting the short exposures against the longer ones?"
+
+Measured on his own run, comparing `short_lum` (the four shortest tiers) with
+the merged HDR, radial profile divided out, and separating structure from grain
+by radial coherence -- real corona is continuous from one radius to the next,
+photon noise is not:
+
+    shell          source        amp     coh    amp*coh
+    1.01-1.10 R    merged     0.0326   0.995     0.0325
+    1.01-1.10 R    short      0.2101   0.993     0.2086
+    1.30-1.80 R    merged     0.0212   0.976     0.0207
+    1.30-1.80 R    short      0.0576   0.186     0.0107
+    1.80-2.60 R    merged     0.0135   0.874     0.0118
+    1.80-2.60 R    short      0.1560   0.013     0.0020
+
+He was right about the limb: 1.9x more coherent fine structure in the short
+tiers, all the way round the disc -- 1.38x in the quietest sector, 3.22x in the
+busiest -- and coherence 0.993 says it is structure, not grain. And he was
+right that the merge loses it. `w = s * rolloff` weights by exposure time,
+which is optimal for photon noise and blind to the fact that a long exposure
+beside a blindingly bright edge is glare-smeared long before it clips. At the
+limb the longest not-quite-saturated tier carries 67x the weight of the
+sharpest one.
+
+He was NOT right about the streamers, and the same table says so: beyond 1.3 R
+the short tiers are noise (coherence 0.186, then 0.013). Nothing to recover
+there, and a blanket tilt would trade streamers for chromosphere. Also
+measured, and also worth knowing: the a-trous denoise is innocent of the
+streamer question. Coherent structure retained is 99.9% at 1.1-1.3 R, 100.7% at
+1.3-1.8 R, and 107.4% at 1.8-2.6 R -- out there it IMPROVES the ratio by
+stripping incoherent grain. So more MGN or NAFE knobs would not have found
+anything.
+
+**So the merge now has one dimensionless knob, `w = s**alpha * rolloff`, and a
+trial that sets it by measurement.** Four alphas, half-res merges, seconds --
+the same pattern `_moon_mask_helps` has used since 0.8. alpha = 1.0 is the
+historical behaviour and the default; nothing else is used unless it wins.
+
+**The guard is coherence, not score.** This is the part worth keeping. Giving
+weight to a noise-dominated tier RAISES the amplitude in every shell, so a test
+that asks "did any score drop" waves it through -- the trial's own noise case
+scored +41% at the limb. What noise cannot fake is radial continuity: as alpha
+falls from 1.0 to 0.55 on that case, coherence goes 0.933 -> 0.438 at the limb
+and 0.398 -> 0.225 in the mid field, monotonically, while in the genuine glare
+case it barely moves. So an alpha costing more than 0.05 of coherence anywhere
+is buying grain and is refused.
+
+Seven cases, all passing, and two of them were found failing first:
+
+    glare-smeared long tiers            -> tilts to 0.70, +25% at the limb
+    every tier equally sharp            -> stays at 1.00
+    short tiers replaced by pure noise  -> refused  (failed first: chose 0.55)
+    no lunar track                      -> stays at 1.00
+    two-tier bracket                    -> stays at 1.00
+    shells off the frame                -> refused  (failed first: chose 0.55)
+    alpha 1.0 vs the old code           -> bit-identical over all 14 tiers
+
+The off-frame case matters for exactly the range Nico is worried about: a long
+lens filling the frame with the disc leaves no outer shell to guard with, and
+tilting the merge with nothing watching the outer field is the trade this trial
+exists to refuse. It now declines rather than deciding blind.
+
+The fine-structure metric also had to learn to sample at one pixel rather than
+a fixed count -- over a narrow shell on a small disc a fixed nr samples at
+0.125 px, and bilinear interpolation then makes white noise look perfectly
+coherent. That is what let the noise case through the first time.
+
+This is the harness 0.16.0 should have had. The merge is not changed on an
+argument; it is changed on a number taken from the data in front of it, with a
+guard that refuses the trade when the number is grain.
+
 ## 0.16.3 — The disc mask was measuring the corona, not the Moon
 
 Both testers reported losing prominences, the largest one included. On the
