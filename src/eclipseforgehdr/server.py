@@ -7,7 +7,7 @@ from PIL import Image
 
 from .pipeline import (run as run_pipeline, Progress, workdir,
                        input_fingerprint as _input_fingerprint)
-from .render import Layers, render, export, DEFAULTS
+from .render import Layers, render, export, defaults_for
 
 app = Flask(__name__)
 STATE = {"folder": None, "progress": None, "layers": None, "thread": None}
@@ -320,7 +320,8 @@ def get_geometry():
     cy, cx, R = ly.geometry(ly.prev_decim)
     h, w = ly.prev["bg"].shape
     return jsonify({"ok": True, "W": w, "H": h, "cy": cy, "cx": cx, "R": R,
-                    "defaults": DEFAULTS, "version": __version__,
+                    "defaults": defaults_for(getattr(ly, "mode", None)),
+                    "version": __version__,
                     "Rmask": ly.mask_radius(ly.prev_decim),
                     "limbProf": ([float(x) / ly.prev_decim for x in ly.limb_prof]
                                  if ly.limb_prof else None),

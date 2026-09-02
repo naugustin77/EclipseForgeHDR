@@ -225,7 +225,45 @@ def run(folder, image_path, progress, denoise="fine", assume=None):
         if os.path.exists(p):
             os.remove(p)
 
-    margin = max(4.0, 0.042 * R)
+    # DISC MASK: measure the limb ramp, do not guess it.
+    #
+    # This was a blind max(4.0, 0.042 * R) -- 22.0 px on a 524 px disc, with no
+    # reference to the image. The stacking path stopped guessing in 0.13: it
+    # measures the 20-80% brightness transition and covers THAT, because the
+    # thing the mask has to hide is the half-lit lunar edge, and how wide that
+    # is depends on registration and seeing, not on the disc's size.
+    #
+    # An import has a better limb than a stack, not a worse one -- somebody
+    # already registered and merged it -- so the blind rule was backwards.
+    # Measured on Val Italo's stack (R = 523.8 px, fit rms 2.34 px): the
+    # transition is 11.0 px wide at the 90th percentile, so the measured rule
+    # asks for 9.9 px and the blind one took 22.0. Those extra 12 px are a ring
+    # right where prominences live, at 1.83 arcsec/px about 22 arcsec of it.
+    #
+    # Same rule as the stack path, with a 4 px floor rather than its 1.5: on
+    # this path there is no per-tier registration report to say the limb is as
+    # clean as it looks.
+    ramp = 0.0
+    try:
+        from . import align
+        _lw = align.limb_transition_width(np.clip(lum[::2, ::2], 0, None),
+                                          cy / 2, cx / 2, R / 2)
+        if _lw:
+            ramp = 2.0 * float(_lw["limb_width_p90"])
+    except Exception as _e:
+        progress.log(f"limb ramp not measurable ({_e}); disc mask falls back to "
+                     f"a fraction of the radius", None)
+    if ramp > 0:
+        margin = float(np.clip(max(0.8 * rms, 0.9 * ramp), 4.0, 0.08 * R))
+        progress.log(f"limb 20-80% transition {ramp:.0f}px (p90) -> disc mask "
+                     f"margin {margin:.1f}px", None)
+    else:
+        margin = max(4.0, 0.042 * R)
+        progress.log(f"limb ramp not measurable; disc mask margin "
+                     f"{margin:.1f}px from the radius", None)
+    stats["geometry"]["Rmask"] = float(R + margin)
+    stats["geometry"]["limb_margin"] = float(margin)
+    stats["geometry"]["limb_ramp_px"] = float(ramp) or None
     json.dump({"cy": cy, "cx": cx, "R": R, "Rmask": R + margin,
                "limb_margin": margin,
                "limb_prof": [float(x) for x in prof] if prof is not None else None,

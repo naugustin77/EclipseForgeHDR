@@ -246,6 +246,22 @@ def find_disc(lum, target=520.0):
     L = np.log(np.maximum(s - lo, span * 1e-4) + span * 1e-4)
     gy, gx = np.gradient(L)
     g = np.hypot(gy, gx)
+
+    # ...but relative contrast has unbounded variance as the signal goes to
+    # zero, and `lo` is the 1st percentile of the WHOLE FRAME. When the disc is
+    # darker than the sky and covers more than 1% of the picture -- true of any
+    # imported stack whose sky sits well above black -- p1 lands INSIDE the
+    # disc, so the flooring never flattens it and the shadow's own noise
+    # becomes the strongest edge in the image. Measured on the first imported
+    # stack that failed: the disc interior sat 23 units above the floor against
+    # 2892 at the limb, yet produced 4548 strong-gradient pixels to the limb's
+    # 2092, and the circle fit collapsed to R=37px on a 500px disc.
+    #
+    # So require SIGNAL as well as contrast: an edge means nothing where there
+    # is no light on either side of it. This leaves a bright limb untouched
+    # (weight 0.97 there) and takes the dark shadow's noise down fivefold.
+    g *= (np.maximum(s - lo, 0.0) /
+          (np.maximum(s - lo, 0.0) + 0.002 * span)).astype(np.float32)
     hs, ws = s.shape
 
     # Start from a wide bright mask -- not the extreme tail. Measured across the

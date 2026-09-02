@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.15.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.15.3
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait
@@ -260,6 +260,19 @@ Alternative — Homebrew, from the clone:
     ECLIPSEFORGE_SRC=$PWD brew install --formula ./formula/eclipseforgehdr.rb
 
 Either way you get `eclipseforgehdr` (and the short alias `efhdr`) on PATH.
+
+**Windows: if the first raw file fails with `DLL load failed while importing
+_rawpy`**, rawpy's compiled part cannot load. Two causes, both with simple
+fixes, and the app now names whichever applies:
+
+- The **Microsoft Visual C++ Redistributable** is missing — a fresh Windows
+  does not have it. Install
+  [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe), reboot.
+- You installed the **ARM64** build of Python (Windows on ARM, e.g. a VM on an
+  Apple-silicon Mac). rawpy publishes no ARM64 wheel, so it can never load.
+  Install the x86-64 Python from python.org instead — Windows on ARM runs it
+  under emulation — and reinstall. FITS input needs no rawpy and works either
+  way.
 
 Raw decoding uses rawpy (bundled LibRaw). If your camera is newer than the
 bundled LibRaw, install will still succeed but decoding may fail — then install

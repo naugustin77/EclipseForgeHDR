@@ -88,11 +88,46 @@ def read_exif(path):
     return sec, iso, ts
 
 
+def _rawpy_help(err):
+    """Turn rawpy's import failure into something a user can act on.
+
+    rawpy is a compiled extension, and when it will not load, Windows says
+    only `DLL load failed while importing _rawpy: The specified module could
+    not be found.` -- which names neither the missing thing nor the fix. Both
+    known causes have simple answers, and neither is guessable from that line.
+    """
+    import platform
+    msg = [f"the raw decoder (rawpy) could not be loaded: {err}", ""]
+    if os.name == "nt":
+        if platform.machine().upper() in ("ARM64", "AARCH64"):
+            msg += [
+                "This Python is the ARM64 build of Windows Python, and rawpy",
+                "publishes no ARM64 wheel -- so it can never load here. Install",
+                "the x86-64 build of Python from python.org instead (Windows",
+                "on ARM runs it under emulation), then reinstall this app.",
+            ]
+        else:
+            msg += [
+                "On Windows this is nearly always the missing Microsoft Visual",
+                "C++ Redistributable, which rawpy's compiled part needs and a",
+                "fresh Windows does not have. Install it from",
+                "  https://aka.ms/vs/17/release/vc_redist.x64.exe",
+                "reboot, and try again.",
+            ]
+    else:
+        msg += ["Reinstalling the app usually rebuilds it: pipx install --force ."]
+    msg += ["", "FITS input does not use rawpy and still works."]
+    return "\n".join(msg)
+
+
 class RawFile:
     """Decoded bayer data normalized to RGGB layout, plus color info."""
 
     def __init__(self, path):
-        import rawpy
+        try:
+            import rawpy
+        except ImportError as e:
+            raise ImportError(_rawpy_help(e)) from None
         self.path = path
         with rawpy.imread(path) as raw:
             bayer = raw.raw_image_visible.astype(np.float32)

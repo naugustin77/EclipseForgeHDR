@@ -275,6 +275,19 @@ def build(stats):
         A(f"prominences  : corona colour R/GB = {p.get('med_red', 0):.2f}, "
           f"gate threshold {p.get('t0', 0):.2f}-{p.get('t1', 0):.2f}, "
           f"{p.get('area_px', 0)} px flagged")
+        # Flagged and visible are different numbers, and the difference is the
+        # answer to "where are my prominences?". Only said when it matters.
+        _vis = p.get("area_visible_px")
+        if _vis is not None and _vis < p.get("area_px", 0):
+            if _vis == 0:
+                A(f"             : none of it outside the disc mask — the gate "
+                  f"found redness only at or inside the limb, so the "
+                  f"prominence slider has nothing to act on. Prominences may "
+                  f"still be visible as brightness; this layer only adds the "
+                  f"ones it can identify by colour")
+            else:
+                A(f"             : {_vis} px of that outside the disc mask; the "
+                  f"rest sits under it and does not reach the picture")
 
     A("")
     A("PROCESSING")

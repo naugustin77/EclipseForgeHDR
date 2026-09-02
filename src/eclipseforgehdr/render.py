@@ -19,6 +19,36 @@ DEFAULTS = {
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
 }
 
+# An IMPORTED image has already been through somebody's colour management --
+# that is what makes it an import rather than a stack -- so `temp` and `tint`
+# start neutral there.
+#
+# WHY: on the raw path the merge applies the camera's daylight white balance
+# and colour matrix, and 0.9/1.205 is the by-eye correction that sat on top of
+# THAT, for THAT camera, under a sun 7 degrees up. It is a taste call about one
+# specific pipeline, not a property of coronae. Applied a second time to a file
+# that is already balanced it is simply a tint.
+#
+# MEASURED on Val Italo's 16-bit sRGB stack (4680x3132), median chroma
+# normalised to unit luminance, source against the rendered composite:
+#
+#                       source           as shipped        temp/tint 1.0
+#   limb  1.02-1.15 R   1.058 .990 .925  0.832 1.062 .885  1.046 .996 .901
+#   inner 1.15-1.5  R   1.088 .985 .889  0.853 1.058 .853  1.074 .991 .868
+#   mid   1.5 -2.5  R   1.155 .973 .811  0.902 1.050 .791  1.133 .980 .803
+#
+# Green becomes the strongest channel in every shell -- the teal cast he
+# reported. Neutral reproduces the source to within 2%, the remainder being
+# `bgNeutral` (1.5%). The per-channel sky-gradient division, the other
+# suspect, was measured on the same file at 0.1% or less: its tilt is +89 deg,
+# so it cancels in a radial median.
+IMPORT_DEFAULTS = dict(DEFAULTS, temp=1.0, tint=1.0)
+
+
+def defaults_for(mode):
+    """Slider starting points for a workdir built by `mode` ('import' or not)."""
+    return IMPORT_DEFAULTS if mode == "import" else DEFAULTS
+
 
 
 def _fill_disc(a, cy, cx, Rm):
@@ -56,6 +86,13 @@ class Layers:
 
     def __init__(self, wd, preview_decim=4):
         self.wd = wd
+        # How these products were built. Only the colour defaults read it, but
+        # they have to: an import is already white-balanced (see IMPORT_DEFAULTS).
+        self.mode = None
+        try:
+            self.mode = json.load(open(os.path.join(wd, "opts.json"))).get("mode")
+        except Exception:
+            pass
         geo = json.load(open(os.path.join(wd, "geometry.json")))
         self.cy, self.cx, self.R = geo["cy"], geo["cx"], geo["R"]
         self.Rmask = float(geo.get("Rmask", self.R + 4.0))
@@ -380,7 +417,7 @@ def _detail_layers(src, P, preview=True):
 
 
 def render(layers: Layers, params, preview=False, view="composite"):
-    P = dict(DEFAULTS); P.update(params or {})
+    P = dict(defaults_for(getattr(layers, "mode", None))); P.update(params or {})
     src = layers.prev if preview else layers.full
     decim = layers.prev_decim if preview else 1
     cy, cx, R = layers.geometry(decim)

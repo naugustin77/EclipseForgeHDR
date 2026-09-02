@@ -5,6 +5,166 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.15.5 — The report was right and still misleading
+
+0.15.4's new prominence line reads "none of it outside the disc mask ... so
+nothing reaches the picture". On the run that prompted it, a prominence then
+appeared in the composite that had not been there before. Both facts are true
+and the sentence was still wrong.
+
+The mask covers everything, not just gate signal. Measured on the 12 px of
+annulus 0.15.4 stopped covering, in the sector where the H-alpha excess sits:
+
+    median luminance, 160-200 deg      55253
+    median luminance, everywhere else  43950
+    excess in that sector              1.26x
+
+That 26% is prominence LIGHT, and uncovering it is what put the prominence on
+screen. The gate contributed nothing — it flagged 0 px there, exactly as
+reported. So the line now says what is actually true of the gate, and says that
+prominences can be visible without it:
+
+    prominences  : corona colour R/GB = 1.11, gate threshold 1.35-1.88, 60 px flagged
+                 : none of it outside the disc mask - the gate found redness only
+                   at or inside the limb, so the prominence slider has nothing to
+                   act on. Prominences may still be visible as brightness; this
+                   layer only adds the ones it can identify by colour
+
+Report text only. 0.15.4's cached products are reused — nothing that writes into
+the work directory changed.
+
+## 0.15.4 — Three things the import path was doing to somebody else's colour
+
+An imported HDR came back green. Val Italo's 16-bit sRGB stack ran end to end on
+0.15.3 and the composite arrived with a teal cast that is not in the file.
+
+**The colour.** Three suspects, measured on that file rather than argued about.
+Median chroma, normalised to unit luminance:
+
+                       source           as shipped        temp/tint 1.0
+    limb  1.02-1.15 R  1.058 .990 .925  0.832 1.062 .885  1.046 .996 .901
+    inner 1.15-1.5  R  1.088 .985 .889  0.853 1.058 .853  1.074 .991 .868
+    mid   1.5 -2.5  R  1.155 .973 .811  0.902 1.050 .791  1.133 .980 .803
+
+The per-channel sky-gradient division was the obvious suspect and is innocent:
+its tilt is +89 deg, so it cancels in a radial median and moves the corona's
+colour by 0.1% or less. `bgNeutral` accounts for 1.5%. The whole of the rest is
+`temp` 0.9 and `tint` 1.205 — 21% off red and 6% onto green once the renderer
+renormalises to unit luminance, which turns a source corona that is warm in
+every shell into one where green is the strongest channel.
+
+Those two numbers are a by-eye correction that sat on top of the camera's
+daylight white balance and colour matrix, for one camera, under a sun 7 degrees
+up. They are a taste call about the RAW path, not a property of coronae — and an
+imported image has already been through somebody's colour management, which is
+what makes it an import. So `temp` and `tint` now start at 1.0 for an import and
+are untouched for a stack. Neutral reproduces the source to within 2%.
+
+The RAW path renders bit-for-bit identically: verified by rendering the same
+layers with the mode marker removed and differencing (max |diff| 0.0).
+
+**The disc mask, on the import path, was guessed.** It was
+`max(4.0, 0.042 * R)` — 22.0 px on a 524 px Moon, with no reference to the
+image. The stacking path stopped guessing in 0.13: it measures the 20-80%
+brightness transition and covers that, because what the mask has to hide is the
+half-lit lunar edge, and how wide that is depends on registration and seeing,
+not on the disc's size. An import has a *better* limb than a stack, not a worse
+one, so the blind rule was backwards. Measured on Val's file the transition is
+11.0 px at the 90th percentile, so the same rule the stack uses asks for 9.9 px
+where the blind one took 22.0. That is a 12 px ring around the whole limb, about
+22 arcsec at his 1.83 arcsec/px, that was being covered for no reason.
+
+**And the report was lying about it.** `stats["geometry"]` on the import path
+never carried `Rmask`, so the report fell back to `R` and printed `disc mask at
+R+0.0 px` on every import ever run, while the mask was actually at R+22.0.
+
+**Where are my prominences?** Not fixed by any of the above, and the honest
+answer is measurable. On Val's file the gate flags 60 px and every one of them
+lies between 0.97 and 1.01 R — at or inside the limb, under the mask, invisible.
+Beyond 1.02 R the highest R/(G+B)/2 anywhere out to 1.3 R is 1.33 against a 1.35
+threshold: there is no H-alpha excess left in that file to find.
+
+That is the gate reading the file correctly rather than misfiring, and the file
+says so itself. It carries its Siril header in the TIFF's ImageDescription: 327
+frames stacked in Siril 1.4.4, then Background neutralization, Color
+Calibration, two GHS stretches (pivot 0.001 amount 145.65, and pivot 0.079
+amount 7.57), two background subtractions, and SCNR average-neutral at amount
+1.00 — a full-strength green subtraction. What arrives at the import is a
+finished picture, and a finished picture no longer carries the chromosphere's
+colour separately from the corona's. Lowering the threshold would gate on noise.
+So the report says what happened instead of implying 60 prominences he cannot
+see:
+
+    prominences  : corona colour R/GB = 1.11, gate threshold 1.35-1.88, 60 px flagged
+                 : none of it outside the disc mask - the gate found redness only
+                   at or inside the limb, so nothing reaches the picture
+
+**The linearity survived, and that was worth checking.** A history with two GHS
+stretches in it is exactly the case the import path warns about, since MGN,
+FNRGF and NAFE all assume the value is proportional to coronal brightness. It
+holds anyway. Log-log corona falloff over 1.1–2.4 R, measured on the file:
+
+    as stored, treated as linear        -1.52     (reference at display gamma: -1.72)
+    after the ICC sRGB inversion        -3.19     (reference scene-linear:     -3.38)
+
+So reading the transfer function out of the embedded profile, rather than
+guessing it, put this file within 6% of the reference slope — and had it been
+taken at face value it would have been off by a factor of two. Nothing is
+clipped at either end either: 0.000% of pixels at zero, 0.000% at saturation.
+
+Cached products from 0.15.3 are not reused: the disc-mask margin is written into
+`geometry.json` and every detail layer is built against it.
+
+## 0.15.3 — Disc detection outvoted by noise in the Moon's shadow
+
+An imported stack failed with "could not find the lunar limb in this image" on
+two different machines. It was not failing to find a disc — it was finding a
+37 px one on a 500 px Moon.
+
+`find_disc` works on the gradient of the LOG of the image, deliberately: a
+relative-contrast measure is independent of exposure, of units and of the sky
+level, which is what lets one detector work from a 42 px disc to a 420 px one.
+But relative contrast has unbounded variance as the signal approaches zero, and
+the floor that is supposed to protect against that was the **1st percentile of
+the whole frame**. When the disc is darker than the sky and covers more than 1%
+of the picture — true of any stack whose sky sits well above black — that
+percentile lands *inside the disc*, the flooring never flattens it, and the
+shadow's own noise becomes the strongest edge in the image:
+
+| region | value above the floor | median &#124;∇log&#124; |
+|---|---:|---:|
+| inside the disc | 23 | 0.059 |
+| at the limb | 2892 | 0.504 |
+| sky | 1447 | 0.011 |
+
+42% of the disc's interior pixels cleared the detector's own strong-gradient
+threshold, giving **4548 votes inside the shadow against 2092 on the limb** —
+so the circle fit collapsed inward.
+
+The fix asks for signal as well as contrast: an edge means nothing where there
+is no light on either side of it. The gradient is now weighted by
+`(s−lo)/(s−lo + 0.002·span)`, which is 0.97 at the limb and 0.19 in the shadow.
+
+| | before | after |
+|---|---|---|
+| the failing stack | no disc found (R=37 px) | centre (1523,2390) R=524 px, **720/720 rays, rms 2.34 px** |
+| synthetic sweep, R/short 0.030–0.300 | all pass | all pass, unchanged |
+
+The whole import now runs through to a finished set of layers.
+
+## 0.15.2 — `DLL load failed while importing _rawpy` now says what to do
+
+Windows reports a compiled extension that will not load as `DLL load failed
+while importing _rawpy: The specified module could not be found.` — naming
+neither the missing thing nor the fix. Both known causes have one-line answers
+and neither is guessable from that message, so the app now detects which
+applies and says so: the missing Microsoft Visual C++ Redistributable (absent
+from a fresh Windows), or an ARM64 Python, for which rawpy publishes no wheel
+at all. Both are also in the README's install section now.
+
+Found by trying to run it in a Windows VM on an Apple-silicon Mac, which hit
+the second one.
+
 ## 0.15.1 — Browse buttons, so nobody has to type a path
 
 Every field that wants a location now has a **Browse…** next to it: the raw

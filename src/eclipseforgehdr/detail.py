@@ -766,6 +766,23 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
             progress.log("prominence colour: not enough limb samples", None)
     if "prom" in lstats:
         lstats["prom"]["area_px"] = int((gate > 0.3).sum())
+        # ...and how much of it survives the disc mask. A prominence flagged
+        # UNDER the mask contributes nothing to the picture, so a report that
+        # counts it is telling the user they have prominences they cannot see.
+        # Measured on an imported HDR (Val Italo's Siril stack of 327 frames):
+        # 60 px flagged, every one of them between 0.97 and 1.01 R -- at or
+        # inside the limb -- and 0 px visible. Beyond 1.02 R the highest
+        # R/(G+B)/2 anywhere out to 1.3 R is 1.33 against a 1.35 threshold, so
+        # there is no H-alpha excess left in that file to find.
+        #
+        # That is the gate reporting the file correctly, not misfiring. The
+        # file's own embedded header says why it could not be otherwise: two
+        # GHS stretches (amount 145.65 and 7.57) and an SCNR green subtraction
+        # at full strength, all applied before export. What reaches the import
+        # is a picture, and a picture no longer carries the chromosphere's
+        # colour separately from the corona's. Lowering the threshold would
+        # gate on noise; the report should say what happened instead.
+        lstats["prom"]["area_visible_px"] = int(((gate > 0.3) & ~disc_m).sum())
     np.save(os.path.join(wd, "prom.npy"), gate.astype(np.float32))
     del gate, Ls
 
