@@ -174,18 +174,31 @@ def _timing_summary(progress, top=5, floor=1.0):
 def load_big(path):
     """np.load, memory-mapped when the filesystem allows it.
 
-    mmap keeps a 45 Mpx three-channel float32 out of RAM, but it is not
-    universally available: on Windows, a file inside a OneDrive-synced folder
-    raises `[Errno 22] Invalid argument`. The first FITS tester hit exactly that
-    and lost the sky-gradient correction to it -- silently, because the caller
-    only reported that the step was skipped:
+    mmap keeps a 45 Mpx three-channel float32 out of RAM, and a plain read is
+    the fallback when a filesystem will not map -- network drives and some
+    exotic mounts genuinely refuse.
+
+    WHAT THIS WAS ORIGINALLY WRITTEN FOR, AND WHY THAT WAS WRONG. A Windows
+    tester reported
 
         sky gradient removal skipped ([Errno 22] Invalid argument:
         'C:\\Users\\...\\OneDrive\\Desktop\\...\\hdr_rgb.npy')
 
-    The same call sits in the contact-frame path and in the renderer, so one
-    cloud-synced folder could take out three unrelated features. Falling back to
-    a plain read costs memory and keeps the feature.
+    and the OneDrive in that path was taken as the cause -- cloud-synced folders
+    are known to refuse mmap. Two things later showed that was a coincidence.
+    The folder was named that way but was an ordinary local one, not synced at
+    all. And this fallback was already shipping when a second Windows run
+    produced the same Errno 22 on a path with no OneDrive in it, which on its
+    own rules out the load: if opening the map were what failed, the except
+    below would have caught it.
+
+    The real fault was at the other end of the same file -- `np.save` over a
+    mapping still held open, which Windows refuses and POSIX allows. It is
+    fixed where it happens, in `remove_sky_gradient` and
+    `neutralise_corona_colour`. This function is kept because the fallback is
+    cheap insurance for filesystems that really cannot map, but it never fixed
+    the bug it was written for, and one folder's name is not evidence about the
+    folder.
     """
     try:
         return np.load(path, mmap_mode="r")
@@ -714,6 +727,23 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     H, W, _ = hdr.shape
     d = 6
     S = np.asarray(hdr[::d, ::d], np.float32)
+    # RELEASE THE MAP BEFORE THE WRITE (Windows).
+    #
+    # `S` is a copy, so `hdr` has no reader left -- but on Windows an open
+    # memory mapping LOCKS the file, and the np.save at the end of this function
+    # then fails with [Errno 22] Invalid argument on the very path it is trying
+    # to write. POSIX allows overwriting a mapped file, which is why this never
+    # showed up on macOS. Reported from a Windows run as
+    #
+    #     sky gradient removal skipped ([Errno 22] Invalid argument:
+    #     'C:\\Users\\...\\.eclipseforgehdr\\hdr_rgb.npy')
+    #
+    # An earlier report of the same error was blamed on OneDrive refusing to
+    # memory-map, because the path had OneDrive in it. It was a local folder
+    # that merely happened to be named that way, and `load_big`'s fallback --
+    # written for that theory -- was already shipping when this one arrived. So
+    # the failure was never in OPENING the map. It is in closing it.
+    del hdr
     h, w, _ = S.shape
     yy = np.arange(h, dtype=np.float32)[:, None] - cy / d
     xx = np.arange(w, dtype=np.float32)[None, :] - cx / d
@@ -818,6 +848,84 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
                  f"G {np.exp(spans[1]):.3f}x B {np.exp(spans[2]):.3f}x across the "
                  f"frame ({'quadratic' if quad else 'plane'}, tilt {ang:+.0f} deg), "
                  f"fitted beyond {r_fit:.1f} R ({sig:.0f} sigma)", None)
+
+
+def neutralise_corona_colour(wd, cy, cx, R, stats, progress):
+    """White-balance a stack that arrived without a camera white balance.
+
+    WHY IT IS NEEDED. `RawFile` gets `daylight_whitebalance` and a colour matrix
+    from LibRaw. `FitsFrame` and `TiffFrame` have neither -- no FITS convention
+    carries them -- so both fall back to wb (1,1,1) and cam2rgb = identity, and
+    the merge comes out in RAW SENSOR RGB. A silicon sensor under a CFA is far
+    more sensitive in green than in red, so raw-sensor white is not white: on a
+    25-tier FITS bracket the corona measured R/((G+B)/2) = 0.56 where a
+    colour-managed stack of the same corona reads 1.11, and the picture had a
+    blue-cyan rim around the Moon on a brown sky. It also puts the prominence
+    gate's reference colour in the wrong place, which is why that run flagged
+    nothing.
+
+    WHY THE CORONA IS A LEGITIMATE WHITE REFERENCE, and this is not a taste
+    call: the K-corona is photospheric light Thomson-scattered off free
+    electrons. Thomson scattering is wavelength-independent, so the inner
+    corona has the SUN's spectrum -- it is the one thing in the frame that is
+    white by physics rather than by convention. The dusty F-corona is redder and
+    takes over further out, so the reference is taken close in, at 1.05-1.6 R,
+    and the outward reddening the file actually contains is left alone.
+
+    ONLY when there was no camera white balance to use. A raw bracket keeps the
+    body's own numbers; this never runs for it.
+    """
+    hp = os.path.join(wd, "hdr_rgb.npy")
+    if not os.path.exists(hp):
+        return
+    a = load_big(hp)
+    H, W, _ = a.shape
+    # Decimate against the DISC, not by a fixed factor. A fixed d=4 leaves a
+    # 40 px moon with ~460 px in the reference annulus and the measurement is
+    # abandoned; scaling with R keeps roughly 13k-20k px whether the disc is
+    # 100 px across or 1000, which is the range these brackets actually span
+    # (a 200 mm frame gives R=108 px, a 1000 mm one R=524).
+    d = int(np.clip(round(R / 50.0), 1, 8))
+    S = np.asarray(a[::d, ::d], np.float32)
+    del a                                  # see remove_sky_gradient: Windows
+    h, w, _ = S.shape
+    yy = np.arange(h, dtype=np.float32)[:, None] - cy / d
+    xx = np.arange(w, dtype=np.float32)[None, :] - cx / d
+    r = np.hypot(yy, xx) / max(R / d, 1e-6)
+    m = (r > 1.05) & (r < 1.60)
+    if m.sum() < 2000:
+        progress.log("corona white balance: too few pixels in the 1.05-1.6 R "
+                     "annulus to measure — left in raw sensor colour", None)
+        return
+    med = np.median(S[m].reshape(-1, 3), axis=0).astype(np.float64)
+    del S
+    if not np.isfinite(med).all() or med.min() <= 0:
+        progress.log("corona white balance: the annulus has no usable signal — "
+                     "left in raw sensor colour", None)
+        return
+    lum = 0.2126 * med[0] + 0.7152 * med[1] + 0.0722 * med[2]
+    g = (lum / med).astype(np.float32)     # unit-luminance, so brightness holds
+    # A sensor's raw R:G:B never needs more than a few times' correction. More
+    # than that is a broken channel or a mono frame read as colour, and dividing
+    # by it would invent colour rather than correct it.
+    if float(g.max() / max(g.min(), 1e-6)) > 8.0:
+        progress.log(f"corona white balance: implausible gains "
+                     f"{g[0]:.2f}/{g[1]:.2f}/{g[2]:.2f} — not applied", None)
+        stats["corona_wb"] = {"gains": [float(x) for x in g], "applied": False}
+        return
+    out = np.load(hp)
+    out *= g[None, None, :]
+    np.save(hp, out)
+    np.save(os.path.join(wd, "hdr_lum.npy"),
+            (0.2126 * out[:, :, 0] + 0.7152 * out[:, :, 1]
+             + 0.0722 * out[:, :, 2]).astype(np.float32))
+    rgb_before = float(med[0] / max(0.5 * (med[1] + med[2]), 1e-9))
+    stats["corona_wb"] = {"gains": [float(x) for x in g], "applied": True,
+                          "r_over_gb_before": rgb_before}
+    progress.log(f"corona white balance: no camera white balance in these "
+                 f"files, so the inner corona (1.05-1.6 R) is used as the white "
+                 f"reference — R/GB was {rgb_before:.2f}, gains R {g[0]:.3f} "
+                 f"G {g[1]:.3f} B {g[2]:.3f}", None)
 
 
 def shift_bayer_even(a, dy, dx):
@@ -980,6 +1088,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                               "cam2rgb": rf.cam2rgb.tolist(),
                               "sat_level": rf.sat_level,
                               "shape": list(rf.shape)}
+                # FITS and TIFF have no white balance to give (see
+                # neutralise_corona_colour). Recorded here because this is the
+                # only place that still knows which reader produced the frame.
+                stats["no_camera_wb"] = bool(
+                    np.allclose(rf.daylight_wb, 1.0, atol=1e-6)
+                    and np.allclose(rf.cam2rgb, np.eye(3), atol=1e-6))
             raw_bayers.append((p, rf.bayer, rf.sat_level))
             del rf
         # A flat from another body, another crop mode or another orientation is
@@ -1507,7 +1621,43 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          f"{_exp_name(secs[i + 1])}: only {int(good.sum())} px "
                          f"carry signal in both tiers; using exposure time", None)
             ratios.append(0.0); continue
-        lr = float(np.log(np.median(b[good] / np.maximum(a[good], 1e-6))))
+        # RATIO OF SUMS OVER THE UNSATURATED FRAME, NOT median(b/a) OVER A
+        # DATA-SELECTED SET.
+        #
+        # `good` above is still used to decide whether a link is measurable at
+        # all, but it must NOT define the set the ratio is measured on, because
+        # selecting on a tier's own noise biases that tier upward inside the
+        # selection -- classic Eddington bias -- and the ratio inherits it. It
+        # is a one-sided error, so it does not average out over a chain: it
+        # compounds.
+        #
+        # MEASURED on synthetic tier pairs whose true ratio is 1.000 by
+        # construction (same scene, exposure differing by exactly 2x), nine
+        # links compounded:
+        #
+        #     median(b/a), select on both (shipped)   0.785
+        #     median(b/a), select on b only           1.366
+        #     sum(b)/sum(a), select on b only         1.246
+        #     Huber slope b~a, select on b            0.815
+        #     sum(b)/sum(a), NO data selection        1.0015   <-- this
+        #
+        # Every data-dependent selection leans toward the tier it selects on.
+        # Only dropping the selection is unbiased, and it stays unbiased at
+        # read noise 12e- (0.960) and when the corona fills a quarter of the
+        # frame (0.999). The saturation mask `m` stays -- it keys on
+        # saturation, not on noise, so it introduces no such bias.
+        #
+        # This was not academic. A 25-tier bracket from a FITS user came back
+        # with 23 of 24 links leaning the same way, median 0.798 each, which
+        # compounded to 0.00074 end to end and tripped the photometric warning.
+        #
+        # PREREQUISITE: the black level must already be subtracted. A pedestal
+        # does not scale with exposure, so it corrupts sums far worse than
+        # medians -- with 64 ADU left in, this estimator reads 0.005 against the
+        # old one's 0.077. Both are wrong; sums are more obviously wrong, which
+        # is why the black-level check below now says so out loud.
+        _sa, _sb = float(a[m].sum()), float(b[m].sum())
+        lr = float(np.log(max(_sb, 1e-9) / max(_sa, 1e-9)))
         if abs(lr) > np.log(2.5):
             # a tier cannot really be 2.5x off its own exposure time; this means
             # the comparison region is noise, not signal (very short tiers) --
@@ -1540,6 +1690,36 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                      "bracket normally spans 10-14 EV; this looks like a "
                      "partial-phase, diamond-ring or beads sequence, which this "
                      "pipeline is not built for.", None)
+    # THE PER-LINK RESIDUALS, NOT ONLY THE CUMULATIVE FACTORS.
+    #
+    # `cal` is a running product down the chain, so one bad link and a hundred
+    # slightly-biased ones look identical in it -- both just end up far from 1.
+    # The links themselves tell them apart at a glance, and that distinction is
+    # the whole diagnosis: scatter about 1.0 is noise and averages out; a
+    # consistent lean to one side is a systematic error and COMPOUNDS.
+    #
+    # On the run that motivated this, 23 of 24 links sat below 1.0 with a
+    # median of 0.798, which is not something anyone would read out of
+    # "58.202, 29.812, 15.324, ...".
+    _lnk = np.exp(np.asarray(ratios, np.float64)) if ratios else np.ones(0)
+    if _lnk.size:
+        progress.log("photometric links (1.000 = the exposure ratio predicts "
+                     "this tier exactly): " +
+                     ", ".join(f"{x:.3f}" for x in _lnk), None)
+        _meas = _lnk[np.abs(np.log(np.maximum(_lnk, 1e-9))) > 1e-9]   # drop fallbacks
+        if _meas.size >= 6:
+            _lean = float((_meas < 1.0).mean())
+            _med = float(np.median(_meas))
+            if (_lean > 0.8 or _lean < 0.2) and abs(np.log(_med)) > np.log(1.05):
+                progress.log(
+                    f"WARNING: {int(round(_lean * _meas.size)) if _lean > 0.5 else int(round((1 - _lean) * _meas.size))}"
+                    f" of {_meas.size} measured links lean the same way "
+                    f"(median {_med:.3f}). That is a systematic error, not "
+                    f"scatter, and it compounds down the chain to "
+                    f"{_med ** _meas.size:.4f}. The usual cause is a black "
+                    f"level left in the data — a pedestal does not scale with "
+                    f"exposure, so it biases every link in the same direction. "
+                    f"Check that the frames are black-subtracted.", None)
     bad = [f"{s:g}s x{cal[s]:.2f}" for s in secs if not 0.25 < cal[s] < 4.0]
     if bad:
         progress.log("WARNING: tiers disagree photometrically far beyond their "
@@ -1961,6 +2141,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          "rays_kept": int(fit[4]) if fit else None,
                          "rays": int(fit[5]) if fit else None}
     stats.update(_report.measure_image(lum, cyf, cxf, R))
+    # Before the sky fit, because that fit is per channel: run it on raw sensor
+    # colour and it absorbs the sensor's own R:G:B imbalance into what it
+    # reports as the sky's colour gradient.
+    if stats.get("no_camera_wb"):
+        try:
+            neutralise_corona_colour(wd, cyf, cxf, R, stats, progress)
+        except Exception as e:
+            progress.log(f"corona white balance skipped ({e})", None)
     # now that the corona's extent is measured, the sky beyond it can be fitted
     try:
         remove_sky_gradient(wd, cyf, cxf, R, stats.get("corona_extent_R"),

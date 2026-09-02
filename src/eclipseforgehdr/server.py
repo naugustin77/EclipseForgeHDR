@@ -389,6 +389,10 @@ def do_export():
     view = data.get("view", "composite")
     size = data.get("size", "full")
     params = data.get("params", {})
+    # Purely cosmetic and applied last, so it needs no re-run and no re-render
+    # of anything cached -- see render.apply_orient.
+    _or = str(data.get("orient", "") or "").strip().lower()
+    params = dict(params, orient=(_or if _or in ("flipv", "fliph", "180", "cw", "ccw") else ""))
     ext = {"tif16": ".tif", "tif8": ".tif", "png": ".png", "jpg": ".jpg"}[fmt]
     name = data.get("name") or "eclipseforge_render"
     if view != "composite":

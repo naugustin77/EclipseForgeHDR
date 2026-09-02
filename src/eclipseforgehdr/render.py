@@ -51,6 +51,34 @@ def defaults_for(mode):
 
 
 
+
+# Orientation is the one property of the output that no measurement depends on.
+#
+# The limb fit is a circle, MGN, FNRGF, NAFE and Pellett are all radial or
+# tangential about that circle, and the Bayer decode was settled at read time.
+# Turn the finished picture any way up and every number in the report is the
+# number it was. So this belongs at the very last step, applied to the array on
+# its way out -- never at read time, where it would change what is cached and
+# cost a full re-stack to undo something purely cosmetic.
+#
+# It exists because a FITS file cannot say which way up the camera was. ROWORDER
+# describes row order, not camera rotation, and there is no orientation keyword
+# in FITS at all -- a portrait-shot frame arrives on its side and nothing in a
+# corona can tell you so. A rotationally symmetric subject has no up.
+_ORIENT = {"": lambda a: a,
+           "flipv": lambda a: a[::-1],
+           "fliph": lambda a: a[:, ::-1],
+           "180":   lambda a: a[::-1, ::-1],
+           "cw":    lambda a: np.rot90(a, -1),
+           "ccw":   lambda a: np.rot90(a, 1)}
+
+
+def apply_orient(a, orient):
+    """Turn a finished image. Lossless: every one of these is a view permutation."""
+    f = _ORIENT.get(str(orient or "").lower())
+    return a if f is None else np.ascontiguousarray(f(a))
+
+
 def _fill_disc(a, cy, cx, Rm):
     """Continue the layer across the disc edge by reflecting it inward.
 
@@ -540,6 +568,7 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full")
     view: composite | mgn | fnrgf | nafe | inner | prom | pellett (detail views export grayscale).
     size: full | half (half = 2x2 binned, ~2x better SNR)."""
     rgb = render(layers, params, preview=False, view=view)
+    rgb = apply_orient(rgb, (params or {}).get("orient", ""))
     if size == "half":
         H2, W2 = rgb.shape[0] // 2 * 2, rgb.shape[1] // 2 * 2
         rgb = rgb[:H2, :W2].reshape(H2 // 2, 2, W2 // 2, 2, -1).mean(axis=(1, 3))

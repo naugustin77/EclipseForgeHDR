@@ -1,4 +1,4 @@
-__version__ = "0.15.5"
+__version__ = "0.16.1"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -10,7 +10,13 @@ __version__ = "0.15.5"
 # When in doubt leave it out; a needless re-run costs time, a wrong reuse costs
 # a wrong picture.
 CACHE_COMPAT = frozenset({"0.14.0", "0.14.1", "0.14.2",
-                          "0.15.4", "0.15.5"})
+                          "0.15.4", "0.15.5",
+                          # 0.16.1 only moved orientation to the output
+                          # side; nothing in the work directory changed
+                          "0.16.0", "0.16.1"})
+# 0.16.0 changes the photometric factors, so every merged tier and every
+# layer built on them differs. Deliberately not listed: reusing a 0.15.x
+# merge here would show the old merge under the new report.
 # 0.14.3 changes the defect map and the limb override, both of which write into
 # the merge -- so it is deliberately NOT listed above: its products differ.
 # 0.15.4 likewise: it changes the disc-mask margin an import writes into

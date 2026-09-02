@@ -29,10 +29,23 @@ WHAT THE PIPELINE NEEDS FROM THE HEADER
     SATURATE / DATAMAX      the saturation ceiling, if the writer records one.
 
 There is no colour matrix and no white balance in a FITS header, so both are
-identity: a colour-camera FITS will come out green-dominant as captured, and
-Warmth, Tint and Neutralise sky cast are the controls for that. This is stated
-rather than guessed at, because inventing a white balance would put a colour
-error into the photometry where it cannot be seen.
+identity here and the frames stay in raw sensor colour through the merge. That
+much has not changed, and for the reason it always had: inventing a white
+balance before the photometry would put a colour error where it cannot be seen.
+
+What changed is that leaving it there was worse. A silicon sensor under a CFA
+is much more sensitive in green than in red, so raw-sensor white is not white:
+on a 25-tier FITS bracket the corona measured R/((G+B)/2) = 0.56 against 1.11
+for a colour-managed stack of the same corona, which is a blue-cyan rim on a
+brown sky, and it also put the prominence gate's reference colour in the wrong
+place. Warmth and Tint can chase that by eye, but they cannot know the answer.
+
+So the balance is now measured, once, AFTER the merge and the photometry, from
+the inner corona -- see `pipeline.neutralise_corona_colour`. The K-corona is
+photospheric light Thomson-scattered off free electrons, and Thomson scattering
+is wavelength-independent, so the inner corona carries the Sun's own spectrum:
+it is white by physics, not by convention. That makes it a reference rather
+than a guess, and taking it after the merge keeps the photometry clean.
 """
 from __future__ import annotations
 import os
@@ -128,6 +141,11 @@ def _orient(data, hdr):
 
     Returns (data, what it did, the row-parity shift the flip introduced).
     """
+    # Whatever this decides, it must be BAYER-correct -- that is the only part
+    # of orientation that matters here, because a wrong CFA parity is a colour
+    # error and cannot be undone downstream. Which way up the picture ends up is
+    # settled at the other end of the pipeline, losslessly and without a
+    # re-stack: see render.apply_orient.
     ro = str(hdr.get("ROWORDER", hdr.get("ROW_ORDER", "")) or "").strip().upper()
     if ro.startswith("TOP"):          # already top-down; leave it alone
         return data, "TOP-DOWN (ROWORDER)", 0

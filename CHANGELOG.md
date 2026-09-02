@@ -5,6 +5,138 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.16.1 — Orientation belongs at the end, not the beginning
+
+0.16.0 put the FITS row-order override at read time, where it was part of the
+cache key. That meant changing which way up the picture is cost a full re-stack
+— six minutes on the 200 mm bracket — to alter something no measurement depends
+on. Nico's read was better: a flip is trivially reversible, so just turn it at
+the end.
+
+He is right, and the reason is worth stating. The limb fit is a circle. MGN,
+FNRGF, NAFE and Pellett are all radial or tangential about that circle. The
+Bayer decode is settled at read time and stays there, because a wrong CFA parity
+IS a real error and cannot be undone downstream. Everything else is invariant:
+turn the finished picture any way up and every number in the report is the
+number it was.
+
+So the read-time override is gone and an **Orientation** control sits with the
+export settings — as captured, flip vertical, flip horizontal, 180 degrees,
+90 CW, 90 CCW. It applies to the preview and to the export, costs no re-run, and
+is lossless: verified as a pure permutation of pixels in all six states, with
+cw→ccw and flipv→flipv both exact round trips.
+
+In the preview it is applied at the final canvas blit and nowhere earlier. The
+composite is computed in the layers' own coordinate frame against the disc
+centre and radius, so turning it any sooner would move the disc out from under
+every radial weight.
+
+WHY IT IS NEEDED AT ALL, restated now that the reason is clearer: FITS has no
+orientation keyword. ROWORDER describes row order, not which way the camera was
+held. A portrait-shot bracket therefore arrives on its side, nothing in the data
+can reveal that — a corona is rotationally symmetric enough to have no up — and
+so the answer has to come from whoever is looking at it.
+
+## 0.16.0 — Five bugs one FITS log was carrying at once
+
+A 25-tier 200 mm FITS bracket from Val Italo, run on 0.15.5, produced a log with
+five separate faults in it. Four are fixed here and the fifth is now something
+the user can override.
+
+**The photometric chain was biased by construction, and the bias compounded.**
+The log's factors ran 58.202 down to 0.043 and tripped the "tiers disagree
+photometrically" warning. Decomposed into per-link residuals — each one is
+supposed to sit at 1.000, because the exposure ratio is already divided out —
+23 of 24 fell below it, with a median of 0.798. That is not scatter. It is one
+error made 24 times, and 0.798^24 is 0.0044.
+
+The cause is the selection, not the arithmetic. The link was
+`median(b/a)` over pixels passing `a > floor(a) & b > floor(b)`, and
+thresholding a tier against its own noise biases that tier upward inside the
+selection — Eddington bias — which drags the ratio down. Measured on synthetic
+tier pairs whose true ratio is 1.000 by construction, compounded over nine
+links:
+
+    median(b/a), select on both (shipped)   0.785
+    median(b/a), select on b only           1.366
+    sum(b)/sum(a), select on b only         1.246
+    Huber slope b~a, select on b            0.815
+    sum(b)/sum(a), NO data selection        1.0015   <-- now shipped
+
+Every data-dependent selection leans toward the tier it selects on; only
+removing the selection is unbiased. It holds at read noise 12 e- (0.960) and
+with the corona filling a quarter of the frame (0.999). The saturation mask
+stays — it keys on saturation, not on noise.
+
+One caveat is now in the code and in the warning: this estimator needs the
+black level subtracted. A pedestal does not scale with exposure, so it biases
+every link the same way; with 64 ADU left in, sums read 0.005 and the old
+medians 0.077. Both are wrong, sums more obviously so.
+
+**The warning now shows the per-link residuals**, not only the running product.
+A running product cannot distinguish one bad link from a hundred slightly
+biased ones, and that distinction is the entire diagnosis. When most links lean
+the same way it says so, names the compounded result, and points at the black
+level. Verified to fire on the real 25-tier numbers and to stay quiet on
+simulated healthy chains and on a chain with a single 1.5x outlier.
+
+**FITS came out in raw sensor colour.** `FitsFrame` has no white balance and no
+colour matrix to give — no FITS convention carries them — so both were identity
+and the merge stayed as the sensor saw it. A CFA sensor is far more sensitive in
+green than red, so that is not neutral: the corona measured R/((G+B)/2) = 0.56
+against 1.11 for a colour-managed stack of the same corona, which is the
+blue-cyan rim on a brown sky in that render, and it put the prominence gate's
+reference colour somewhere meaningless (0 px flagged).
+
+The balance is now measured from the inner corona, at 1.05-1.6 R, once, AFTER
+the merge and the photometry. That is a reference and not a guess: the K-corona
+is photospheric light Thomson-scattered off free electrons, and Thomson
+scattering is wavelength-independent, so the inner corona carries the Sun's own
+spectrum. It is the one thing in the frame that is white by physics. The F-corona
+is redder and takes over further out, so the reference stays close in and the
+outward reddening the file really contains is left alone. Gains beyond 8x
+between channels are refused rather than applied. Raw brackets are untouched —
+this runs only where there was no camera white balance to use.
+
+**The Windows sky-gradient failure was the wrong bug.** It reported
+
+    sky gradient removal skipped ([Errno 22] Invalid argument:
+    'C:\Users\...\.eclipseforgehdr\hdr_rgb.npy')
+
+It is the opposite end of the same file: `remove_sky_gradient` memory-maps
+`hdr_rgb.npy`, copies what it needs, and then np.saves over it while the mapping
+is still open. POSIX permits that; Windows locks the file and raises Errno 22.
+The map is released before the write now. Verified unchanged on real data — the
+same 1.064 / 1.049 / 1.025 per channel as 0.15.3.
+
+This also retires the explanation that has been in `load_big` since it was
+written. An earlier Windows report of the identical error carried OneDrive in
+its path, and that was taken as the cause — cloud-synced folders do refuse
+mmap. It was a coincidence twice over: the folder was named that way but was an
+ordinary local one, and `load_big`'s fallback was already shipping in 0.15.5
+when this second report arrived on a path with no OneDrive in it. If opening
+the map were what failed, that fallback would have caught it. So there was one
+bug, reported twice, and the fix added the first time addressed a cause that
+did not exist. `load_big` stays — a plain-read fallback is cheap insurance for
+filesystems that genuinely cannot map — but its docstring now says what the
+evidence actually supports.
+
+**And FITS row order can now be set by hand.** `ROWORDER` is honoured by
+default and that has not changed, but the keyword is a convention rather than a
+guarantee: a file re-saved by a tool that flipped the data without rewriting the
+keyword arrives declaring the opposite of what it holds, and nothing in the file
+can catch it — an upside-down corona is still a plausible corona. A FITS rows
+control in the toolbar takes "from the header" (default), "bottom-up" or
+"top-down". It is part of the cache key, so changing it re-runs, and the Bayer
+row-parity shift is applied on the manual flip exactly as on the automatic one.
+
+Also: the corona white-balance reference now decimates against the disc rather
+than by a fixed factor, so a 108 px moon gets the same ~15k reference pixels as
+a 524 px one instead of being abandoned for want of samples.
+
+Cached products from 0.15.x are not reused: the photometric factors changed, so
+every merged tier and every layer built on them differs.
+
 ## 0.15.5 — The report was right and still misleading
 
 0.15.4's new prominence line reads "none of it outside the disc mask ... so
