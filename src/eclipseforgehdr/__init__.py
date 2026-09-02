@@ -1,4 +1,4 @@
-__version__ = "0.16.2"
+__version__ = "0.16.3"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another

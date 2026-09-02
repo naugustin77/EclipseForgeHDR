@@ -295,9 +295,33 @@ def stack_variance(tiers_aligned, cy, cx, R):
     return cov, out
 
 
-def limb_transition_width(lum, cy, cx, R, na=72):
+def limb_transition_width(lum, cy, cx, R, na=72, ref_px=5.0):
     """20-80% width of the merged limb, per azimuth. A sharp lunar edge should
-    be a few px; tens of px means the tiers were blended out of register."""
+    be a few px; tens of px means the tiers were blended out of register.
+
+    THE REFERENCE LEVEL HAS TO SIT JUST OUTSIDE THE EDGE (fixed 0.16.3).
+
+    This used `hi = percentile(v, 95)` over 0.75-1.35 R. The inner corona is
+    still climbing steeply tens of px beyond the limb -- on the reference
+    bracket it peaks at R+27 -- so that percentile is the near-limb CORONA
+    PEAK, and "80% of it" lands far outside the lunar edge. The number then
+    measures the corona's own radial gradient rather than the edge.
+
+    The proof is that it scaled with wherever the reference was taken, on the
+    reference bracket's own merged luminance:
+
+        reference at   R+5   R+10   R+15   R+20   R+30
+        median width   6.5    9.8   12.5   16.0   20.0 px
+        p90 width      9.0   11.5   16.0   21.0   28.0 px
+
+    A real edge width converges as the reference moves out. This one grows
+    without bound, which is what says it is not an edge measurement.
+
+    It matters because `margin = 0.9 * ramp` sets the disc mask, so an
+    inflated width hides real corona: 25.1 px of margin on that bracket where
+    the edge itself is 6.5 px wide. Both testers reported losing prominences,
+    and the largest one sat inside that annulus.
+    """
     H, W = lum.shape
     ang = np.linspace(0, 2 * np.pi, na, endpoint=False)
     rr = np.arange(0.75 * R, 1.35 * R, 0.5, dtype=np.float32)
@@ -312,7 +336,11 @@ def limb_transition_width(lum, cy, cx, R, na=72):
         if not ok[i]:
             continue
         v = P[i]
-        lo = float(np.median(v[:30])); hi = float(np.percentile(v, 95))
+        lo = float(np.median(v[:30]))
+        # the corona immediately outside the edge, not the near-limb peak
+        _c = int(round((R - 0.75 * R) / 0.5))
+        _k = int(round(ref_px / 0.5))
+        hi = float(np.median(v[max(_c + _k - 3, 0):_c + _k + 4]))
         if hi <= lo * 1.3:
             continue
         r20 = rr[int(np.argmax(v > lo + 0.2 * (hi - lo)))]

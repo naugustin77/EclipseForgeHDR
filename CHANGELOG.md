@@ -5,6 +5,59 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.16.3 — The disc mask was measuring the corona, not the Moon
+
+Both testers reported losing prominences, the largest one included. On the
+reference bracket the mask sat at R+25.1 px and Nico had to set Disc mask trim
+to -40 to get them back.
+
+**The margin came from a metric that cannot measure an edge.**
+`limb_transition_width` took its 100% reference as `percentile(v, 95)` over
+0.75-1.35 R. But the inner corona is still climbing steeply well beyond the
+limb -- on this bracket it peaks at R+27 -- so that percentile IS the near-limb
+corona peak, and "80% of it" lands far outside the lunar edge.
+
+The proof is that the answer scaled with wherever the reference was put, on the
+same merged luminance:
+
+    reference at   R+5   R+10   R+15   R+20   R+30
+    median width   6.5    9.8   12.5   16.0   20.0 px
+    p90 width      9.0   11.5   16.0   21.0   28.0 px
+
+A real edge width converges as the reference moves outward. This one grows
+without bound, which is what says it was measuring the corona's own radial
+gradient and not the Moon at all.
+
+The reference is now taken just outside the edge, at R+5 px. Measured:
+
+                        shipped     corrected
+    ramp (p90)           28.0 px      11.0 px
+    disc mask margin     25.1 px       9.9 px
+
+15.2 px of annulus recovered all the way round -- 23 arcsec at this plate scale
+-- which is exactly where the prominences were. On an imported stack whose limb
+is genuinely sharp the corrected metric returns the SAME margin it did before
+(9.9 px), so the case that was already right is undisturbed.
+
+**Still outstanding, and deliberately not fixed here.** The fitted R is itself
+about 8 px too large: the merged image leaves the disc floor at R-7.8 px
+(p10 -8.8, p90 -7.3, so it is consistent all round) and the per-tier lunar
+radius consensus reads 617 px against the merged fit's 622.9. `fit_limb_rays`
+uses a half-level crossing with the same kind of reference, so it is likely the
+same bias. That would account for the remaining gap between this mask and the
+Moon's true edge. It is left for its own release because R feeds every radial
+weight in the pipeline, and after 0.16.1 two changes to the geometry in one
+version is not a trade worth making.
+
+Nico's proposal -- find the disc on a short or median exposure rather than the
+merged image -- is the right instinct and the numbers support it: the per-tier
+fits already agree to within 7 px while the merged fit sits 6 px outside them.
+A short tier has a sharp, high-contrast edge and no bright near-limb corona to
+inflate the reference. The existing code fits the merged image on purpose,
+because the Moon moves against the corona between tiers and the mask must
+follow the image being masked -- but the pipeline already fits a linear lunar
+track, so it knows where the Moon is at any epoch and can have both.
+
 ## 0.16.2 — Reverting the photometric estimator: right reasoning, wrong evidence
 
 0.16.0 replaced the per-tier photometric link with a ratio of sums and no
