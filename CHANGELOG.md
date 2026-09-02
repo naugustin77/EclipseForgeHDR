@@ -5,6 +5,56 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.16.2 — Reverting the photometric estimator: right reasoning, wrong evidence
+
+0.16.0 replaced the per-tier photometric link with a ratio of sums and no
+data-dependent selection. On the reference bracket that made things much worse,
+and it put the bright rim back:
+
+                       0.14.5    0.16.1
+    1/4000s             1.273     0.571
+    1/2000s             1.061     0.746
+    1/500s              0.965     0.878
+    1.6s                1.158     1.326
+
+    disagreement rim    2 px      128 px
+    limb variance       0.072     0.255
+
+128 px of tier disagreement outside the limb is that rim, visible in MGN, NAFE
+and FNRGF and faintly in FNRGF's neighbours. The first three links flipped from
+0.833 / 0.910 / 1.009 to 1.307 / 1.177 / 1.091 — an over-correction in the
+opposite direction to the bias it was meant to remove.
+
+**Why the evidence was bad.** The synthetic tier pairs it was validated on had
+a corona filling most of the frame. A real wide-field bracket is mostly sky —
+8100x5357 px with the corona reaching 4 R — so the sums are dominated by sky
+area rather than by corona, and at the short end the sky carries nothing to take
+a ratio of. The estimator was measuring the wrong thing, and the synthetic
+scene could not show that.
+
+The original reasoning stands: thresholding a tier against its own noise biases
+that tier upward inside the selection, one-sidedly, and it compounds. That is
+still what makes a 25-tier FITS bracket read 23 of 24 links below 1.000. So the
+old estimator is biased, the new one was worse on real data, and neither is
+right.
+
+**What stays.** The per-link residual line and the systematic-lean warning
+introduced in 0.16.0 — those are diagnostic only, they cost nothing, and they
+are what made this regression legible in one glance instead of a reconstruction
+by hand. The FITS colour balance, the Windows memmap fix and the orientation
+control are untouched.
+
+**What a replacement has to do**, written into the code so the next attempt
+starts from it: take the ratio over a region chosen GEOMETRICALLY — an annulus
+just outside the limb where both tiers of a pair carry real signal — so that
+the selection depends on neither tier's noise and sky area cannot dominate. And
+be validated on the reference bracket AND a wide-field FITS set before it ships.
+The mistake was not the idea; it was shipping a change to the core merge on
+simulated evidence alone.
+
+Cached products from 0.16.0 and 0.16.1 are not reused — their merged tiers came
+from the reverted estimator.
+
 ## 0.16.1 — Orientation belongs at the end, not the beginning
 
 0.16.0 put the FITS row-order override at read time, where it was part of the

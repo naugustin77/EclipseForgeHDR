@@ -1621,43 +1621,46 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          f"{_exp_name(secs[i + 1])}: only {int(good.sum())} px "
                          f"carry signal in both tiers; using exposure time", None)
             ratios.append(0.0); continue
-        # RATIO OF SUMS OVER THE UNSATURATED FRAME, NOT median(b/a) OVER A
-        # DATA-SELECTED SET.
+        # REVERTED IN 0.16.2. Read this before changing it again.
         #
-        # `good` above is still used to decide whether a link is measurable at
-        # all, but it must NOT define the set the ratio is measured on, because
-        # selecting on a tier's own noise biases that tier upward inside the
-        # selection -- classic Eddington bias -- and the ratio inherits it. It
-        # is a one-sided error, so it does not average out over a chain: it
-        # compounds.
+        # 0.16.0 replaced this median with sum(b[m])/sum(a[m]) -- no
+        # data-dependent selection -- because selecting on a tier's own noise
+        # biases that tier upward inside the selection, and the error is
+        # one-sided so it compounds down a long chain. That reasoning is still
+        # correct, and on synthetic tier pairs whose true ratio is 1.000 the
+        # sum estimator returned 1.0015 over nine links against this one's
+        # 0.785.
         #
-        # MEASURED on synthetic tier pairs whose true ratio is 1.000 by
-        # construction (same scene, exposure differing by exactly 2x), nine
-        # links compounded:
+        # It was still wrong, because the synthetic scene was not a real frame.
+        # On the reference bracket (8100x5357, corona to 4 R, so most of the
+        # picture is sky) the sums are dominated by sky area rather than by
+        # corona, and at the short end the sky carries no signal to ratio. The
+        # first three links flipped from 0.833/0.910/1.009 to
+        # 1.307/1.177/1.091 -- an over-correction in the OPPOSITE direction --
+        # and the shortest tier's factor fell from 1.273 to 0.571:
         #
-        #     median(b/a), select on both (shipped)   0.785
-        #     median(b/a), select on b only           1.366
-        #     sum(b)/sum(a), select on b only         1.246
-        #     Huber slope b~a, select on b            0.815
-        #     sum(b)/sum(a), NO data selection        1.0015   <-- this
+        #                       0.14.5    0.16.1
+        #     1/4000s            1.273     0.571
+        #     1/2000s            1.061     0.746
+        #     1/500s             0.965     0.878
+        #     ...
+        #     1.6s               1.158     1.326
         #
-        # Every data-dependent selection leans toward the tier it selects on.
-        # Only dropping the selection is unbiased, and it stays unbiased at
-        # read noise 12e- (0.960) and when the corona fills a quarter of the
-        # frame (0.999). The saturation mask `m` stays -- it keys on
-        # saturation, not on noise, so it introduces no such bias.
+        #     disagreement rim   2 px      128 px
+        #     limb variance      0.072     0.255
         #
-        # This was not academic. A 25-tier bracket from a FITS user came back
-        # with 23 of 24 links leaning the same way, median 0.798 each, which
-        # compounded to 0.00074 end to end and tripped the photometric warning.
+        # 128 px of tier disagreement outside the limb is the bright rim, and
+        # it is visible in MGN, NAFE and FNRGF. So: the old estimator is biased,
+        # the new one is worse on real data, and neither is right.
         #
-        # PREREQUISITE: the black level must already be subtracted. A pedestal
-        # does not scale with exposure, so it corrupts sums far worse than
-        # medians -- with 64 ADU left in, this estimator reads 0.005 against the
-        # old one's 0.077. Both are wrong; sums are more obviously wrong, which
-        # is why the black-level check below now says so out loud.
-        _sa, _sb = float(a[m].sum()), float(b[m].sum())
-        lr = float(np.log(max(_sb, 1e-9) / max(_sa, 1e-9)))
+        # WHAT A REPLACEMENT HAS TO DO. Take the ratio over a region chosen
+        # GEOMETRICALLY -- an annulus a little outside the limb, where both
+        # tiers of a pair have real signal -- so that the selection depends on
+        # neither tier's noise and the sky cannot dominate the sum. And it has
+        # to be validated on the reference bracket AND on a wide-field FITS set
+        # before it ships, not on synthetics alone. That was the actual mistake
+        # here: a change to the core merge went out on simulated evidence.
+        lr = float(np.log(np.median(b[good] / np.maximum(a[good], 1e-6))))
         if abs(lr) > np.log(2.5):
             # a tier cannot really be 2.5x off its own exposure time; this means
             # the comparison region is noise, not signal (very short tiers) --
@@ -1710,7 +1713,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         if _meas.size >= 6:
             _lean = float((_meas < 1.0).mean())
             _med = float(np.median(_meas))
-            if (_lean > 0.8 or _lean < 0.2) and abs(np.log(_med)) > np.log(1.05):
+            # 1.05 was too tight. The 0.16.1 regression put 12 of 13 links
+            # above 1.000 with a median of 1.050 and this stayed silent, which
+            # is the one case it most needed to speak up for. A consistent
+            # DIRECTION across a dozen links is itself the evidence; the size
+            # of the median only has to rule out rounding.
+            if (_lean > 0.8 or _lean < 0.2) and abs(np.log(_med)) > np.log(1.02):
                 progress.log(
                     f"WARNING: {int(round(_lean * _meas.size)) if _lean > 0.5 else int(round((1 - _lean) * _meas.size))}"
                     f" of {_meas.size} measured links lean the same way "
