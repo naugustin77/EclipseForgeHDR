@@ -150,6 +150,7 @@ button:disabled{opacity:.45;cursor:default}
         <button data-view="fnrgf" class="vbtn">FNRGF</button>
         <button data-view="nafe" class="vbtn">NAFE</button>
         <button data-view="inner" class="vbtn">Inner</button>
+        <button data-view="rhef" class="vbtn">RHEF</button>
         <button data-view="pellett" class="vbtn">Pellett</button>
         <button data-view="prom" class="vbtn">Prom gate</button>
         <button data-view="flat" class="vbtn" id="flatBtn" style="display:none"
@@ -226,7 +227,8 @@ const DEFS = [
  ["innerDenoise","Detail denoise",0,1,0.01,"inner"],
  ["innerDim","Glare dim",0,0.7,0.01,"inner"],
  ["promGain","Prominence contrast",0,2,0.01,"prom"],
-  ["promDetail","Prominence detail",0,1,0.01,"prom"],
+  ["rhefMix","Outer field (RHEF)",0,1,0.01,"detail"],
+ ["promDetail","Prominence detail",0,1,0.01,"prom"],
  ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
  ["temp","Warmth (R/B)",0.8,1.3,0.005,"color"],
  ["tint","Tint (green/magenta)",0.8,1.3,0.005,"color"],
@@ -240,9 +242,9 @@ const DEFS = [
  ["discTrim","Disc mask trim (px)",-40,40,0.5,"tone"],
  ["earthShine","Earthshine",0,1.5,0.01,"tone"],
  ["ringBlend","Ring blend (screen)",0,1,0.01,"ring"],
- ["ringScale","Ring disc size",0.96,1.04,0.001,"ring"],
- ["ringDX","Ring offset X (px)",-30,30,0.5,"ring"],
- ["ringDY","Ring offset Y (px)",-30,30,0.5,"ring"],
+ ["ringScale","Ring disc size",0.80,1.25,0.001,"ring"],
+ ["ringDX","Ring offset X (px)",-200,200,0.5,"ring"],
+ ["ringDY","Ring offset Y (px)",-200,200,0.5,"ring"],
 ];
 let VIEW = "composite";
 let P = {}, GEO = null, L = {}, ready = false;
@@ -407,6 +409,7 @@ async function loadLayers(){
   // optional: a workdir built before 0.18, or a run whose gate found nothing,
   // has no prominence detail layer. The blend below then simply never fires.
   if (GEO.has_promdet) names.push("promdet");
+  if (GEO.has_rhef) names.push("rhef");
   if (GEO.has_contact) names.push("contact");
   if (GEO.has_flat){
     names.push("flat");
@@ -555,7 +558,7 @@ function renderNow(){
   // different one. Views that read a fetched layer name it here; a view whose
   // layer is missing falls back to the composite rather than to whichever
   // layer happened to be last in the chain.
-  const VSRC = {nafe:"nafe", pellett:"pel", prom:"prom", flat:"flat"};
+  const VSRC = {nafe:"nafe", pellett:"pel", prom:"prom", flat:"flat", rhef:"rhef"};
   const vComputed = VIEW==="mgn" || VIEW==="fnrgf" || VIEW==="inner";
   const vArr = VSRC[VIEW] ? L[VSRC[VIEW]] : null;
   const solo = VIEW !== "composite" && (vComputed || vArr);
@@ -578,6 +581,11 @@ function renderNow(){
     let B = Math.pow(bg[j]/255, envGamma)*(1-innerDim*wG);
     B = B/Math.pow(Math.max(rp[j]/255, 0.12), radialFlatten)*lvl;
     let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
+    // RHEF in the outer field only -- see the measurement in render.py
+    if (P.rhefMix > 0 && L.rhef){
+      const wr = P.rhefMix*_ss((r - 1.6*GEO.R)/(0.6*GEO.R));
+      det = det*(1-wr) + wr*(L.rhef[j]/255);
+    }
     det = det + P.pelGain*(L.pel[j]/255 - 0.5);
     det = det*(1-innerMix*wI) + innerMix*wI*inEff;
     // prominence detail, inside the gate only -- mirrors render.py exactly

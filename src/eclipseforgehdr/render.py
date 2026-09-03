@@ -17,6 +17,10 @@ DEFAULTS = {
     # prominence's own layer rather than from the corona filters. 0 reproduces
     # every build before 0.18 exactly. See detail.prominence_detail.
     "promDetail": 0.7,
+    # How much of the OUTER field comes from RHEF rather than the corona
+    # filters. Radius-weighted, so this cannot touch the inner corona at any
+    # setting -- see the blend. 0 reproduces every build before 0.21.
+    "rhefMix": 1.0,
     # Prominence structure carried in green/blue instead of luminance -- see
     # the long note where it is applied. OFF by default: the measurement is
     # sound and the mechanism works, but at +0.6 it makes dense prominence
@@ -220,6 +224,22 @@ class Layers:
         nfl = np.load(nfp) if os.path.exists(nfp) else np.full_like(D, 0.5)
         fnl = np.clip(D / 8.0 + 0.5, 0, 1)     # raw sigma units, ±4σ window
         del D
+        # RHEF: built by the pipeline from 0.21, but a work directory stacked by
+        # an earlier build does not have one -- and it would be absurd to charge
+        # someone a 16-minute re-stack for a layer that is one sort of data they
+        # already have on disk. Build it here, once, and cache it beside the
+        # rest. Costs seconds; every later load finds the file.
+        _rp = os.path.join(wd, "rhef.npy")
+        if not os.path.exists(_rp):
+            try:
+                from .detail import rhef as _rhef
+                _rh = _rhef(np.log10(np.clip(lum, 1.0, None)).astype(np.float32),
+                            r, r > self.Rmask)
+                np.save(_rp, _rh)
+                del _rh
+            except Exception:
+                pass
+        self.has_rhef = os.path.exists(_rp)
         inner = np.load(os.path.join(wd, "inner.npy"))
         inner0 = np.load(os.path.join(wd, "inner0.npy"))
         ep = os.path.join(wd, "earth.npy")
@@ -305,6 +325,8 @@ class Layers:
                      "inner": inner, "inner0": inner0, "earth": earth,
                      "prom": gate, "pel": pel, "ratio": ratio,
                      "nafe": nfl, "cconf": self._cconf}
+        if self.has_rhef:
+            self.full["rhef"] = np.load(_rp, mmap_mode="r")
         if self.has_promdet:
             self.full["promdet"] = np.load(_pdp, mmap_mode="r")
         q = preview_decim
@@ -481,6 +503,11 @@ def render(layers: Layers, params, preview=False, view="composite"):
         return np.repeat(inner_eff[:, :, None], 3, axis=2)
     if view == "prom":
         return np.repeat(src["prom"][:, :, None], 3, axis=2)
+    if view == "rhef":
+        _rv = src.get("rhef")
+        if _rv is None:
+            return np.full((H, W, 3), 0.5, np.float32)
+        return np.repeat(np.clip(np.asarray(_rv, np.float32), 0, 1)[:, :, None], 3, axis=2)
     if view == "pellett":
         return np.repeat(src["pel"][:, :, None], 3, axis=2)
     if view == "nafe":
@@ -515,6 +542,29 @@ def render(layers: Layers, params, preview=False, view="composite"):
     B = B / (src["rprof"] ** P["radialFlatten"])
     B *= (1 - P["radialFlatten"] * 0.5)       # keep overall level roughly stable
     det = (1 - P["fnMix"] * wf) * mg + P["fnMix"] * wf * fn
+    # RHEF IN THE OUTER FIELD, AND NOWHERE ELSE.
+    #
+    # MGN and RHEF are good at opposite ends. Like for like on the reference
+    # bracket, scored as amp*coh: MGN -40% and -41% better in the two inner
+    # shells, RHEF +28% and +34% better in the two outer ones. So the renderer
+    # crosses over rather than choosing. Both the weight and the crossover
+    # radius were picked by measurement, not taste:
+    #
+    #   rhefMix   1.05-1.30  1.30-1.80  1.80-2.60  2.60-3.40
+    #     0.4        +0%        -0%        +8%       +11%
+    #     0.8        +0%        -1%       +32%       +36%
+    #     1.0        +0%        -1%       +46%       +50%
+    #
+    #   crossover from 1.3 R    -0%       -15%       +48%      +50%
+    #   crossover from 1.6 R    +0%        -1%       +46%      +50%
+    #   crossover from 1.9 R    +0%        +0%       +32%      +50%
+    #
+    # 1.6 R is where it stops costing anything inside and still collects
+    # everything outside. Starting at 1.3 R eats 15% of the 1.30-1.80 shell.
+    if P.get("rhefMix", 0) > 0 and "rhef" in src:
+        _wr = P["rhefMix"] * _ss((r - 1.6 * R) / (0.6 * R))
+        det = det * (1 - _wr) + _wr * np.asarray(src["rhef"], np.float32)
+        del _wr
     det = det + P["pelGain"] * (src["pel"] - 0.5)
     det = det * (1 - P["innerMix"] * wI) + P["innerMix"] * wI * inner_eff
     # PROMINENCE DETAIL, inside the gate and nowhere else.

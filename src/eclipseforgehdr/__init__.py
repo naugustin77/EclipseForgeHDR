@@ -1,4 +1,4 @@
-__version__ = "0.20.1"
+__version__ = "0.21.2"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -11,7 +11,13 @@ __version__ = "0.20.1"
 # a wrong picture.
 CACHE_COMPAT = frozenset({"0.14.0", "0.14.1", "0.14.2",
                           "0.15.4", "0.15.5",
-                          "0.18.0", "0.19.0", "0.20.0", "0.20.1"})
+                          "0.18.0", "0.19.0", "0.20.0", "0.20.1", "0.20.2", "0.20.3", "0.21.0", "0.21.1", "0.21.2"})
+# 0.21.0 adds a cached product (rhef.npy), and would normally be excluded on
+# that ground alone. It is listed anyway because the renderer BUILDS the layer
+# on first load when the file is absent -- it is one sort of the luminance
+# already on disk, seconds rather than the sixteen minutes a re-stack costs --
+# and then caches it. So an older work directory gains the feature rather than
+# merely tolerating its absence, which is the distinction that kept 0.17.0 out.
 # 0.20.0 and 0.19.0 change render.py and gui.html only -- which layer drives the
 # prominence contrast term. Nothing that writes into the work directory moved,
 # so a 0.18.0 stack is reused as it stands and nobody pays for another run.

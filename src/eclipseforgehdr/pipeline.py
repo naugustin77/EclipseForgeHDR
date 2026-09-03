@@ -619,7 +619,31 @@ def _fine_structure(img, cy, cx, R, r0, r1):
     xs = cx + rr[None, :] * np.cos(th)[:, None]
     P = ndimage.map_coordinates(np.asarray(img, np.float32),
                                 [ys.ravel(), xs.ravel()], order=1).reshape(na, nr)
-    P = P / np.maximum(np.median(P, axis=0, keepdims=True), 1e-9)
+    # NORMALISE BY THE RIGHT KIND OF SCALE FOR THE LAYER IN HAND.
+    #
+    # This divided every radial column by its azimuthal median, full stop. That
+    # is correct for a MULTIPLICATIVE quantity -- luminance, or a 0..1 detail
+    # layer whose median sits near 0.5 -- where dividing removes the radial
+    # falloff and leaves relative contrast.
+    #
+    # It is catastrophic for a ZERO-CENTRED one. FNRGF returns (L-mu)/sd, whose
+    # azimuthal median is ~0 by construction, so `max(median, 1e-9)` divided by
+    # roughly 1e-9 and the metric reported an "amplitude" of 2.6e8. Nothing
+    # warned; the number was simply wrong, and it was wrong in the direction of
+    # looking like an enormous result.
+    #
+    # So pick by what the data is. A column whose median dominates its own
+    # spread is multiplicative and gets divided; anything else is additive and
+    # gets the median SUBTRACTED and is scaled by the shell's robust spread.
+    # Within either branch the numbers are comparable, which is all a
+    # before/after comparison needs.
+    _med = np.median(P, axis=0, keepdims=True)
+    _mad = 1.4826 * np.median(np.abs(P - _med), axis=0, keepdims=True)
+    _scale = max(float(np.median(_mad)), 1e-12)
+    if float(np.median(_med)) > 4.0 * _scale:
+        P = P / np.maximum(_med, 1e-9)
+    else:
+        P = (P - _med) / _scale
     # 2 degrees, expressed in samples, so the scale measured does not change
     # with the disc size either
     _sig = max(2.0, na * 2.0 / 360.0)
@@ -2745,7 +2769,43 @@ def prepare_contact(folder, raw_path, progress):
         cy, cx, R = fit[0], fit[1], fit[2]
         progress.log(f"contact-frame limb (half-level): R={R:.0f}px, rms {fit[3]:.1f}px", None)
     dy, dx = geo["cy"] - cy, geo["cx"] - cx
-    sc = geo["R"] / R if 0.9 < geo["R"] / R < 1.1 else 1.0
+    # THE LIMB FIT CANNOT BE TRUSTED ON A CONTACT FRAME, SO IT IS CHECKED.
+    #
+    # A totality frame is a dark disc inside a corona, which is what fit_limb
+    # was written for. A 2nd/3rd-contact frame is not that. 99.4% of Nico's
+    # P1072722 is below the noise -- the sky is dark, the corona is short-
+    # exposed to nothing, and the only structure in the frame is the blazing
+    # crescent. A limb finder given that fits the CRESCENT'S arc, because it is
+    # the only edge there is.
+    #
+    # Measured on his frame. The crescent sits 588 px from the composite's
+    # lunar centre, and the limb is at R=619 -- so as shot, with no
+    # registration at all, it is already within ~30 px of correct, which is
+    # what you expect from a tracked sequence. The fit put the lunar centre at
+    # (2915, 4248), essentially on top of the crescent, and the resulting shift
+    # moved the layer 399 px UP AND LEFT: the crescent ended up 190 px from the
+    # centre, well inside the disc where no crescent can be.
+    #
+    # So: attempt the fit, then check what it is asking for. A tracked sequence
+    # needs a small correction or none. A fit demanding a large move has found
+    # the wrong thing, and doing nothing is much closer to right than obeying
+    # it. This replaces the 0.20.2 reasoning, which blamed a scale mismatch on
+    # a different focal length -- the EXIF says 600 mm for both, and the ratio
+    # that story rested on came from circle-fitting a crescent, which is not a
+    # circle. Wrong diagnosis, wrong fix.
+    _rat = geo["R"] / R if R > 1 else 1.0
+    _mv = float(np.hypot(dy, dx))
+    _bad = (_mv > 0.25 * geo["R"]) or not (0.8 < _rat < 1.25)
+    if _bad:
+        progress.log(f"contact frame: the limb fit wants to move it {_mv:.0f}px and "
+                     f"scale it x{_rat:.3f} (it fitted R={R:.0f}px against the "
+                     f"composite's {geo['R']:.0f}px). That is far more than a tracked "
+                     f"sequence needs, so the fit found the bead rather than the Moon "
+                     f"and is being ignored — the frame is overlaid AS SHOT. Use the "
+                     f"ring offset and size sliders if it needs nudging.", None)
+        dy, dx, sc = 0.0, 0.0, 1.0
+    else:
+        sc = _rat
     progress.log(f"aligning (shift {dy:+.1f},{dx:+.1f}px, R={R:.0f} vs {geo['R']:.0f}, "
                  f"auto-scale x{sc:.4f})", 0.7)
     for c in range(3):
@@ -2757,6 +2817,39 @@ def prepare_contact(folder, raw_path, progress):
         for c in range(3):
             rgb[:, :, c] = ndimage.affine_transform(rgb[:, :, c], mat, offset=off,
                                                     order=1, mode="constant", cval=0)
+    # DID THE ALIGNMENT ACTUALLY WORK? A crescent of photosphere is always
+    # OUTSIDE the lunar limb -- the Moon is what is hiding the rest of it. So if
+    # the aligned frame's bright arc lands inside the composite's disc, the
+    # registration failed, whatever the fit residuals said. This is cheap, it is
+    # geometry rather than taste, and it is what was missing when Nico's ring
+    # came out 327px off centre with nothing in the log to say so.
+    try:
+        _al = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+        _s = _al[::4, ::4]
+        _m = _s >= np.percentile(_s, 99.98)
+        _ys, _xs = np.nonzero(_m)
+        if _ys.size > 200:
+            _Y, _X = _ys * 4.0, _xs * 4.0
+            _rr = np.hypot(_Y - geo["cy"], _X - geo["cx"])
+            _med = float(np.median(_rr))
+            # algebraic circle fit, valid however far the centre has drifted
+            _A = np.stack([_X, _Y, np.ones_like(_X)], axis=1)
+            _sol, *_ = np.linalg.lstsq(_A, _X * _X + _Y * _Y, rcond=None)
+            _fx, _fy = _sol[0] / 2, _sol[1] / 2
+            _fr = float(np.sqrt(max(_sol[2] + _fx * _fx + _fy * _fy, 0.0)))
+            progress.log(f"contact frame: its bright arc fits a circle of R={_fr:.0f}px "
+                         f"centred {np.hypot(_fy - geo['cy'], _fx - geo['cx']):.0f}px from "
+                         f"the composite disc (limb R={geo['R']:.0f}px); arc sits at "
+                         f"{_med:.0f}px from that centre", None)
+            if _med < 0.90 * geo["R"]:
+                progress.log("contact frame: THE RING LANDS INSIDE THE LUNAR DISC. A "
+                             "crescent of photosphere cannot be there, so this frame is "
+                             "not registered to the composite. The ring sliders cannot "
+                             "correct an error this size — the limb fit on the contact "
+                             "frame is what needs looking at.", None)
+        del _al, _s, _m
+    except Exception as _e:
+        progress.log(f"contact frame: could not check the ring geometry ({_e})", None)
     top = np.percentile(lum, 99.9)
     disp = np.clip(rgb / max(top, 1e-6), 0, 1) ** (1 / 2.2)
     # match the composite frame size if the sensor crop differs slightly

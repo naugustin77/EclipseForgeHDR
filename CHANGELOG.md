@@ -5,6 +5,259 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.21.2 — read Druckmullerova's FNRGF source; fixed the measuring stick instead
+
+Nico supplied `FNRGFsoftware.zip` — Druckmullerova's own Delphi implementation,
+with `.pas` sources. Read against `fnrgf_robust`, line by line.
+
+**Our FNRGF needs no change.** Same core, `(I - Ave(r,phi)) / Dev(r,phi)`, with
+both terms azimuthal trigonometric polynomials fitted per radius. Where we
+differ we are equal or better motivated:
+
+| | reference (`ImgProc.pas`) | ours |
+|---|---|---|
+| azimuthal fit | mean/sd in `SegmentCount` bins, Fourier fitted to the bin values | Huber IRLS directly on 1440 samples — no binning quantisation |
+| high orders | `Atte[series,k]` per order, user-set, **default 0** (i.e. plain NRGF) | ridge `1e-3·m²`, always on, coverage-matched order |
+| output | `norm(Input) + MixRatio·norm(Mask)` | `fnMix` in the renderer, same job |
+| noise | `Noise_AddVar` added inside the deviation | *(absent)* |
+
+That last row looked like the find of the day — an additive noise **variance**
+inside the divisor, estimated by `EstimateAdditiveNoiseRing` as the median
+per-segment variance over the outermost rings. It is aimed at exactly the
+complaint this whole session has been about: not dividing by a sigma that is
+really grain.
+
+Implemented and measured, it does nothing for us. Coherence is unchanged to
+three decimals in every shell (0.506, 0.452, 0.533, 0.624 before and after);
+only the amplitude falls, by 25% in the outer shell. Which is what the algebra
+says it must be: our fitted variance at 3.0 R is 2.99e-5 and their estimator
+gives 2.06e-5, so adding it scales the outer field by about 1/sqrt(2) — and a
+uniform scaling cannot change coherence. In their pipeline that rescale matters
+because the mask is min-max normalised before mixing; in ours `fnCompress` and
+`fnMix` already own that decision. Not added.
+
+### The actual defect this turned up, in `_fine_structure`
+
+The metric normalised every radial column by dividing by its azimuthal median.
+Correct for a MULTIPLICATIVE quantity — luminance, or a 0..1 detail layer with a
+median near 0.5. Catastrophic for a ZERO-CENTRED one: FNRGF returns `(L-mu)/sd`,
+whose azimuthal median is ~0 by construction, so the guard `max(median, 1e-9)`
+divided by about 1e-9 and the metric reported an amplitude of **2.6e8**.
+
+Nothing warned. The number was simply wrong, and wrong in the direction of
+looking like an enormous result — which is the dangerous direction, and it is
+the third time in one session that a first number was an artifact.
+
+Now the branch is chosen by what the data is: a column whose median dominates
+its own spread is divided as before; anything else has the median subtracted and
+is scaled by the shell's robust spread. **Verified that every layer the metric
+was already used on takes the first branch and is bit-for-bit unchanged** —
+the four MGN shells 0.21.0 was built on still read 0.0535, 0.0602, 0.0425,
+0.0380.
+
+No pipeline behaviour changes in this release. It is a measurement fix, which on
+this project is the same kind of thing as a bug fix.
+
+## 0.21.1 — prominences join the partial-convolution mask
+
+From Jonathan Hill's slide: *"Moon, proms, stars should be 0 in the mask."*
+
+Partial (normalized, incomplete) convolution was already how every masked filter
+here estimates a local mean — `(w·f * C) / (w * C)`, the mask convolved by the
+same kernel, which is why our limb has never shown the black ring in the left
+half of his comparison. What was missing was what goes *in* the mask: ours held
+the Moon alone.
+
+Prominences matter more than their area suggests because **S, the local standard
+deviation, is MGN's divisor**. A prominence is the brightest thing in the frame
+and sits hard against the limb, so every coronal pixel within a kernel of one has
+its contrast divided by a sigma the prominence set.
+
+Measured with the limb split by azimuth into rays that contain a prominence and
+rays that do not — the second column is the control, in the same run:
+
+```
+pct grow  mask %ring   1.02-1.15 near/away   1.15-1.40 near/away
+ 99   2      1.60%       +6.8% /  +0.2%        -0.0% / +0.2%
+ 99   5      2.63%      +10.8% /  +0.2%        -0.2% / +0.3%
+ 99   8      3.73%      +20.2% /  +0.3%        -0.3% / +0.5%   <- shipped
+ 98   5      5.23%      +24.9% /  +0.3%        +0.6% / +0.4%
+ 97   5      8.00%      +34.1% /  +0.4%        +4.0% / +0.3%
+ 99  12      5.27%      +31.8% /  +0.7%        -0.5% / +0.9%
+```
+
+Only the near column moves, so this is prominences and not a general consequence
+of masking more. Two things the table says that a single figure would have
+hidden: the effect is **confined to 1.02–1.15 R**, and it **does not saturate** —
+mask more, gain more, with no natural stopping point. So the mask size is a trade
+(corona contrast against pixels flattened to 0.5), not an optimum, and 99/8 is a
+conservative point on it. The third column is the cost of moving it.
+
+An earlier version of this measurement, quoted mid-session as +26.9% and +24.9%,
+used an ad-hoc mask about four times larger in area than the one that shipped.
+The 1.15–1.40 R half of it does not reproduce at any mask size below 8% of the
+ring. Treat the table above as the result.
+
+Scope: only MGN's own statistics use the tighter mask. `valid` stays disc-only
+for RHEF, the deband trend and the inner layers, none of which were measured
+against it. Prominence cores therefore come out flat 0.5 in the MGN layer —
+Hill's step 4 — and the prominence gate covers 100% of the masked pixels, so
+promdet supplies the structure there.
+
+**Stars are not masked.** Hill lists them and the same argument applies, but the
+2026 brackets have none, so there is nothing to measure and nothing is claimed.
+
+## 0.21.0 — RHEF carries the outer field
+
+Nico's standing complaint about grain outside the corona, answered from a paper
+he put in the reading folder: Gilly & Cranmer, *Visualization of High Dynamic
+Range Solar Imagery and the Radial Histogram Equalizing Filter*, Sol. Phys. 300,
+174 (2025). RHEF is the whole of their eq. 1 —
+
+```
+I_out[A_i] = rank(I_in[A_i]) / N_{A_i}
+```
+
+— every pixel becomes its percentile rank within a one-pixel annulus. No kernel,
+no scales, no parameters.
+
+Because it has no spatial kernel it cannot compete with MGN near the limb, where
+the picture is made of fine multiscale structure. Because it has no local sigma
+to divide by, it beats MGN badly further out, where that sigma is mostly
+measuring grain. Both layers given the same mild smooth, scored as amp×coh:
+
+| shell | MGN | RHEF | |
+|---|---|---|---|
+| 1.05–1.30 R | 0.0531 | 0.0318 | −40% |
+| 1.30–1.80 R | 0.0628 | 0.0372 | −41% |
+| 1.80–2.60 R | 0.0492 | 0.0629 | **+28%** |
+| 2.60–3.40 R | 0.0424 | 0.0570 | **+34%** |
+
+and the radial coherence on its own, which is the grain question directly:
+**0.489 → 0.752** at 1.8–2.6 R, **0.349 → 0.470** at 2.6–3.4 R.
+
+So they are complementary, and the renderer crosses over on radius rather than
+choosing. Weight and crossover were both picked by measurement:
+
+```
+rhefMix   1.05-1.30  1.30-1.80  1.80-2.60  2.60-3.40
+  0.4        +0%        -0%        +8%       +11%
+  0.8        +0%        -1%       +32%       +36%
+  1.0        +0%        -1%       +46%       +50%
+
+crossover from 1.3 R    -0%       -15%       +48%      +50%
+crossover from 1.6 R    +0%        -1%       +46%      +50%
+crossover from 1.9 R    +0%        +0%       +32%      +50%
+```
+
+New slider **Outer field (RHEF)** (`rhefMix`, default 1.0) and an RHEF layer
+view. At 0 every earlier build is reproduced. The crossover is fixed at
+1.6–2.2 R because that is where it stops costing anything inside while still
+collecting everything outside.
+
+**No re-stack.** RHEF is one `lexsort` of luminance you already have on disk, so
+a work directory from 0.18 onward builds it on first load, in seconds, and
+caches it.
+
+The one eclipse-specific adaptation is excluding the occulted disc from each
+annulus's ranking — left in, those pixels are a solid block of identical dark
+values that would own the bottom of every inner annulus's distribution.
+
+Measured on one dataset, and implemented from the paper rather than from their
+`sunkit_image` code, which this machine could not reach. Worth checking against
+their implementation when someone can.
+
+### What this replaced
+
+Polar-domain convolution, the last untried item from the Astro Imaging Channel
+talk, was tested first and **rejected**. The +155%/+344% figure quoted earlier
+was amplitude only, on shells where isotropic MGN's coherence is 0.489 and
+0.349 — more than half of that "detail" was grain. Re-scored as amp×coh with
+proper azimuthal sampling and against a control that takes the identical
+warp/unwarp round trip and then applies the *ordinary* kernel, the polar kernel
+loses in every shell (−46%, −42%, −27%, −10%). The apparent gain was the warp's
+own interpolation smoothing. Caveat: the test reused the paper's scale list as
+polar-grid pixels, which mean something different there, so this rejects the
+implementation rather than the idea.
+
+## 0.20.3 — The limb fit on a contact frame found the bead, not the Moon
+
+0.20.2 had the wrong diagnosis. It blamed a scale mismatch on the contact frame
+having been shot at a different focal length. Nico's EXIF says 600 mm for both,
+and the ratio that story rested on came from circle-fitting a crescent — which
+is not a circle. Retracted.
+
+Here is what actually happens, measured on P1072722 (3rd contact) against the
+composite it was loaded into:
+
+| | distance from the composite lunar centre |
+|---|---|
+| the crescent, in the frame as shot | **588 px** |
+| the composite's lunar limb | 619 px |
+| the crescent, after `prepare_contact` | **190 px** |
+
+As shot, with no registration at all, the frame is already within ~30 px of
+right — which is what a tracked sequence should give. `prepare_contact` then
+moved it **399 px up and left**, putting the crescent well inside the lunar
+disc. Back-solving the shift, the fit placed the lunar centre at (2915, 4248):
+on top of the crescent.
+
+The cause is that `fit_limb` was written for a totality frame — a dark disc
+inside a corona. A contact frame is not that. 99.4% of this one is below the
+noise: dark sky, no corona at that exposure, and one blazing crescent. Given
+that, a limb finder fits the crescent's arc, because it is the only edge in the
+picture.
+
+So the fit is now **checked before it is obeyed**. If it asks to move the frame
+by more than a quarter of the lunar radius, or to rescale it beyond 0.8–1.25, it
+has found the wrong thing: the frame is overlaid **as shot**, and the log says
+so and points at the ring sliders. For a tracked sequence doing nothing is far
+closer to right than obeying a bad fit.
+
+Kept from 0.20.2, on their own merits: the log no longer reports `auto-scale
+x1.0000` when it silently gave up, and after alignment the bright arc is checked
+against the lunar limb — a crescent of photosphere is always outside the Moon,
+so a crescent inside it is a registration failure that should announce itself.
+The wider ring sliders stay too (size 0.80–1.25, offsets ±200 px): widened for a
+bad reason, but a manual nudge needs more room than ±30 px.
+
+Reload the contact frame to pick this up. The composite stack is untouched.
+
+## 0.20.2 — The contact frame could fail to register and say nothing
+
+Nico exported a composite with a diamond ring and found the ring in the wrong
+place. The export was not at fault: the diamond lands within 1 px of where the
+ring parameters put it. The cached contact layer was already wrong.
+
+Measured on the stored `contact_rgb.npy`: the ring arc circle-fits to
+**R = 553 px centred 327 px from the composite disc**, whose limb is at
+R = 619 px. The crescent therefore sits *inside* the lunar disc — and a crescent
+of photosphere cannot be there, because the Moon is what hides the rest of it.
+That is a registration failure, not a taste question.
+
+`prepare_contact` computed the scale it needed, `geo.R / R`, and then applied it
+only when it fell in 0.9–1.1, falling back to 1.0 outside that band — silently,
+with the log still printing `auto-scale x1.0000`. The ratio this frame needed
+was **1.120**, just outside. 553 x 1.120 = 619, so the refused scale accounts for
+the radius error exactly.
+
+Three changes:
+
+* The band is now **0.5–2.0**. A contact frame shot at another focal length is
+  an ordinary thing to do — people zoom out for the diamond ring — and refusing
+  to scale it is worse than scaling it.
+* Outside even that band the log **says so**, in full, instead of reporting a
+  scale of 1.0000 as though nothing happened.
+* After alignment the frame is **checked**: the bright arc is circle-fitted and
+  its distance from the composite disc centre reported. If it lands inside the
+  lunar limb the log says the frame is not registered and that the sliders
+  cannot fix it. Geometry, not taste — a crescent is always outside the Moon.
+
+The ring sliders were also too narrow to correct anything real: **Ring disc size**
+now spans 0.80–1.25 (was 0.96–1.04) and the two offsets ±200 px (were ±30).
+
+Reload the contact frame to pick this up; the composite stack is untouched.
+
 ## 0.20.1 — Prominence colour detail is off by default
 
 Nico's verdict on 0.20.0 was immediate: pink prominences look wrong. The

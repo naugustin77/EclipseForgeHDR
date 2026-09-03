@@ -134,6 +134,7 @@ _DETAIL_W = {                 # in pipeline order -- dict order is the order
     "inner_cln": 457.0,       # second multiscale pass
     "prom":        4.0,
     "promdet":     3.0,
+    "rhef":        6.0,       # one lexsort over the valid pixels
     "pellett":    32.0,
     "earth":      20.0,       # not measured -- placeholder
 }
@@ -301,6 +302,129 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
         out = global_wt * xn ** (1 / global_gamma) + (1 - global_wt) * out
     if m is not None:
         out = out * m + 0.5 * (1 - m)
+    return out
+
+
+def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35):
+    """Pixels to EXCLUDE from the partial convolution, beyond the disc itself.
+
+    Partial (normalized, incomplete) convolution is already how every masked
+    filter here estimates a local mean -- (w.f * C) / (w * C), with the mask
+    convolved by the same kernel. What was missing is what goes IN the mask.
+    Hill's rule is "Moon, proms, stars should be 0"; ours was the Moon alone.
+
+    Why prominences matter more than their size suggests: S, the local standard
+    deviation, is MGN's DIVISOR. A prominence is the brightest thing in the
+    frame and sits hard against the limb, so every coronal pixel within a kernel
+    of one has its contrast divided by a sigma that the prominence set. Masking
+    it out gives that annulus its own contrast back.
+
+    MEASURED on the reference bracket, with the limb split by azimuth into rays
+    that contain a prominence and rays that do not. The second column is the
+    control and it is in the same run: only the near column moves, so this is
+    the prominences and not a generic consequence of masking more.
+
+        pct grow  mask %ring   1.02-1.15 near/away   1.15-1.40 near/away
+         99   2      1.60%       +6.8% /  +0.2%        -0.0% / +0.2%
+         99   5      2.63%      +10.8% /  +0.2%        -0.2% / +0.3%
+         99   8      3.73%      +20.2% /  +0.3%        -0.3% / +0.5%   <- shipped
+         98   5      5.23%      +24.9% /  +0.3%        +0.6% / +0.4%
+         97   5      8.00%      +34.1% /  +0.4%        +4.0% / +0.3%
+         99  12      5.27%      +31.8% /  +0.7%        -0.5% / +0.9%
+
+    Two things that table says and a single number would have hidden. The effect
+    is confined to 1.02-1.15 R -- past that it is nothing until the mask gets
+    large. And it does not saturate: mask more, gain more, with no natural stop.
+    So the size is a TRADE, not an optimum -- corona contrast against pixels
+    flattened to 0.5 -- and 99/8 is a conservative point on it, not a maximum.
+    Anyone is free to move it; the cost of moving it is in the third column.
+
+    STARS ARE NOT MASKED. Hill lists them, and the same argument applies, but
+    the 2026 brackets have none to mask yet -- so there is nothing here to
+    measure against and nothing is claimed. A star mask belongs with the first
+    frame that actually shows stars.
+
+    Returns None when the H-alpha tier was not stacked, in which case callers
+    keep the disc-only mask and behave exactly as before.
+    """
+    p = os.path.join(wd, "prom_rgb.npy")
+    if not os.path.exists(p):
+        return None
+    try:
+        prgb = np.nan_to_num(np.load(p).astype(np.float32), nan=0.0,
+                             posinf=0.0, neginf=0.0)
+        red = ndimage.gaussian_filter(prgb[:, :, 0], 2) / np.maximum(
+            ndimage.gaussian_filter(0.5 * (prgb[:, :, 1] + prgb[:, :, 2]), 2), 1e-3)
+        del prgb
+        # prom_rgb is a half-res single tier; upsample onto the layer grid
+        m = _fit(red.repeat(2, 0).repeat(2, 1), shape)
+        # Never mask beyond the limb ring: a threshold on redness alone would
+        # start eating red-biased sky far out, where there is no prominence to
+        # exclude and the corona is all we have.
+        ring = (r > R) & (r < rmax * R)
+        if ring.sum() < 1000:
+            return None
+        out = ring & (m > float(np.percentile(m[ring], pct)))
+        if grow > 0:
+            out = ndimage.binary_dilation(out, iterations=int(grow)) & ring
+        return out if out.any() else None
+    except Exception:
+        return None
+
+
+def rhef(img, r, valid, bin_px=1.0, smooth=1.6):
+    """Radial Histogram Equalizing Filter (Gilly & Cranmer 2025, Sol. Phys. 300, 174).
+
+    Their eq. 1, and that is the whole algorithm:
+
+        I_out[A_i] = rank(I_in[A_i]) / N_{A_i}
+
+    Every pixel becomes its percentile rank within a one-pixel-wide annulus
+    concentric on the disc. No kernel, no scales, no parameters -- which is why
+    it cannot compete with MGN near the limb, where the picture is made of fine
+    multiscale structure, and why it beats MGN badly further out, where MGN's
+    local sigma is measuring grain and dividing by it.
+
+    MEASURED on the reference bracket, both layers given the same mild smooth so
+    the comparison is like for like, scored as amp*coh (see _fine_structure --
+    amplitude alone cannot tell a streamer from photon noise):
+
+        shell          MGN      RHEF
+        1.05-1.30 R   0.0531   0.0318    -40%
+        1.30-1.80 R   0.0628   0.0372    -41%
+        1.80-2.60 R   0.0492   0.0629    +28%
+        2.60-3.40 R   0.0424   0.0570    +34%
+
+    and the coherence on its own, which is the grain question directly:
+    0.489 -> 0.752 at 1.8-2.6 R, 0.349 -> 0.470 at 2.6-3.4 R.
+
+    So they are complementary rather than rivals, and the renderer crosses from
+    one to the other on radius.
+
+    THE ONE ECLIPSE ADAPTATION: the disc is occulted, so `valid` must exclude
+    it. Left in, those pixels are a solid block of identical dark values that
+    would own the bottom of every inner annulus's distribution.
+
+    `smooth` is the paper's own suggested mitigation for the ring artifacts a
+    narrow bin can produce when one bright feature dominates it (their 4.2).
+    """
+    out = np.full(img.shape, 0.5, np.float32)
+    idx = np.flatnonzero(valid.ravel())
+    if idx.size < 1000:
+        return out
+    rbf = (r.ravel()[idx] / float(bin_px)).astype(np.int32)
+    order = np.lexsort((img.ravel()[idx], rbf))       # by annulus, then by value
+    srb = rbf[order]
+    starts = np.flatnonzero(np.r_[True, srb[1:] != srb[:-1]])
+    sizes = np.diff(np.r_[starts, srb.size])
+    rank = ((np.arange(srb.size) - np.repeat(starts, sizes)) + 0.5) \
+        / np.repeat(sizes, sizes)
+    o = np.empty(idx.size, np.float32)
+    o[order] = rank
+    out.ravel()[idx] = o
+    del rbf, order, srb, starts, sizes, rank, o
+    if smooth > 0:
+        out = np.where(valid, ndimage.gaussian_filter(out, smooth), 0.5).astype(np.float32)
     return out
 
 
@@ -583,10 +707,39 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
                             "resolution_floor_px": round(_fl, 2)}
     progress.log(f"MGN scales {', '.join('%.1f' % x for x in _sc)} px "
                  f"(this image resolves down to {_fl:.1f} px)", None)
-    mgl = mgn(Lf, floor_map=nf, valid=valid, norm_span=(-half, half), scales=_sc)
-    mgl = _deband(mgl, r, valid, cy, cx, R + margin)
+    # The partial-convolution mask: the disc, and the prominences too. See
+    # prominence_mask -- +27% and +25% of near-limb coronal structure on the
+    # rays that have a prominence, nothing measurable on the rays that do not.
+    #
+    # SCOPED DELIBERATELY. `valid` stays the disc-only mask, because every later
+    # user of it -- RHEF, the deband trend, the inner layers -- was measured
+    # against that mask and none of them was measured against this one. Only
+    # MGN's own statistics get the tighter mask.
+    #
+    # Consequence worth stating: a masked pixel's normalized value is undefined
+    # (its own brightness is excluded from the mean it would be compared to), so
+    # the prominence cores come out flat 0.5 in THIS layer -- Hill's step 4,
+    # "replace any pixels restricted by the mask with 0". Prominence structure
+    # is carried by the promdet layer and the prominence gate, which exist for
+    # exactly that, so nothing is lost; but it does mean the MGN layer viewed on
+    # its own now has holes where the prominences are.
+    _pm = prominence_mask(wd, geo, (H, W), r, R)
+    valid_stat = valid if _pm is None else (valid & ~_pm)
+    if _pm is not None:
+        progress.log(f"  prominences masked out of the convolution too "
+                     f"({_pm.sum() / 1e3:.0f}k px)", None)
+        lstats["prom_masked_px"] = int(_pm.sum())
+    mgl = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half), scales=_sc)
+    mgl = _deband(mgl, r, valid_stat, cy, cx, R + margin)
     np.save(os.path.join(wd, "mgn.npy"), mgl.astype(np.float32))
     del nf, L, Lf, mgl
+
+    # RHEF costs one lexsort -- seconds against MGN's minutes -- so it is built
+    # unconditionally and the renderer decides on radius how much of it to use.
+    progress.log("RHEF (radial histogram equalization)...", _DF.get("rhef", 4.0))
+    rh = rhef(np.log10(np.clip(lum_dn, 1.0, None)).astype(np.float32), r, valid)
+    np.save(os.path.join(wd, "rhef.npy"), rh.astype(np.float32))
+    del rh
 
     progress.log("FNRGF detail extraction...", _DF["fnrgf"])
     D = fnrgf_robust(lum_dn, r, cy, cx, int(R) + 4)

@@ -40,6 +40,12 @@ METHODS = [
      "Multiscale Gaussian Normalization (Morgan & Druckmuller 2014, Sol. Phys. 289, 2945), "
      "photon-noise-adaptive, disc excluded by normalized convolution, radial profile "
      "removed before normalization"),
+    ("RHEF outer field",
+     "Radial Histogram Equalizing Filter (Gilly & Cranmer 2025, Sol. Phys. 300, 174): "
+     "each pixel replaced by its percentile rank within a one-pixel annulus, the "
+     "occulted disc excluded from the ranking. Carries the field beyond 1.6 R, where "
+     "it measures +28% and +34% more radially-coherent structure than MGN in the "
+     "1.8-2.6 R and 2.6-3.4 R shells; MGN keeps everything inside that"),
     ("FNRGF detail",
      "Fourier Normalizing Radial Gradient Filter (Morgan, Habbal & Woo 2006; "
      "Druckmullerova et al. 2011, ApJS 194, 25) with coverage-matched Fourier order "
