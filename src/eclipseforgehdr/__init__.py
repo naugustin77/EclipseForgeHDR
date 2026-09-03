@@ -1,4 +1,4 @@
-__version__ = "0.17.0"
+__version__ = "0.20.1"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -10,7 +10,17 @@ __version__ = "0.17.0"
 # When in doubt leave it out; a needless re-run costs time, a wrong reuse costs
 # a wrong picture.
 CACHE_COMPAT = frozenset({"0.14.0", "0.14.1", "0.14.2",
-                          "0.15.4", "0.15.5"})
+                          "0.15.4", "0.15.5",
+                          "0.18.0", "0.19.0", "0.20.0", "0.20.1"})
+# 0.20.0 and 0.19.0 change render.py and gui.html only -- which layer drives the
+# prominence contrast term. Nothing that writes into the work directory moved,
+# so a 0.18.0 stack is reused as it stands and nobody pays for another run.
+# 0.18.0 writes a new cached product (promdet.npy), so a 0.17.0 workdir is
+# missing it. The key is then ABSENT from the layer dict rather than filled
+# with a flat 0.5 -- 0.5 is not the identity here, the blend pulls towards the
+# layer -- so an old cache still LOADS; it just has nothing to blend.
+# 0.17.0 is deliberately not listed, because "loads" and "has the feature"
+# differ.
 # 0.16.0 and 0.16.1 are deliberately NOT listed, and were removed from this set
 # in 0.16.2: their photometric factors came from an estimator that has since
 # been reverted, so their merged tiers are wrong. Reusing them would show the

@@ -290,6 +290,10 @@ def build(stats):
           f"{p.get('area_px', 0)} px flagged")
         # Flagged and visible are different numbers, and the difference is the
         # answer to "where are my prominences?". Only said when it matters.
+        if p.get("detail_layer"):
+            A(f"             : a prominence detail layer was built from the "
+              f"H-alpha tier's red channel — the corona filters cannot carry "
+              f"this structure (MGN clips it and divides out its local sigma)")
         _vis = p.get("area_visible_px")
         if _vis is not None and _vis < p.get("area_px", 0):
             if _vis == 0:

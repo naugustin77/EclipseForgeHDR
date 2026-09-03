@@ -226,6 +226,8 @@ const DEFS = [
  ["innerDenoise","Detail denoise",0,1,0.01,"inner"],
  ["innerDim","Glare dim",0,0.7,0.01,"inner"],
  ["promGain","Prominence contrast",0,2,0.01,"prom"],
+  ["promDetail","Prominence detail",0,1,0.01,"prom"],
+ ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
  ["temp","Warmth (R/B)",0.8,1.3,0.005,"color"],
  ["tint","Tint (green/magenta)",0.8,1.3,0.005,"color"],
  ["bgNeutral","Neutralise sky cast",0,1.2,0.01,"color"],
@@ -402,6 +404,9 @@ async function loadLayers(){
   const names = ["bg","rprof","mgn","fnrgf","mgn_lo","mgn_sm","fnrgf_lo","fnrgf_sm",
                  "nafe","nafe_lo","nafe_sm",
                  "pel","inner","inner0","earth","prom","ratio","cconf"];
+  // optional: a workdir built before 0.18, or a run whose gate found nothing,
+  // has no prominence detail layer. The blend below then simply never fires.
+  if (GEO.has_promdet) names.push("promdet");
   if (GEO.has_contact) names.push("contact");
   if (GEO.has_flat){
     names.push("flat");
@@ -575,8 +580,16 @@ function renderNow(){
     let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
     det = det + P.pelGain*(L.pel[j]/255 - 0.5);
     det = det*(1-innerMix*wI) + innerMix*wI*inEff;
+    // prominence detail, inside the gate only -- mirrors render.py exactly
+    if (P.promDetail > 0 && L.promdet){
+      const pw = P.promDetail*(pr[j]/255);
+      det = det*(1-pw) + pw*(L.promdet[j]/255);
+    }
     let Y = B*(baseLift+detailGain*det);
-    Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(inEff-0.5)));
+    // driven by the prominence layer when the workdir has one -- see the
+    // measurement in render.py beside the same line
+    const pdrv = L.promdet ? L.promdet[j]/255 : inEff;
+    Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(pdrv-0.5)));
     const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
     Y = Y*eg + Yd*(1-eg);
     // the sky-cast correction is weighted by the chroma confidence, exactly as
@@ -589,6 +602,12 @@ function renderNow(){
     const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
     a0 /= alum; a1 /= alum; a2 /= alum;
     a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
+    // prominence structure in green/blue -- red is already pinned at 255 in
+    // there, so this is the only channel pair with room. See render.py.
+    if (P.promChroma !== 0 && L.promdet){
+      const cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
+      a1 *= cfac; a2 *= cfac;
+    }
     let r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
     const m = Math.max(r0,r1,r2);
     const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));

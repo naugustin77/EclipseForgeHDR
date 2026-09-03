@@ -329,6 +329,7 @@ def get_geometry():
                     "bgChroma": [float(x) for x in ly.bg_chroma],
                     "decim": ly.prev_decim, "has_contact": ly.has_contact,
                     "has_flat": getattr(ly, "has_flat", False),
+                    "has_promdet": getattr(ly, "has_promdet", False),
                     "flat_range": list(getattr(ly, "flat_range", []) or []),
                     "flat_error": getattr(ly, "flat_error", None),
                     "has_earth": getattr(ly, "has_earth", False)})

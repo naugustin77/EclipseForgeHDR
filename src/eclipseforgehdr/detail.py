@@ -133,6 +133,7 @@ _DETAIL_W = {                 # in pipeline order -- dict order is the order
     "inner_dn":   25.0,       # denoise of the short stack
     "inner_cln": 457.0,       # second multiscale pass
     "prom":        4.0,
+    "promdet":     3.0,
     "pellett":    32.0,
     "earth":      20.0,       # not measured -- placeholder
 }
@@ -762,6 +763,20 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
             g = ndimage.gaussian_filter(g, 2)
             gate = _fit(np.clip(g * 1.6, 0, 1).repeat(2, 0).repeat(2, 1), (H, W))
             gate = ndimage.gaussian_filter(gate, 2)
+            # ...and the prominences' own fine structure, which no corona layer
+            # can carry. See prominence_detail.
+            try:
+                _pd = prominence_detail(prgb[:, :, 0], g)
+                _pdf = _fit(_pd.repeat(2, 0).repeat(2, 1), (H, W))
+                del _pd
+                _pdf = ndimage.gaussian_filter(_pdf, 1.0)
+                np.save(os.path.join(wd, "promdet.npy"), _pdf.astype(np.float32))
+                lstats["prom"]["detail_layer"] = True
+                progress.log("prominence detail: built from the H-alpha tier's "
+                             "red channel, scaled inside the gate", None)
+                del _pdf
+            except Exception as _e:
+                progress.log(f"prominence detail layer not built ({_e})", None)
         else:
             progress.log("prominence colour: not enough limb samples", None)
     if "prom" in lstats:
@@ -882,6 +897,69 @@ DENOISE_PROFILES = {
     "medium": (1.8, 1.5, 0.8, 0.0),
     "strong": (2.2, 1.8, 1.2, 0.6),
 }
+
+
+def prominence_detail(red_half, gate_half, floor_map=None):
+    """Fine structure of the prominences, from the H-alpha tier's RED channel.
+
+    WHY A SEPARATE LAYER, AND WHY NOT MGN.
+
+    Prominence interiors came out flat in every corona layer, and both external
+    testers said so. Two measured reasons, on the reference bracket's biggest
+    prominence (225 deg, R/GB 16.4):
+
+    1. MGN's NORMALISATION WINDOW CLIPS THEM. `hi` is the 99.95th percentile of
+       the frame -- the right choice for a corona, where a few hot pixels must
+       not set the range. But a prominence is brighter than that: 37% of this
+       one sat hard-clipped at xn = 1.0 in the red channel and 21% in the merged
+       luminance, with the unclipped remainder squeezed into the top 6% of the
+       range. Whatever structure it had was gone before the multiscale filter
+       ran. Giving the layer its OWN window, taken inside the gate, drops the
+       clipping to 2%.
+
+    2. MGN IS THE WRONG FILTER FOR A COMPACT BRIGHT FEATURE. Its purpose is to
+       divide out the local standard deviation so faint structure at any
+       brightness comes up equally -- which is exactly what flattens a
+       prominence, whose interior variation IS its local sigma. A plain
+       multiscale unsharp keeps it. Correlation of the resulting layer's fine
+       structure with the red channel's own, which no normalisation can fake:
+
+           MGN, frame window (what the corona layers do)        0.037
+           MGN, gate window, fine scales                        0.420
+           MGN, gate window, corona scales                      0.375
+           plain multiscale unsharp, gate-scaled                0.940   <-- this
+
+       For reference the existing layers score inner 0.317, MGN 0.274, merged
+       HDR 0.262 on the same measure.
+
+    THE RED CHANNEL, not luminance. An H-alpha prominence puts most of its
+    signal in R, and luminance weights R at 0.2126: going to luminance costs
+    more than half the structure before any filter sees it (1.000 -> 0.417),
+    which is the single largest loss in the chain.
+
+    Returns a 0..1 layer at the input's resolution, 0.5 where there is nothing.
+    """
+    L = np.log10(np.clip(np.asarray(red_half, np.float32), 1.0, None))
+    acc = np.zeros_like(L)
+    # octave spacing with decreasing weight, the usual unsharp ladder; the
+    # finest scale carries most of it because prominence structure is fine
+    for sig, gain in ((1.0, 1.0), (2.0, 0.7), (4.0, 0.5), (8.0, 0.35)):
+        acc += gain * (L - ndimage.gaussian_filter(L, sig))
+    del L
+    # Scale by the spread INSIDE the prominences, so the layer uses its range on
+    # them rather than on whatever else the frame contains. Dilated, so the
+    # scaling is not set by the few brightest cores alone.
+    sel = ndimage.binary_dilation(np.asarray(gate_half, np.float32) > 0.05,
+                                  iterations=6)
+    if sel.sum() < 200:
+        sel = np.ones_like(acc, bool)
+    v = acc[sel]
+    sd = 1.4826 * float(np.median(np.abs(v - np.median(v))))
+    if not np.isfinite(sd) or sd <= 0:
+        sd = float(np.std(acc)) or 1.0
+    out = np.clip(0.5 + acc / (6.0 * sd), 0.0, 1.0)
+    del acc
+    return out.astype(np.float32)
 
 
 def denoise_loglum(L, noise_map, ks=(1.5, 1.0, 0.0, 0.0), levels=4):

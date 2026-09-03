@@ -13,6 +13,17 @@ DEFAULTS = {
     "radialFlatten": 0.5, "mgnContrast": 0.04, "fnCompress": 0.9,
     "clarity": 0.39, "smoothing": 0.25, "pelGain": 0.0,
     "nafeMix": 0.15, "innerMix": 0.31, "innerDenoise": 0.4, "innerDim": 0.05, "promGain": 0.4,
+    # How much of the detail inside the prominence gate comes from the
+    # prominence's own layer rather than from the corona filters. 0 reproduces
+    # every build before 0.18 exactly. See detail.prominence_detail.
+    "promDetail": 0.7,
+    # Prominence structure carried in green/blue instead of luminance -- see
+    # the long note where it is applied. OFF by default: the measurement is
+    # sound and the mechanism works, but at +0.6 it makes dense prominence
+    # material go pink, and pink prominences look wrong. Negative values run it
+    # the other way (dense material goes deeper red), which is the direction
+    # worth trying before this is called a dead end.
+    "promChroma": 0.0,
     "temp": 0.9, "tint": 1.205, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.1, "hlDesat": 0.0,
     "outGamma": 1.0, "bgBlack": 0.005,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
@@ -281,10 +292,21 @@ class Layers:
             bc = np.ones(3, np.float32)
         bl = 0.2126 * bc[0] + 0.7152 * bc[1] + 0.0722 * bc[2]
         self.bg_chroma = np.clip(bc / max(float(bl), 1e-6), 0.3, 3.0).astype(np.float32)
+        # The prominence detail layer is optional: a workdir built before 0.18
+        # does not have one, and a run whose gate found nothing does not write
+        # one. When it is missing the key is ABSENT, not filled with 0.5 --
+        # a flat 0.5 is NOT the identity here, because the blend pulls `det`
+        # TOWARDS the layer, so a flat one would erase detail inside the gate
+        # rather than do nothing. Caught by the fallback test, which is the
+        # only reason this comment is not still claiming otherwise.
+        _pdp = os.path.join(wd, "promdet.npy")
+        self.has_promdet = os.path.exists(_pdp)
         self.full = {"bg": Bg, "rprof": rprof, "mgn": mg, "fnrgf": fnl,
                      "inner": inner, "inner0": inner0, "earth": earth,
                      "prom": gate, "pel": pel, "ratio": ratio,
                      "nafe": nfl, "cconf": self._cconf}
+        if self.has_promdet:
+            self.full["promdet"] = np.load(_pdp, mmap_mode="r")
         q = preview_decim
         self.prev = {k: v[::q, ::q] for k, v in self.full.items()}
         # clarity/smoothing variants (preview scale; full-res computed on demand)
@@ -495,10 +517,46 @@ def render(layers: Layers, params, preview=False, view="composite"):
     det = (1 - P["fnMix"] * wf) * mg + P["fnMix"] * wf * fn
     det = det + P["pelGain"] * (src["pel"] - 0.5)
     det = det * (1 - P["innerMix"] * wI) + P["innerMix"] * wI * inner_eff
+    # PROMINENCE DETAIL, inside the gate and nowhere else.
+    #
+    # The corona filters cannot carry it: MGN's normalisation window clips the
+    # prominence (37% of the reference one sat hard against xn = 1.0) and its
+    # local-sigma division is precisely what flattens a compact bright feature.
+    # Measured as correlation with the red channel's own fine structure, which
+    # normalisation cannot fake: the prominence layer scores 0.940 against
+    # inner 0.317, MGN 0.274 and the merged HDR 0.262.
+    #
+    # `prom` is the same gate that decides where prominences are brightened, so
+    # this can only act where the H-alpha colour test already fired -- it cannot
+    # reach the corona at any setting.
+    if P.get("promDetail", 0) > 0 and "promdet" in src:
+        _pw = P["promDetail"] * np.clip(src["prom"], 0, 1)
+        det = det * (1 - _pw) + _pw * src["promdet"]
+        del _pw
     Y = B * (P["baseLift"] + P["detailGain"] * det)
     # prominence: local-contrast modulation inside the gate, with a small
-    # positive bias so a detected prominence gains presence, not just texture
-    Y = Y * (1 + P["promGain"] * src["prom"] * (0.30 + 1.3 * (inner_eff - 0.5)))
+    # positive bias so a detected prominence gains presence, not just texture.
+    #
+    # The contrast term used to be driven by the inner-corona layer, which was
+    # the best thing available before 0.18. It is not any more. Scored as
+    # correlation with the H-alpha red channel's own fine structure, measured on
+    # the bright core of each prominence clear of the disc mask:
+    #
+    #     prominence   inner-driven   promdet-driven
+    #     az 226           0.714          0.828
+    #     az  44           0.357          0.361
+    #     az  10           0.143          0.284
+    #
+    # The bias stays at 0.30. Lowering it to 0.10 scores 0.828 against 0.807 on
+    # the big prominence, which is not worth changing how bright every user's
+    # prominences render.
+    #
+    # Scoped: `prom` is 0 outside the gate, so the whole term is exactly 1
+    # there, and a workdir with no promdet falls back to the old driver and
+    # renders bit-identically. Both are checkable, which is the point.
+    _pdrv = src["promdet"] if "promdet" in src else inner_eff
+    Y = Y * (1 + P["promGain"] * src["prom"] * (0.30 + 1.3 * (_pdrv - 0.5)))
+    del _pdrv
     Yd = P["discLevel"] * (1 + P["earthShine"] * (2 * src["earth"] - 1))
     Y = Y * edge + Yd * (1 - edge)
     del B, det, inner_eff, Yd, wf, wI, wG, mg, fn
@@ -517,6 +575,36 @@ def render(layers: Layers, params, preview=False, view="composite"):
     a /= np.maximum(al, 1e-6)[:, :, None]
     del al
     a = a * edge[:, :, None] + (1 - edge)[:, :, None]   # neutral moon disc
+    # PROMINENCE STRUCTURE, CARRIED IN COLOUR RATHER THAN BRIGHTNESS.
+    #
+    # Measured on the reference bracket: inside a prominence the red channel is
+    # at 255 in 100% of the bright core, while green sits near 59 and blue near
+    # 51. Red is the max channel everywhere in there, so the hue-preserving knee
+    # below sets every channel from `ms` and the chroma ratio -- which means the
+    # luminance detail we spent 0.18 and 0.19 improving cannot reach the picture
+    # at all. Before the knee a promDetail change is 59 levels; after it, 13.
+    #
+    # Green and blue have ~200 unused levels. Putting the prominence's own
+    # structure there costs nothing in red and shows immediately:
+    #
+    #                     G spread (p10-p90)   agreement with H-alpha in G
+    #   promChroma 0.0        49 - 79 levels             0.368
+    #   promChroma 0.6        57 - 105 levels            0.596
+    #
+    # and on the other two prominences 0.565 -> 0.762 and 0.740 -> 0.827. On
+    # screen it is a mean of 13.6 levels, p90 27, against 1.5 for the 0.19.0
+    # luminance change. Physically it reads as the denser material going pinker
+    # rather than redder, which is what more continuum through more material
+    # actually looks like.
+    #
+    # Scoped like everything else in the gate: `prom` is 0 outside it, so the
+    # factor is exactly 1 there (measured residual 1.2e-07, float rounding).
+    if abs(P.get("promChroma", 0)) > 1e-6 and "promdet" in src:
+        _f = 1.0 + P["promChroma"] * np.clip(src["prom"], 0, 1) * (
+            2.0 * np.asarray(src["promdet"], np.float32) - 1.0)
+        a[:, :, 1] *= _f
+        a[:, :, 2] *= _f
+        del _f
     rgb = Y[:, :, None] * a
     del a, Y, edge
     # hue-preserving highlight shoulder (parametric knee) + optional white rolloff

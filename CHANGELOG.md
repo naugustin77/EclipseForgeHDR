@@ -5,6 +5,176 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.20.1 — Prominence colour detail is off by default
+
+Nico's verdict on 0.20.0 was immediate: pink prominences look wrong. The
+measurement stands — green and blue really are the only channels with room, and
+the structure really does show up there — but a correct mechanism pointed in an
+ugly direction is still ugly, and taste beats a correlation coefficient on a
+question of how a picture should look.
+
+`promChroma` now defaults to **0**, so nothing changes unless it is asked for,
+and its range runs **-1.5 to +1.5**. Positive makes dense material go pinker
+(what was shipped and rejected); negative makes it go deeper red, which is the
+direction worth trying before the idea is abandoned. The whole term is skipped
+when the slider sits at zero.
+
+## 0.20.0 — Prominence structure, carried in colour
+
+Nico set Prominence detail to 1.0 after 0.19.0 and reported no visible change.
+He was right, and measuring why found the real obstacle.
+
+**Inside a prominence the red channel is at 255 in 100% of the bright core.**
+Green sits near 59, blue near 51. Red is the maximum channel everywhere in
+there, so the hue-preserving highlight knee sets all three channels from `ms`
+and the chroma ratio — which means luminance detail cannot reach the picture at
+all, however good it is. The same promDetail change measures 59 levels before
+the knee and 13 after it. The 0.19.0 driver swap measures 1.5 levels on screen.
+That is what "no visible change" was.
+
+Green and blue have roughly 200 unused levels. Putting the prominence's own
+structure there costs nothing in red:
+
+| | G spread (p10–p90) | agreement with H-alpha in G |
+|---|---|---|
+| promChroma 0.0 | 49–79 levels | 0.368 |
+| promChroma 0.6 | 57–105 levels | **0.596** |
+
+and on the two smaller prominences 0.565 → 0.762 and 0.740 → 0.827. On screen
+it is a mean of 13.6 levels and p90 of 27, against 1.5 for the luminance route.
+
+New slider, **Prominence colour detail** (`promChroma`, default 0.6). At 0 every
+build before this one is reproduced exactly. Outside the gate `prom` is 0 so the
+factor is exactly 1 — measured residual 1.2e-07, which is float rounding.
+
+It reads as the denser prominence material going pinker rather than redder.
+That is roughly what more continuum through more material looks like, but it is
+a look, and the slider is there because it is a taste call.
+
+Measured on one dataset, three prominences. **A 0.18.0 cache is reused as it
+stands.**
+
+## 0.19.0 — Let the prominence layer drive the prominence contrast
+
+0.18.0 built a prominence detail layer and blended it into `det`, but left the
+*contrast* term — the one that gives a detected prominence its texture — driven
+by the inner-corona layer, which was the best thing available before the new
+layer existed. It is not any more.
+
+Scored as correlation with the H-alpha red channel's own fine structure, which
+normalisation cannot fake, on each prominence's bright core clear of the disc
+mask (Nico's 12 Aug 2026 bracket, 600 mm, 14 tiers):
+
+| prominence | inner-driven | promdet-driven |
+|---|---|---|
+| az 226 (the large one) | 0.714 | **0.828** |
+| az 44 | 0.357 | **0.361** |
+| az 10 | 0.143 | **0.284** |
+
+No prominence gets worse. The positive bias stays at 0.30: lowering it to 0.10
+scores 0.828 against 0.807 on the large prominence, which does not justify
+changing how bright everyone's prominences render.
+
+The change is scoped by construction. `prom` is zero outside the gate, so the
+whole term is exactly 1 there and nothing in the corona moves; a work directory
+with no `promdet.npy` falls back to the old driver and renders bit-identically.
+
+Measured on one dataset. It wants a second bracket before it is trusted as a
+general result.
+
+**A 0.18.0 cache is reused as it stands** — this release touches `render.py` and
+`gui.html` only, so nobody pays for another 16-minute stack.
+
+Two things this release does NOT fix, both measured while looking for the cause:
+
+* **The disc mask is not covering the prominences.** Where they are actually
+  bright, none are hidden and the mask weight runs 0.73–0.92. An earlier reading
+  of 83% hidden came from sampling the whole gate, most of which sits inside the
+  disc where the colour test fires on noise. The mask is fine.
+* **83–91% of the large prominence's bright core still renders above the
+  highlight knee**, in every setting tried. The envelope pins at the frame's
+  99.97th percentile and a prominence is 5,870 px out of 43 million, so its own
+  structure lands where there is no room left. Raising the highlight compression
+  does not recover it — measured across 0.1 to 1.0, fine structure inside the
+  prominence goes slightly *down*. This is the next real problem.
+
+## 0.18.0 — Prominences get their own detail layer
+
+Both testers said prominence interiors came out flat, and Nico's short-exposure
+frames show why that is a loss: the structure is plainly there. Two measured
+reasons, on the reference bracket's largest prominence (225 deg, R/GB 16.4).
+
+**MGN's normalisation window clips them.** `hi` is the 99.95th percentile of the
+frame — correct for a corona, where a few hot pixels must not set the range —
+and a prominence is brighter than that:
+
+    red channel        37% of the prominence hard-clipped at xn = 1.0
+    merged luminance   21% clipped, the rest squeezed into the top 6% of range
+
+Whatever structure it had was gone before the multiscale filter ran. Giving the
+layer its own window, taken inside the gate, drops the clipping to 2%.
+
+**And MGN is the wrong filter for a compact bright feature.** Its purpose is to
+divide out the local standard deviation so faint structure comes up equally at
+any brightness — which is exactly what flattens a prominence, whose interior
+variation IS its local sigma. Measured as correlation with the red channel's own
+fine structure, which no normalisation can fake:
+
+    MGN, frame window (what the corona layers do)        0.037
+    MGN, gate window, corona scales                      0.375
+    MGN, gate window, fine scales                        0.420
+    plain multiscale unsharp, gate-scaled                0.940   <-- shipped
+
+    existing layers on the same measure:  inner 0.317, MGN 0.274, merged 0.262
+
+**And it uses the RED channel, not luminance.** An H-alpha prominence puts most
+of its signal in R, and luminance weights R at 0.2126, so the conversion costs
+more than half the structure before any filter sees it — 1.000 to 0.417, the
+single largest loss in the chain.
+
+So `promdet.npy` is a multiscale unsharp of log(red) from the H-alpha tier,
+scaled by the spread inside the prominence gate. It is blended into the detail
+only where `prom` fires — the same gate that already decides where prominences
+are brightened — so it cannot touch the corona at any setting. New slider,
+**Prominence detail**, default 0.7; at 0 the render is identical to 0.17.0.
+
+Measured end to end on the reference bracket, correlation of the render's detail
+with the truth inside the prominence:
+
+    promDetail 0.0 (0.17.0)   0.368
+    promDetail 0.4            0.535
+    promDetail 0.7            0.633
+    promDetail 1.0            0.682
+
+**Two things that looked right and were not**, both killed by measurement rather
+than argument:
+
+*Partial convolution with the prominences masked out.* Druckmuller's method, and
+the obvious candidate — exclude the bright feature so it does not inflate the
+local statistics. It makes things WORSE (0.0850 to 0.0561, and 0.0519 dilated),
+because excluding a bright feature drags the local mean down, `(x - B)` is then
+large everywhere inside it, and the arctan saturates. Partial convolution solves
+the DARK plateau problem the Moon creates. Different problem, different tool.
+
+*My own comparison metric.* The first version of this analysis compared
+`rms(highpass)/mean(lowpass)` across stages — but that denominator is the local
+brightness for an IMAGE and about 0.5 for a normalised LAYER, so "red channel
+0.2932 against inner 0.1513" was never a comparison. Every number above uses
+correlation against a fixed reference instead, which is invariant to whatever
+normalisation a stage applies.
+
+An old workdir has no `promdet.npy`, and the renderer omits the key entirely
+rather than substituting a flat 0.5. That distinction is not cosmetic: the blend
+pulls `det` TOWARDS the layer, so a flat one would ERASE detail inside the gate
+rather than do nothing. The first version of this release did exactly that, and
+the fallback test caught it — on a 0.17.0 cache, turning the new slider up would
+have flattened the prominences it was meant to sharpen. 0.17.0 caches load fine;
+they simply have nothing to blend until the folder is re-run.
+
+Verified: with no layer the slider has no effect at all; with a layer,
+promDetail 0 is bit-identical to 0.17.0, and the change is exactly zero wherever
+the gate is zero.
+
 ## 0.17.0 — Letting the data say how much the short exposures are worth
 
 Nico: "All the detail is in the short exposures. So it is there but somehow got
