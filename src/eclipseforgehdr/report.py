@@ -17,7 +17,10 @@ METHODS = [
      "hot/dead photosites mapped on the shortest tier against a fitted photon+read "
      "noise model, repaired by the median of same-colour neighbours"),
     ("Alignment",
-     "phase correlation on gradient-flattened log corona (Druckmuller 2009, ApJ 706, 1605); "
+     "cross-correlation of a gradient-flattened log corona, after Druckmuller "
+     "2009 (ApJ 706, 1605) -- but WITHOUT that paper's phase normalisation: "
+     "skimage is called with normalization=None, so the amplitude spectrum is "
+     "not divided out and this is not, strictly, phase correlation; "
      "lag-1 and lag-2 links solved together by weighted least squares"),
     ("Prominence anchors",
      "the fastest tiers hold almost no corona to correlate on, so they are also tied in "
@@ -60,7 +63,7 @@ METHODS = [
      "robust spread of the corona's own colour in the limb annulus"),
     ("NAFE detail",
      "Noise Adaptive Fuzzy Equalization with a Variable Neighbourhood (Druckmuller 2013, "
-     "ApJ 775, 88; Druckmuller & Druckmullerova, IWCIA 2014, LNCS 8466, 262): each pixel is "
+     "ApJS 207:25; Druckmuller & Druckmullerova, IWCIA 2014, LNCS 8466, 262-271): each pixel is "
      "ranked within a fuzzy multiscale neighbourhood restricted in VALUE rather than by a "
      "geometric mask, which is what removes the contrast loss at the lunar edge and makes "
      "this the one detail layer that does not depend on the limb fit"),
@@ -197,14 +200,105 @@ def build(stats):
         if "cov_limb" in aq:
             A(f"             : tier-to-tier variance {aq['cov_limb']:.3f} at the limb, "
               f"{aq.get('cov_corona', float('nan')):.3f} in the corona "
-              f"(lower = the tiers agree)")
+              f"(lower = the tiers agree; over "
+              f"{aq.get('tiers_limb', float('nan')):.0f} unclipped tiers at the "
+              f"limb)")
+        elif "cov_limb_unmeasurable" in aq:
+            A(f"             : tier-to-tier variance at the limb NOT MEASURABLE "
+              f"— only {aq['cov_limb_unmeasurable']:.0f} tier(s) hold unclipped "
+              f"signal between 1.00 and 1.10 R, and the coefficient of "
+              f"variation needs three. A number built on a partly clipped tier "
+              f"is worse than none: that is what produced a false 0.79 here for "
+              f"three releases. A shorter tier at the top of the bracket would "
+              f"make it measurable")
         if "rim_width_px" in aq:
-            A(f"             : disagreement rim {aq['rim_width_px']:.0f} px wide "
-              f"just outside the limb")
+            import math as _m
+            A("             : disagreement rim "
+              + (f"{aq['rim_width_px']:.0f} px wide just outside the limb"
+                 if _m.isfinite(aq["rim_width_px"])
+                 else "none detectable — the tiers agree at the limb"))
         if "limb_width_med" in aq:
             A(f"             : merged limb 20-80% transition "
               f"{aq['limb_width_med']:.1f} px (p90 "
               f"{aq.get('limb_width_p90', float('nan')):.1f} px)")
+    _lg = stats.get("linearity_gamma")
+    if _lg is not None and abs(_lg - 1.0) > 0.08:
+        A(f"linearity    : *** NOT scene-linear — the photometric links are "
+          f"tilted as if the data carried a gamma of about {_lg:.2f}, where "
+          f"linear data gives 1.00. A raw developer's tone curve does this, "
+          f"and inverting sRGB on load does not undo it. Use the raw files; a "
+          f"flat exported the same way carries the same curve and does not "
+          f"divide out. Every number in this report assumes linearity")
+    _pd = stats.get("pedestal")
+    if _pd:
+        # sigma comes from a leave-one-tier-out jackknife on a grid, so it can
+        # land at exactly 0 when every subset agrees. Say "well determined"
+        # rather than printing a number the grid cannot support.
+        _sg = (f"{abs(_pd['fitted']) / _pd['sigma']:.0f} sigma"
+               if _pd["sigma"] > 1e-9 else
+               "every leave-one-tier-out subset agrees")
+        if _pd["applied"]:
+            A(f"pedestal     : {_pd['applied']:+.2f} ADU subtracted from every "
+              f"tier (fitted {_pd['fitted']:+.2f}; {_sg}) — a black level left "
+              f"a few ADU behind arrives divided by the exposure time, so it is "
+              f"nothing on a long tier and everything on a short one")
+            A(f"             : tier-to-tier disagreement in the outer field "
+              f"{100 * _pd['scatter_before']:.1f}% -> "
+              f"{100 * _pd['scatter_after']:.1f}%")
+        else:
+            A(f"pedestal     : none applied. The best fit was "
+              f"{_pd['fitted']:+.2f} ADU ({_sg}) and was shrunk to zero by its "
+              f"own uncertainty; the tiers already agree to "
+              f"{100 * _pd['scatter_before']:.1f}% in the outer field")
+    for _k, _msg in (
+        ("limb_spread_bad",
+         "the tiers' lunar limbs are spread over %s px -- they are the same Moon "
+         "seconds apart, so this is a cross-tier alignment failure"),
+        ("limb_fit_rms_bad",
+         "the limb fit's rms is %s px; a real lunar limb fits to well under 1%% "
+         "of its radius, so this circle does not describe an edge"),
+        ("limb_variance_bad",
+         "the tiers disagree by %s (coefficient of variation) at the limb where "
+         "a well-behaved set sits near 0.05-0.08 — a disagreement in BRIGHTNESS, "
+         "not position, which the detail filters amplify into concentric rings. "
+         "The CAUSE is not established: 0.22.17 withdrew the veiling-glare "
+         "explanation an earlier build printed here"),
+        ("track_scatter_bad",
+         "the per-tier lunar positions scatter %s px about the fitted track, so "
+         "the track is fitting the alignment error rather than the Moon"),
+    ):
+        _v = stats.get(_k)
+        if _v:
+            A("             : *** " + (_msg % _v))
+    _af = stats.get("align_failed")
+    if _af:
+        A(f"             : *** CROSS-TIER ALIGNMENT FAILED — the link network is "
+          f"inconsistent by {_af:.0f} px half-res "
+          f"({2 * _af:.0f} px full-res) against a tolerance of "
+          f"{stats.get('align_tolerance', 0):.0f} px. The links contradict each "
+          f"other; the solved shifts are a compromise between impossible "
+          f"constraints. The merged limb, its radius, the disc mask and every "
+          f"radial filter are built on those shifts. This run's output is not "
+          f"usable — check whether the long tiers hold any corona to correlate on.")
+    _d = stats.get("limb_fit_disputed")
+    _dc = stats.get("limb_fit_corrected_px")
+    if _d and _dc:
+        A(f"limb correction: the merged half-level fit ran {_d:.0f} px LARGER "
+          f"than the tiers' own radius, far more than they disagree with each "
+          f"other, so it was moved {_dc:+.1f} px onto their consensus with its "
+          f"per-azimuth shape kept. The 50% crossing sits outside the true limb "
+          f"whenever the edge is soft, and the merged edge is soft because the "
+          f"Moon moves against the corona during the bracket; the per-tier fits "
+          f"use the same method on unsmeared single tiers. R sets the radial "
+          f"profile MGN divides out, FNRGF's rings, the deband and the disc "
+          f"mask, so this circle had to be right before any of them.")
+    elif _d:
+        A(f"             : *** the merged limb fit disagrees with the tiers' own "
+          f"radius by {_d:.0f} px, far more than they disagree with each other, "
+          f"and it was NOT corrected — the fit has no per-azimuth profile to "
+          f"move. R sets the radial profile MGN divides out, FNRGF's rings and "
+          f"the deband, so a wrong circle prints concentric arcs in all of them "
+          f"at once. Check the disc mask size on the preview.")
     ac = stats.get("autocrop_px") or {}
     if ac:
         A(f"alignment trim: {ac['top']}/{ac['bottom']} top/bottom, "

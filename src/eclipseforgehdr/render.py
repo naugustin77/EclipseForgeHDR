@@ -19,8 +19,51 @@ DEFAULTS = {
     "promDetail": 0.7,
     # How much of the OUTER field comes from RHEF rather than the corona
     # filters. Radius-weighted, so this cannot touch the inner corona at any
-    # setting -- see the blend. 0 reproduces every build before 0.21.
-    "rhefMix": 1.0,
+    # setting -- see the blend.
+    #
+    # DEFAULT 0, i.e. OFF, after 0.21.0 shipped it at 1.0 and made the picture
+    # visibly worse. RHEF forces a FLAT HISTOGRAM IN EVERY ANNULUS. Where the
+    # annulus holds corona that is exactly what you want. Where it holds only
+    # sky -- past about 3 R in a 600 mm frame -- it stretches the noise across
+    # the whole tonal range, and the outer field fills with full-contrast grain
+    # manufactured out of nothing.
+    #
+    # The amp*coh score did not see this: rank-equalised noise, plus the 1.6 px
+    # smooth in the layer, still reads as moderately radially coherent, so the
+    # number rose while the image degraded. Gilly & Cranmer work on EUV DISK
+    # imagery, where every annulus has signal; an eclipse frame runs out of
+    # corona long before it runs out of frame, and that difference was not
+    # thought through here.
+    #
+    # THE SNR GATE WAS TRIED AND DOES NOT FIX IT. The idea was to fade the
+    # weight out once an annulus holds no signal, using the data's own radial
+    # coherence ring by ring rather than a noise model. Measured on the
+    # reference bracket, that coherence is 0.99 at 1.5 R, 0.94 at 2.0 R, 0.78 at
+    # 2.5 R and still 0.55 at 3.0 R -- so the gate stays fully open exactly
+    # where the grain is worst, and the diagnosis behind it was wrong.
+    #
+    # The real mechanism is not absence of signal. It is that a rank transform
+    # DISCARDS AMPLITUDE: within one annulus a 1% real modulation and a 1% noise
+    # fluctuation are both stretched to the full 0..1 range, because a flat
+    # histogram is exactly what the method is for. Nothing that gates ON signal
+    # presence can fix that, since the signal is present -- it is just faint.
+    #
+    # So this stays opt-in at 0 with no recommended setting on this data. It is
+    # left in rather than removed because it is one lexsort of cached luminance
+    # and it may well suit a wider, cleaner field than a 600 mm frame; but on
+    # Nico's brackets the honest advice is to leave it alone.
+    "rhefMix": 0.0,
+    # Where the MGN layer sits between all six scales weighted alike (0, every
+    # build before 0.22) and the three FINE scales alone (1). See the long note
+    # in detail.build_layers: our gains are noise-normalisation constants, not
+    # Hill's 1:0.6:0.2:0.1 amplification ladder, and the difference is slabs
+    # against filaments.
+    #
+    # DEFAULT 1.0 -- chosen by Nico from a blind-ish four-way contact sheet at
+    # matched contrast, against my metric, which rates it 44% WORSE at the limb.
+    # amp*coh cannot see "delicate": it rewards radially coherent structure and
+    # the coarse scales carry plenty. Drag to 0 for the old look.
+    "detailScale": 1.0,
     # Prominence structure carried in green/blue instead of luminance -- see
     # the long note where it is applied. OFF by default: the measurement is
     # sound and the mechanism works, but at +0.6 it makes dense prominence
@@ -28,7 +71,62 @@ DEFAULTS = {
     # the other way (dense material goes deeper red), which is the direction
     # worth trying before this is called a dead end.
     "promChroma": 0.0,
-    "temp": 0.9, "tint": 1.205, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.1, "hlDesat": 0.0,
+    # RAW-PATH WHITE BALANCE, SOLVED RATHER THAN EYEBALLED.
+    #
+    # These were 0.9 / 1.205, a by-eye correction from 0.12.0, and tint at 1.205
+    # is a straight 20% GREEN MULTIPLY. After the unit-luminance renormalisation
+    # below (green carries 0.7152 of luminance) the net is green +5% and red and
+    # blue -13% relative -- the green-grey sky Nico reported, and the same cast
+    # the IMPORT_DEFAULTS note below had already measured and fixed for imports
+    # while the raw path was left alone. Half a fix for two years.
+    #
+    # Solvable exactly, because the far sky is neutral before these are applied:
+    # `ratio` is driven to 1.0 where the signal is near the noise floor, and the
+    # bgNeutral division is weighted by `cconf`, which measures 0.015 out there.
+    # So the rendered sky chroma is just (temp, tint, 1/temp) renormalised, and
+    #     R/G = temp/tint        B/G = 1/(temp*tint)
+    #
+    # Nico's own PixInsight version -- "lowered the green curve a bit and raised
+    # the blue curve a little" -- measured off his JPEG, linearised, normalised
+    # to green: sky R/G 1.064, B/G 1.884. Inverting the two expressions gives
+    # temp 0.752, tint 0.706, which reproduces that sky exactly.
+    #
+    #              temp   tint    sky R/G   sky B/G
+    #   was        0.900  1.205     0.747     0.922      green-dominant
+    #   now        0.752  0.706     1.064     1.884      his target, exactly
+    #
+    # Relative to green this is R/G x1.425 and B/G x2.043 -- his two curve moves,
+    # as numbers. It cools the corona too, which is why `satur` is the other half
+    # of what he did: he pushed saturation to restore the warm/cool separation.
+    #
+    # BOTH BACK TO 1.0 IN 0.22.23, at Nico's request, and the derivation above
+    # deserves the correction rather than quiet deletion.
+    #
+    # It rests on "the far sky is neutral before these are applied". Measured on
+    # hdr_rgb, the far sky is not neutral on ANY of the five datasets, and the
+    # five do not agree with each other:
+    #
+    #     set                    far sky R/G   B/G
+    #     Clifton 2024 560mm         1.244    0.908
+    #     Clifton 2026 360mm         1.206    0.880
+    #     Clifton 2026 250mm         1.116    0.757
+    #     Nico Lumix 600mm           0.992    0.647
+    #     Nico Sony                  0.553    1.328
+    #
+    # So a pair of numbers solved against one photographer's rendering of one
+    # eclipse cannot transfer: they landed near his target on his set because
+    # his own sky chroma was folded into the fit, and they render violet on a
+    # Canon whose sky chroma differs. 1.0/1.0 applies no cast at all and leaves
+    # the decision where it belongs -- with the two sliders and the person
+    # looking at the picture.
+    #
+    # The principled fix is a corona-referenced white balance: the K-corona is
+    # Thomson-scattered photospheric light and is white by physics, so the
+    # 1.05-1.6 R annulus is a defensible white reference. `corona_white_balance`
+    # already does exactly this, and is gated to files with no camera WB, so it
+    # never runs on a raw bracket. Opening that gate is the real answer and is
+    # not this change.
+    "temp": 1.0, "tint": 1.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.1, "hlDesat": 0.0,
     "outGamma": 1.0, "bgBlack": 0.005,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
@@ -219,6 +317,12 @@ class Layers:
         mg = np.load(os.path.join(wd, "mgn.npy"))
         mg = np.clip((mg - np.percentile(mg, 1)) /
                      (np.percentile(mg, 99.7) - np.percentile(mg, 1)), 0, 1)
+        _mfp = os.path.join(wd, "mgn_fine.npy")
+        self.has_mgn_fine = os.path.exists(_mfp)
+        if self.has_mgn_fine:
+            mgf = np.load(_mfp)
+            mgf = np.clip((mgf - np.percentile(mgf, 1)) /
+                          (np.percentile(mgf, 99.7) - np.percentile(mgf, 1)), 0, 1)
         D = np.load(os.path.join(wd, "fnrgf.npy"))
         nfp = os.path.join(wd, "nafe.npy")
         nfl = np.load(nfp) if os.path.exists(nfp) else np.full_like(D, 0.5)
@@ -327,12 +431,14 @@ class Layers:
                      "nafe": nfl, "cconf": self._cconf}
         if self.has_rhef:
             self.full["rhef"] = np.load(_rp, mmap_mode="r")
+        if self.has_mgn_fine:
+            self.full["mgn_fine"] = mgf
         if self.has_promdet:
             self.full["promdet"] = np.load(_pdp, mmap_mode="r")
         q = preview_decim
         self.prev = {k: v[::q, ::q] for k, v in self.full.items()}
         # clarity/smoothing variants (preview scale; full-res computed on demand)
-        for key in ("mgn", "fnrgf", "nafe"):
+        for key in ("mgn", "fnrgf", "nafe") + (("mgn_fine",) if self.has_mgn_fine else ()):
             f = _fill_disc(self.prev[key], self.cy / q, self.cx / q, self.Rmask / q)
             self.prev[key + "_lo"] = ndimage.gaussian_filter(f, 8.0 / q * 2)
             self.prev[key + "_sm"] = ndimage.gaussian_filter(f, 0.6)
@@ -449,11 +555,24 @@ def _variant(src, key, kind, preview):
 
 def _detail_layers(src, P, preview=True):
     """Runtime-transformed detail layers (shared by composite render and layer views)."""
-    mgr = src["mgn"]
+    # Detail balance: blend the all-scale layer with the fine-only one. Because
+    # an MGN layer is a weighted mean of its per-scale terms, this IS a ladder
+    # change, not an approximation of one -- measured fine/coarse ratio 1.09 at
+    # 0, 3.18 at 1, against 3.32 for Hill's true gains.
+    _ds = float(P.get("detailScale", 0.0)) if "mgn_fine" in src else 0.0
+
+    def _mgsrc(suffix=None):
+        a = src["mgn"] if suffix is None else _variant(src, "mgn", suffix, preview)
+        if _ds <= 0:
+            return a
+        b = src["mgn_fine"] if suffix is None else _variant(src, "mgn_fine", suffix, preview)
+        return (1.0 - _ds) * a + _ds * b
+
+    mgr = _mgsrc()
     if P["clarity"] > 0:
-        mgr = mgr + P["clarity"] * (mgr - _variant(src, "mgn", "lo", preview))
+        mgr = mgr + P["clarity"] * (mgr - _mgsrc("lo"))
     if P["smoothing"] > 0:
-        mgr = (1 - P["smoothing"]) * mgr + P["smoothing"] * _variant(src, "mgn", "sm", preview)
+        mgr = (1 - P["smoothing"]) * mgr + P["smoothing"] * _mgsrc("sm")
     mg = np.clip(0.5 + (mgr - 0.5) * P["mgnContrast"], 0, 1)
     fnr = src["fnrgf"]
     if P["clarity"] > 0:

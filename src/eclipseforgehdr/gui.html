@@ -215,6 +215,7 @@ const DEFS = [
  ["radialFlatten","Radial flatten",0,0.9,0.01,"structure"],
  ["fnMix","FNRGF share (outer)",0,1,0.01,"structure"],
  ["mgnContrast","MGN contrast (0 = off)",0,2,0.01,"structure"],
+ ["detailScale","Detail balance (fine \u2192)",0,1,0.01,"structure"],
  ["fnCompress","FNRGF strength (0 = off)",0,2.5,0.01,"structure"],
  ["nafeMix","NAFE-VN mix (0 = off)",0,1,0.01,"structure"],
  ["clarity","Clarity",0,1,0.01,"structure"],
@@ -227,7 +228,7 @@ const DEFS = [
  ["innerDenoise","Detail denoise",0,1,0.01,"inner"],
  ["innerDim","Glare dim",0,0.7,0.01,"inner"],
  ["promGain","Prominence contrast",0,2,0.01,"prom"],
-  ["rhefMix","Outer field (RHEF)",0,1,0.01,"detail"],
+  ["rhefMix","Outer field (RHEF)",0,1,0.01,"structure"],
  ["promDetail","Prominence detail",0,1,0.01,"prom"],
  ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
  ["temp","Warmth (R/B)",0.8,1.3,0.005,"color"],
@@ -250,13 +251,30 @@ let VIEW = "composite";
 let P = {}, GEO = null, L = {}, ready = false;
 const $ = id => document.getElementById(id);
 
+// Controls that only work when an optional cached layer is present. Without
+// this a slider whose layer was never built just sits there doing nothing --
+// which is what happened with Detail balance on a workdir stacked before 0.22,
+// and is the same failure as a blank preview: the app knew and did not say.
+const NEEDS_LAYER = {detailScale: ["has_mgn_fine", "re-stack needed"],
+                     rhefMix:     ["has_rhef",     "re-stack needed"]};
+
 function buildSliders(defaults){
   for (const [k,label,min,max,step,grp] of DEFS){
     P[k] = defaults[k];
+    const need = NEEDS_LAYER[k];
+    const off = need && GEO && !GEO[need[0]];
+    if (off) P[k] = 0;                     // never render with a weight we cannot honour
     const div = document.createElement("div"); div.className = "ctl";
-    div.innerHTML = `<label>${label}<span class="val" id="v_${k}">${defaults[k]}</span></label>
-      <input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}" value="${defaults[k]}">`;
-    $("g-"+grp).appendChild(div);
+    div.innerHTML = `<label${off?' style="opacity:.45"':''}>${label}${off?' \u2014 '+need[1]:''}<span class="val" id="v_${k}">${off?"n/a":defaults[k]}</span></label>
+      <input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}" value="${off?0:defaults[k]}"${off?' disabled':''}>`;
+    // A slider naming a group that does not exist used to throw here, and the
+    // throw happened during init -- so ONE bad group id in the table above left
+    // the app with no sliders, no preview and no error the user could see, while
+    // the server log still said "ready". 0.21.0 shipped exactly that mistake
+    // ("detail" is not a group). Warn and skip the control instead.
+    const _grp = $("g-"+grp);
+    if (!_grp){ console.warn("no slider group g-"+grp+" for "+k+" -- skipped"); continue; }
+    _grp.appendChild(div);
     const el = div.querySelector("input");
     el.addEventListener("input", () => {
       P[k] = parseFloat(el.value); $("v_"+k).textContent = el.value;
@@ -410,6 +428,7 @@ async function loadLayers(){
   // has no prominence detail layer. The blend below then simply never fires.
   if (GEO.has_promdet) names.push("promdet");
   if (GEO.has_rhef) names.push("rhef");
+  if (GEO.has_mgn_fine) names.push("mgn_fine","mgn_fine_lo","mgn_fine_sm");
   if (GEO.has_contact) names.push("contact");
   if (GEO.has_flat){
     names.push("flat");
@@ -515,9 +534,14 @@ function setOrient(v){
 let nafeMed = 0.5;
 function detailAt(j){
   const {mgnContrast,fnCompress,innerDenoise,clarity,smoothing,nafeMix} = P;
-  let mgr = L.mgn[j]/255;
-  if (clarity>0) mgr += clarity*(mgr - L.mgn_lo[j]/255);
-  if (smoothing>0) mgr = (1-smoothing)*mgr + smoothing*(L.mgn_sm[j]/255);
+  // Detail balance -- blend all-scale MGN with the fine-only layer. Mirrors
+  // _detail_layers in render.py, variants included, or clarity would subtract
+  // the blur of a layer that is no longer the one being sharpened.
+  const ds = (L.mgn_fine && P.detailScale>0) ? P.detailScale : 0;
+  const _mgs = (a,b) => ds>0 ? (1-ds)*(a[j]/255) + ds*(b[j]/255) : a[j]/255;
+  let mgr = _mgs(L.mgn, L.mgn_fine);
+  if (clarity>0) mgr += clarity*(mgr - _mgs(L.mgn_lo, L.mgn_fine_lo));
+  if (smoothing>0) mgr = (1-smoothing)*mgr + smoothing*_mgs(L.mgn_sm, L.mgn_fine_sm);
   let mg = 0.5 + (mgr - 0.5)*mgnContrast; mg = mg<0?0:mg>1?1:mg;
   let fnr = L.fnrgf[j]/255;
   if (clarity>0) fnr += clarity*(fnr - L.fnrgf_lo[j]/255);

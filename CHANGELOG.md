@@ -5,6 +5,1363 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.22.24 — the pipeline now measures the thing TODO 1a is about
+
+TODO 1a was reopened on a rough rig: one raw per tier, the stacked tier's shift
+applied to a single frame, my own centre and radius. It showed two of Nico's
+tiers departing from the others by -22% and +64% inside 1.25 R while agreeing
+outside — far too large to be an artifact of that rig, and far too rough to
+build on.
+
+So the pipeline takes the same measurement itself, with the real alignment, the
+real per-tier stacks and the real geometry: each tier's radial profile,
+scene-referred, divided by the median across tiers, from 1.0 to 3.0 R. Flat 1.0
+means the single photometric factor describes that tier fully. A departure that
+grows toward the limb is an error that factor **cannot see**, because it is
+fitted where the tiers overlap — mostly the mid field — and it lands where the
+detail filters normalise against a local mean.
+
+The run says which tier is worst inside 1.3 R and by how much, and writes the
+full profiles to `tier_radial.json` in the diagnostics bundle. On synthetic
+tiers with a planted +60% near-limb error on tier 2, it names tier 2 at 60%.
+
+**It changes nothing.** No correction is applied, no layer moves, and a 0.22.19+
+work directory is still reused. The point is to have this number on five
+datasets before deciding whether a radial per-tier correction is warranted —
+rather than deciding from one set measured with a rough rig, which is how TODO
+#1 got both opened and closed on thin evidence already.
+
+## 0.22.23 — Warmth and Tint default to 1.0, and the bisect finishes
+
+**Warmth and Tint are both 1.0 by default**, at Nico's request. The 0.22.9
+derivation that set them to 0.752 / 0.706 rests on "the far sky is neutral
+before these are applied", and that premise is false on every dataset here:
+
+```
+set                    far sky R/G   B/G
+Clifton 2024 560mm         1.244    0.908
+Clifton 2026 360mm         1.206    0.880
+Clifton 2026 250mm         1.116    0.757
+Nico Lumix 600mm           0.992    0.647
+Nico Sony                  0.553    1.328
+```
+
+Two numbers solved against one photographer's rendering of one eclipse landed
+near his target because his own sky chroma was folded into the fit, and render
+violet on a Canon whose sky chroma differs. 1.0 / 1.0 applies no cast and leaves
+the choice to the sliders. The principled fix — a corona-referenced white
+balance, since the K-corona is white by physics — already exists as
+`corona_white_balance` and is gated to files with no camera WB. Opening that
+gate is the real answer and is not this change.
+
+### The bisect is finished: it is the feather, and only the feather
+
+Three switches, three runs on Nico's 600 mm set, each against the same default
+baseline (which reproduced bit-for-bit across two runs):
+
+```
+change                       texture at 1.06 R (NAFE)   elsewhere
+pedestal off                        1.00                 1.000
+exposure exponent 1.0 (was 0.55)    1.03                 0.97-1.05
+feather plain (pre-0.22.16)         0.36                 0.95-1.05
+```
+
+Only the feather moves it, only at 1.06 R, and the setting that helps is the one
+that **blurs** — the leak, which also measurably softens the limb (ramp 6 → 8 px,
+fit rms 2.37 → 2.62, R 617.4 → 619.4 against a tier consensus of 617).
+
+And the per-radius coherence, measured for the first time, says what that band
+contains:
+
+```
+m80-250 coherence at 15 px lag   1.06R  1.10R  1.25R  1.40R  1.90R
+hdr_lum                           0.33   0.49   0.72   0.85   0.77
+MGN                               0.30   0.41   0.54   0.68   0.72
+NAFE                              0.25   0.44   0.62   0.70   0.65
+```
+
+Beyond 1.4 R the fine structure is radially coherent — real corona. At 1.06 R it
+is not. So the leak was suppressing something that is largely **not signal**, and
+restoring the correct merge exposed it.
+
+### What the raws say, and the lead that is left
+
+Four of Nico's own raws decoded with LibRaw, aligned with the pipeline's own
+shifts, scene-referred and compared ring by ring:
+
+```
+tier / median-of-tiers   1.03R  1.06R  1.10R  1.15R  1.20R  1.30R  1.60R
+1/60s                    1.000  1.008  0.999  0.994  1.035  0.999  0.996
+1/30s                    0.947  0.912  0.912  0.911  0.775  1.001  1.050
+1/20s                    1.216  1.216  1.226  1.359  1.640  0.925  0.978
+1/13s                    1.000  0.992  1.001  1.006  0.965  1.008  1.004
+```
+
+Two adjacent tiers disagree with the other two by −22% and **+64%** inside
+1.25 R, and all four agree to a few percent outside it. Saturation is 0–13% of
+the ring, so it is not clipping. That is a per-tier error which varies with
+RADIUS — which is what TODO #1 was originally designed to correct, and which
+0.22.16 closed as unnecessary. That closure was premature.
+
+Stated as a caveat because it matters: this used one raw per tier against the
+stacked tier's shift, and my own centre and radius rather than the pipeline's.
+The effect is far too large to be an artifact of that, but the exact numbers are
+not trustworthy. The pipeline should measure this itself — per-tier radial
+profiles in the diagnostics bundle — before anything is built on it.
+
+## 0.22.22 — say which switches the build actually honours
+
+A bisect run was set up with `ECLIPSEFORGE_WALPHA=1.0` and launched against a
+build that predated the switch. It was ignored silently, the run looked like a
+test, and it came back **bit-identical to the default** — every band 1.000, the
+same alpha 0.55, coherence unchanged to four decimals. Twenty minutes for a
+reproducibility check nobody asked for.
+
+The run now logs any `ECLIPSEFORGE_*` variables it can see, together with the
+version that is reading them. A build too old to know about a switch cannot
+print the line, so its absence is the signal that the app was not reinstalled.
+
+`efhdr --version` before starting is the other half of that check.
+
+## 0.22.21 — a third switch: the exposure-exponent trial
+
+The pedestal is excluded by measurement. Nico's `ECLIPSEFORGE_NO_PEDESTAL=1`
+run, snapshotted before and after against the same rings:
+
+```
+                       with pedestal   without    ratio
+hdr_lum m80-250 amp        43.938      43.936     1.000
+   coherence 5/15/40    0.88/0.74/0.47  0.88/0.74/0.47
+merged level 1.1-2.3 R                             1.000 .. 0.999
+```
+
+Identical in every layer and every band. And the texture is not new: his own
+full-resolution exports from before today already carry it, measured on the
+composite over the same rings —
+
+```
+export             version   m80-250 rel-amp   coherence 5/15/40
+render_16bit_2      0.21.4        0.047          0.29/0.23/0.10
+render_16bit_5      0.22.5        0.075          0.46/0.36/0.13
+```
+
+(those two also differ in slider settings, so the rise between them is
+confounded and is not read as a version effect).
+
+That points away from today's changes entirely, and at something that fires on
+his bracket and not on Clifton's: **the exposure-exponent trial**. It is a
+0.22.5-era feature; on his set it picks 0.55 and reports "+106% coherent detail
+at 1.02-1.12 R", which is its stated purpose — it tilts merge weight toward the
+SHORT tiers, which are also the noisiest. Its guard only checks that the mid and
+outer shells keep their radial coherence, so fine radial texture near the limb
+is precisely what it is permitted to add.
+
+`ECLIPSEFORGE_WALPHA=1.0` holds the exponent at 1.0 and skips the trial. Nothing
+changes by default; the report says when the switch is on.
+
+## 0.22.20 — two switches, so the next answer is measured rather than guessed
+
+0.22.19 removed the per-tier arcs — replayed on the finished run, the radial
+ripple in the detail layers' texture amplitude is 0.024–0.030, i.e. no ring
+structure left. Nico: *"better but not gone."*
+
+What is left, measured on his 600 mm set at 0.22.19:
+
+* it is **not the flat** — the merged texture correlates **−0.001** with the
+  master flat's own texture in the same window (control at a 7 px shift: +0.001)
+* it is **not a per-tier boundary** — no sharp radial features in the texture
+  amplitude anywhere past 1.1 R
+* it is **not made by the filters** — it is already in `hdr_lum`, and FNRGF's
+  version of it correlates **+0.999** with the merged luminance's own
+* it is **radially coherent**, not noise: in the m80–250 band, coherence 0.897 /
+  0.760 / 0.483 at 5 / 15 / 40 px radial lag, against 0.075 / 0.041 / 0.017 for
+  the m250–700 band, which is pure noise
+
+So it is fine radial structure in the merged luminance. That is what real
+coronal fine structure looks like too, and no measurement I have separates the
+two. Three merge changes landed in quick succession — the pedestal (0.22.15) and
+two feathers (0.22.16, 0.22.19) — and on his set the pedestal moved the outer
+field a long way (tier disagreement 44.5% → 8.3%).
+
+**Guessing which one is slower than bisecting**, and his run takes 13 minutes,
+so this release adds the switches and changes nothing by default:
+
+```
+ECLIPSEFORGE_NO_PEDESTAL=1     restores the pre-0.22.15 merge exactly
+ECLIPSEFORGE_FEATHER=plain     the pre-0.22.16 feather (leaks into the clip)
+ECLIPSEFORGE_FEATHER=masked    the 0.22.16 one (steps at the clip edge)
+ECLIPSEFORGE_FEATHER=taper     the default, 0.22.19
+```
+
+Verified: `plain` leaks 0.46 of full weight into the clipped region with a step
+of 0.080; `masked` leaks nothing with a step of 1.000; `taper` leaks nothing
+with a step of 0.133. The run report says when a switch is on.
+
+## 0.22.19 — the arcs were mine, and they are gone
+
+Nico, on his own 600 mm reference set at 0.22.18: *"I am now also seeing strange
+rims in the corona - it is in almost all layers. Something broke - it was
+perfect with my data before."* He was right. 0.22.16 fixed one thing and broke
+another.
+
+Two-tier merge rebuilt from Clifton's raws, identical weights, only the feather
+function changed. "step" is the largest jump one tier's weight makes between
+neighbouring pixels:
+
+```
+version                  peak at   1.00R  1.02R  1.06R  1.20R   step
+no feather (reference)    1.025 R  1.000  1.000  1.000  1.000  0.978
+plain blur (<= 0.22.15)   1.095 R  3.690  0.674  0.856  0.977  0.027
+blur then mask (0.22.16)  1.025 R  0.999  1.000  1.000  1.000  0.986
+this one                  1.025 R  1.054  1.000  1.000  1.000  0.046
+```
+
+0.22.16 restored the weight's magnitude at the boundary and then zeroed it just
+past that boundary — a step of nearly the full weight, **0.986 against the old
+0.027**. Every tier's saturation contour then prints as its own arc.
+
+**Why his set and not Clifton's.** His bracket runs at exposure exponent 0.55 —
+the alpha trial fires on it — so every tier carries comparable weight and every
+tier's boundary shows. At alpha 1.0 the longest unclipped tier dominates and the
+others' steps are invisible. Replayed at both exponents, the step is the same
+0.986 either way; only whether it reaches the picture differs.
+
+**The fix.** `den`, the blurred validity mask, is 1 deep inside the usable
+region and 0.5 on the boundary, so a smoothstep on `(den−0.5)·2` reaches zero
+exactly where the tier starts clipping. The weight is continuous everywhere,
+still exactly zero on every clipped pixel, and the merged profile is unchanged
+from 1.02 R outward. Step down to 0.046 — better than the plain blur's 0.027 in
+kind if not in number, since that one bought its smoothness by leaking.
+
+The cost, named: a tier that clips loses a band about one feather-sigma wide
+*inside* its own clipping contour. That is the conservative direction, and a
+tier that never clips is untouched — its `den` is 1 everywhere, so the function
+reduces to the plain blur it always was.
+
+I should have measured the step when I changed this in 0.22.16. The profile test
+I ran passed perfectly and said nothing about continuity, and I shipped on it.
+
+## 0.22.18 — a linearity check, because Lightroom TIFFs cannot work
+
+Nico tried the 250 mm set again as Lightroom TIFF exports: *"TIFFs work worse
+and the sun/moon is not round at all... looks like a potato"*, and separately,
+*"flats are not working with TIFFs"*. Both are the same cause, and the run
+produced nine pages of plausible-looking numbers without ever saying so.
+
+The same nine frames, both ways:
+
+```
+                     tier factors      photometric links   limb fit rms
+from the CR2s        0.944 .. 1.015    no systematic tilt     0.95 px
+Lightroom TIFFs      0.251 .. 2.328    7 of 7 leaning up     10.32 px
+```
+
+A factor of 9.3 across the bracket where the raws give 1.08, and a limb fit
+whose rms is 3.3% of its own radius — the potato.
+
+### Why it cannot be made to work
+
+Everything here assumes signal proportional to exposure time. A raw file has
+that; a developer's export does not, because a developer applies a tone curve.
+`TiffFrame` already inverts sRGB on load, and that is not the problem — it
+undoes the *encoding*. Adobe's base curve sits underneath it, is not published,
+and cannot be inverted from the file. Lightroom has no scene-linear TIFF export.
+
+The flats fail for exactly the same reason and are not a separate bug: a flat
+exported through the same curve no longer divides out. It shows up as the
+falloff disagreeing between the two paths — 184.0% from the TIFF flats against
+105.6% from the raw ones, the same lens and the same 30 frames.
+
+### Detecting it, and the test that does not work
+
+The obvious test — does the ratio between two tiers change with brightness —
+**fails on the commonest case**. For a power law `y = x^g` the ratio is
+`(s_b/s_a)^g` at every level, so a gamma is invisible to it: a synthetic check
+came back at 1.011, indistinguishable from linear. That test was written, run,
+and thrown away.
+
+What a gamma actually does is tilt every photometric link by the same amount,
+and the links are already measured. So fit g from them:
+
+```
+link_i = (s_i+1 / s_i)^(g-1)    ->    g = 1 + median( ln link / ln step )
+```
+
+Exact on planted values (1.00 → 1.000, 1.49 → 1.490, 0.80 → 0.800). On Nico's
+TIFF run it reads **g ≈ 1.46**. Past 8% from unity the run says plainly that the
+frames are not scene-linear, names the tone curve when the input is not raw,
+says the flat carries it too, and states that every number below assumes
+linearity — instead of quietly producing a potato.
+
+## 0.22.17 — withdrawing the glare explanation, and the statistic behind it
+
+0.22.16 removed the pink rim on the 250 mm set. The **rings did not go**, and
+limb variance came back 0.791 against 0.793 — untouched, exactly as predicted.
+So I went to measure the thing that number stands for, and it does not stand up.
+
+### The 0.79 is not reproducible from that run's own tiers
+
+Rebuilding the same coefficient of variation from the 250 mm set's exported
+aligned tiers, over the same 1.00–1.10 R band, scene-referred, saturated pixels
+excluded:
+
+```
+set          pipeline says   rebuilt from its own tiers
+250 mm           0.791                 0.021
+360 mm           0.037                 0.039
+```
+
+The 360 mm set reproduces to within 0.002, so the method is sound. The 250 mm
+number is not.
+
+Compared ring by ring, that set's tiers agree in the near-limb rim to
+**0.3–2.1%** — *better* than the 360 mm set's 1.1–2.8%:
+
+```
+tier / median-of-tiers   1.02R  1.05R  1.08R  1.12R  1.18R  1.25R
+250mm scatter             0.0%   0.5%   0.3%   1.0%   1.4%   1.8%
+360mm scatter             1.1%   2.7%   2.8%   2.7%   2.5%   2.4%
+```
+
+### Why the statistic lied
+
+`stack_variance` requires three tiers per pixel. The 250 mm bracket's shortest
+exposure is 1/125 s, and between 1.00 and 1.10 R **only two of its nine tiers
+hold unclipped signal**. Every pixel where a third one survived the clipping cut
+is a pixel where a partly clipped tier happened to be dim — excluding clipped
+pixels keeps precisely the dim tail of a blown tier — so the median was taken
+over a biased remnant. The 360 mm set has five or six clean tiers there and
+never enters that regime.
+
+Now the statistic counts its clean tiers and, below three, reports that it is
+**not measurable** rather than printing a number built on contamination. The
+report says which, and says what would fix it: a shorter tier at the top of the
+bracket.
+
+### What is withdrawn
+
+The veiling-glare explanation — *"a 240 mm f/5.6 zoom flares far more than a
+600 mm prime"*, from 0.22.11, and the 0.22.13 entry that called the 360 mm set a
+confirming natural experiment. Both rested on 0.793 vs 0.037, and that contrast
+is an artifact of how many tiers each bracket has unclipped at the limb, not of
+its optics. The prediction that "the 360 mm set will come back low" was right
+for the wrong reason, which is the least useful kind of right.
+
+The comment block in the source is kept and marked withdrawn rather than
+deleted: the ringing measurements in it (2–5.3x the reference set in 1.02–1.15 R,
+NAFE worst at 5.3x while being the one layer that ignores the limb fit) are
+still real and still unexplained.
+
+**The rings are real and their cause is once again open.** What is now excluded:
+the merge weight (0.22.16), the limb fit (0.22.14), the pedestal (0.22.15), and
+tier-to-tier brightness disagreement (this entry).
+
+## 0.22.16 — the merge weight was leaking into each tier's clipped region
+
+Nico, on the 360 mm and 2024 560 mm runs: *"strange pink rim around the limb"*.
+He was looking at a real defect that had been in the merge all along, and that
+0.22.14 had just stopped hiding.
+
+### What the merge was doing
+
+The weight was smoothed with a plain `gaussian_filter(wsat, 0.032*R)`. A blur
+goes both ways, so it handed every tier weight in the band where that tier is
+**clipped** — and a clipped tier under-reports the scene by definition. Weight
+goes as exposure time, so a blown 2 s tier outvotes an unblown 1/1000 s one by a
+factor of two thousand.
+
+Controlled two-tier merge rebuilt from Clifton's own raws (1/125 s and 1/8 s,
+LibRaw-decoded, identical weights, only the feather changed):
+
+```
+mode              peak at    1.00R   1.02R   1.04R   1.06R   1.09R
+no feather         1.025 R   1.000   1.000   1.000   1.000   1.000
+0.22.15 as shipped 1.095 R   3.690   0.674   0.748   0.856   0.900
+0.22.16            1.025 R   0.999   1.000   1.000   1.000   1.000
+```
+
+Both raw frames peak at 1.02–1.03 R and fall monotonically outward, which is
+what a corona does. The shipped merge peaked at **1.095 R** — brightness rising
+away from the limb, which nothing physical does — with a bright overshoot right
+at the limb and a suppressed band outside it. That pair is the pink rim.
+
+### It was in every dataset, and the limb fix uncovered it
+
+Radial brightness peak in the merged luminance, which should sit at the limb:
+
+```
+set                        peak at     suppression toward the limb
+Clifton 2024 560mm         1.093 R          5.4x
+Clifton 2026 360mm         1.083 R          3.2x
+Clifton 2026 250mm         1.057 R          1.2x
+Nico 600mm (Lumix)         1.030 R          1.05x
+Nico Sony                  1.020 R          1.00x
+```
+
+The 2024 560 mm figure was measured on its **0.22.5** work directory — before
+any of this week's changes — so this is longstanding, not a regression. What
+0.22.14 changed is that the disc mask now sits on the real limb instead of 28 px
+outside it, so the band is no longer covered up. Nico's own two sets barely show
+it, which is why it survived this long.
+
+### The fix
+
+Normalized convolution — the same device this codebase already uses to keep the
+lunar disc out of MGN and the Pellett layer. Smooth the weight and the validity
+mask together, divide, re-apply the mask. The weight stays smooth where the tier
+is usable, keeps its magnitude at the boundary rather than tapering into it, and
+is exactly zero wherever the tier is clipped. A plain `blur * valid` restores the
+profile just as exactly; normalized convolution is preferred because it does not
+thin the weight at the boundary, which is precisely where tiers hand over.
+
+Applied at both feathered weights — the main merge and the long-exposure stack.
+The second one is milder (its `wsat` has no hard zero, so its tanh is already
+~0.01 at saturation) but a blown tier has no business contributing there either.
+
+### Fixed as well
+
+The pedestal progress line printed `1238016000000.0 sigma` when the jackknife
+lands at exactly zero — every leave-one-tier-out subset picking the same grid
+point. The report already said it in words; the log line now does too.
+
+## 0.22.15 — the black level every tier shares
+
+TODO #1 asked for a per-tier photometric correction that varies with radius.
+Measuring it first turned out to be worth more than building it: on three real
+datasets the thing that actually varies is not `k(r)` but a **single additive
+constant** left behind by the black subtraction — and one number fixes it.
+
+### The measurement
+
+Twelve exposures of the same corona cannot all be right. Put each aligned tier
+back on the scene scale (divide by its exposure and its photometric factor) and
+they should coincide. Over 1.5–3.5 R they do not:
+
+```
+set                  tiers   scatter   with one offset   fitted P
+Clifton 360mm          12     39.20%        2.93%        +2.95 ADU (14-bit)
+Clifton 2024 560mm     14     36.43%        5.24%        +5.57 ADU
+Clifton 250mm           9      2.42%        1.91%        -1.97 ADU, shrunk to -1.31
+```
+
+Thirteenfold and sevenfold, from one number per dataset. On the 360 mm set the
+1/1000 s tier reads **2.76x the scene at 2.9 R** before the correction and 1.18x
+after. The 250 mm set — a different camera body — barely has one, which is the
+control: this does not invent an offset where there is none.
+
+The model is `measured = S(r)·s·cal + P`. The merge divides by `s·cal`, so a
+leftover P arrives divided by the exposure time: invisible on a long tier,
+overwhelming on a short one, and always in the outer field where the corona is
+faintest. That is the same outer field TODO #3 complains reads to 2 R when the
+report traces signal to 3.7.
+
+### Why one number and not one per tier
+
+Letting every tier have its own offset moved 2.93% → 2.60% (360 mm) and
+5.24% → 4.67% (560 mm) while the long tiers' fitted values wandered to −7 ADU —
+a tier with plenty of signal does not constrain its own pedestal at all. A
+black-level residual belongs to the sensor and the session, not to the shutter
+speed. The shared number is both better determined and the more honest model.
+
+### The prior is zero
+
+P is shrunk by `P²/(P²+σ²)` with σ from a leave-one-tier-out jackknife, so a set
+whose tiers disagree for some *other* reason has its correction pulled toward
+nothing rather than having one invented for it. On synthetic tiers with no
+pedestal the fit returns −0.16 ADU and applies −0.06; with a planted +3.00 it
+recovers +3.14 and applies +3.10. Fewer than four usable tiers and it refuses.
+
+It comes off after demosaic and **before white balance** — a black-level
+residual is one number per photosite, and becomes three different numbers the
+moment the WB gains are applied. Not before the clipping test either: `cmax` is
+a question about the sensor's ceiling, not about the scene.
+
+### What this does not do
+
+It does not touch the near-limb tier disagreement on the 250 mm set (limb
+variance 0.793), which is the other half of TODO #1 and is still open. And the
+fit is over 1.5–3.5 R only; inside that the corona swamps a few ADU and there is
+nothing to measure.
+
+### Correcting 0.22.14's own claim
+
+0.22.14 said the merge amplifies near-limb azimuthal structure by 1.5x at 1.3 R.
+**That was wrong, twice.** The comparison used a 1/8 s frame that is compressed
+against the sensor ceiling near the limb (12.8% of the 1.15 R annulus above 90%
+of full scale), and it compared a 2x2-binned raw against a full-resolution
+merge. Repeated against our own aligned single tiers, linearised, same geometry:
+
+```
+                 1.15R   1.30R   1.70R   2.20R   2.80R
+tier 1/125s      7.99%   8.43%  10.16%   5.59%   2.13%
+tier 1/8s        4.29%   7.01%  10.96%   6.25%   2.15%
+merged          7.75%   8.56%  11.24%   6.74%   2.32%
+merged / best    0.97    1.02    1.03    1.08    1.08
+```
+
+There is no near-limb merge amplification on that set. The 250 mm set is a
+different story — merged/best-tier runs **0.25 / 0.29 / 0.35 / 0.46 / 0.60** at
+1.05–1.40 R, so the merge is *losing* three quarters of the real near-limb
+structure there — and that, not an amplification, is what TODO #1 has left to
+explain.
+
+## 0.22.14 — the limb fit is corrected, not just complained about
+
+Clifton's 2024 560 mm set: *"the moon mask is too large and covers
+prominences, but the rest looks okay"*. The report agrees with him — merged
+half-level fit **R = 553.0 px** against a per-tier consensus of **525 px**,
+disc mask drawn at 578.2. Twenty-eight pixels of real corona, and the
+prominences with it, under the mask.
+
+That is TODO #1b, now on its fifth dataset, and every one of them biased the
+same way:
+
+```
+set                  consensus  range   merged fit    bias    ramp
+Nico 600mm              617 px    7 px      619.1     +2.1      8
+Clifton 250mm           298 px    7 px      300.3     +2.3      9
+Clifton 360mm           456 px    2 px      470.4    +14.4     21
+Clifton 2024 560mm      525 px   15 px      553.0    +28.0     28
+Clifton 560mm (bad)     525 px  226 px      587.3    +62.3     69
+```
+
+Always positive, tracking the merged limb ramp and nothing else. The cause was
+never in doubt: the 50% crossing between disc and near-limb corona sits
+**outside** the true limb whenever the edge is soft, and the merged edge is
+soft because the Moon moves against the corona during the bracket. The
+per-tier fits use the same method on single unsmeared tiers, so their median
+is the better estimate of where the limb is.
+
+**The fix keeps the merged fit's per-azimuth shape and moves it onto the
+tiers' radius** — an OFFSET, not a rescale. Both the lunar relief the profile
+carries and the soft-edge bias are a fixed number of pixels, not a fraction of
+R; scaling would shrink the relief along with the radius and quietly flatten a
+real measurement. Applied only when the fit runs large: a merged fit that came
+out small would be the expected direction for a brighter combined corona.
+
+### The guard that should have caught it was 2.6x too loose
+
+`R_consensus_spread` is a **p90–p10 range**, and the 0.22.6 test used it as if
+it were a standard deviation. For a normal distribution p90−p10 = 2.563 σ, so
+"four sigma" was really ten. The 2024 set — 15 px range, 28 px disagreement,
+under two range-widths but 4.8 real sigma — sailed straight through and the
+user found it by eye instead.
+
+With the conversion in place, replayed on all five sets:
+
+```
+set                            diff   threshold   fires
+Nico 600mm                      2.1        10.9   no
+Clifton 250mm                   2.3        10.9   no
+Clifton 360mm                  14.4         4.6   YES -> R=456
+Clifton 2024 560mm             28.0        23.4   YES -> R=525
+Clifton 560mm (badly aligned)  62.3       352.7   no
+```
+
+The last row is right to stay quiet: those tiers disagree with each other by
+226 px, so their consensus is not evidence of anything.
+
+R sets the radial profile MGN divides out, FNRGF's rings, the deband and the
+disc mask, so this circle had to be right before any of them. 0.22.14 opens a
+new cache family for that reason.
+
+### Also settled: the radial spokes are in the photons, not in us
+
+Nico saw the spoke pattern survive into Photoshop mean stacks of the exported
+aligned tiers, which already ruled out our detail filters. This pins it
+further, against a **single untouched CR2** — `IMG_5468`, 1/8 s, 360 mm,
+LibRaw-decoded, no alignment, no merge, no filtering — compared with the
+finished `hdr_lum`, both reduced to their azimuthal structure in the m = 8–80
+band that "clarity" and "texture" amplify:
+
+```
+                    m3-7    m8-20   m21-60  m61-200   radial coherence
+single raw frame   18.79%    9.69%    3.81%    2.21%       +0.958
+merged hdr_lum     19.77%    9.70%    3.88%    1.40%       +0.985
+```
+
+and correlated ring by ring, at zero angular lag:
+
+```
+   1.3 R   r = +0.782      2.2 R   r = +0.943
+   1.7 R   r = +0.928      2.8 R   r = +0.963
+```
+
+Same structure, same angular positions, same amplitude to within a few percent
+beyond 1.7 R. The pipeline reproduces the corona it was given. The one place
+it does not is **1.3 R, where the merged modulation is 1.5x the raw frame's**
+(8.56% against 5.79%) — the near-limb band the photometric work in TODO #1 is
+about.
+
+## 0.22.13 — the glare prediction held, and the limb-fit warning was blaming the wrong thing
+
+The 360 mm set from the same eclipse, same photographer, is the natural
+experiment 0.22.11 was waiting on. Prediction was written down first.
+
+**Limb variance 0.036, against the 250 mm set's 0.793.** Twenty-two times lower,
+below even the reference set's 0.075, and the disagreement rim is not narrower
+but *undetectable*. The 250 mm limb disagreement is optics-dependent, as
+predicted. The radially-resolved photometric correction (TODO #1) is unblocked.
+
+### But the limb-fit warning was explaining it wrongly
+
+0.22.6 says a disputed limb fit means the merge is "probably smeared by a
+cross-tier alignment error". True of the 560 mm set. **False of the 360 mm set**,
+which aligns to 1.36 px with 3 px of limb spread — nothing is smeared — and is
+still 14 px large.
+
+Across all four datasets the bias is systematic, always positive, and tracks the
+**merged limb ramp** alone:
+
+```
+set              consensus   fit     bias    ramp   align resid   limb spread
+Nico 600mm          617     619.1   +0.3%     8px      1.17px        8px
+Clifton 250mm       298     300.3   +0.8%     9px      0.66px        3px
+Clifton 360mm       456     470.4   +3.2%    21px      1.36px        3px
+Clifton 560mm       525     587.3  +11.9%    69px    512.09px      226px
+```
+
+The mechanism is simpler than the one I assumed: the fit finds the 50% crossing
+between disc and near-limb corona, and **on a soft edge that crossing sits
+outside the true limb**. A wide ramp can come from a smeared merge *or* from a
+genuinely soft limb — focus, seeing, a slow lens — and the alignment residual and
+limb spread tell those apart. The warning now says that instead of picking one.
+
+Nico's own note on this run, written before any of it was measured: *"the moon
+looks a bit off"*. The disc mask sits at 489.3 px on a Moon whose tiers say 456
+— about 19 px of real corona underneath it. Logged as TODO #1b with three
+candidate fixes.
+
+### `rim nan px`
+
+That line appeared on the 360 mm run and looks like a crash. It is the opposite:
+with the tiers agreeing there is no disagreement rim to measure a width from, and
+`nan` was the honest answer wearing an alarming face. Now prints "none
+detectable — the tiers agree at the limb", in the log and the report.
+
+## 0.22.12 — a backlog file, so "noted, not fixed" stops living in prose
+
+Ten open items were scattered across changelog entries, source comments and chat.
+`TODO.md` collects them, each with the evidence behind it, what is uncertain, and
+what measurement would settle it — ordered by expected value rather than effort.
+
+Top of the list is the one Nico asked for: a **radially-resolved per-tier
+photometric correction**. Our calibration is one scalar per tier, which is right
+only if a tier's error is constant across the frame. Clifton's 250 mm set shows it
+need not be — geometrically clean, and still limb variance 0.793 against
+0.075/0.067/0.052 elsewhere, with a 62 px disagreement rim against 4 px. An
+additive, exposure-dependent halo is exactly what a per-tier correction varying
+with radius removes, and the structure exists in the literature: Druckmüllerová's
+LDIC (thesis §4.1.4, eq. 4.15) fits an affine `k_i(φ)`, `q_i(φ)` per angular
+segment. The same thing in the other coordinate.
+
+It is written up but deliberately **not built yet**: it rests on a glare
+hypothesis with one supporting observation, and the 350 mm set from the same
+eclipse is about to test it. The predictions are recorded in TODO.md before the
+result, so the outcome cannot be rationalised afterwards.
+
+The rule for the file: an item leaves it either by shipping, or by being
+**rejected with a measurement** — and a rejection goes into the source beside the
+thing it rejects, as ACHF and the RHEF gate did.
+
+## 0.22.11 — the 250 mm ringing has a different cause, and it is measurable
+
+Clifton's 250 mm set rings, and **not one alignment guard fires on it**: network
+residual 0.66 px, limb spread 3 px, limb-fit rms 0.95 px, track scatter 0/0.
+Geometrically it is a clean run. So the 360 mm and 250 mm ringing are two
+different faults, as suspected, and this is the second one.
+
+Measured on the cached layers rather than reasoned from the log — ring by ring,
+the oscillation of each layer's radial median about a 15-ring smooth, as a
+percentage of that layer's own trend:
+
+```
+band          MGN          FNRGF        NAFE         inner
+1.02-1.15 R   19.4 / 9.9   10.9 / 2.5   13.9 / 2.7   15.1 / 4.6
+1.15-1.40 R    4.5 / 3.7    1.7 / 2.0    2.1 / 0.7    3.2 / 1.5
+1.40-1.80 R    3.2 / 3.0    0.6 / 1.5    0.9 / 0.6    1.9 / 1.3
+1.80-2.60 R    1.0 / 1.5    0.6 / 1.9    0.4 / 0.4    1.2 / 1.7
+              (Clifton 250mm / Nico 600mm reference)
+```
+
+Three things fall out. The ringing lives **almost entirely in 1.02–1.15 R** and
+is gone by 1.8 R. It is **2 to 5.3× the reference set** there. And the merged
+luminance those layers are built from oscillates only **1.4%** in that band — so
+the filters are amplifying a real disagreement by about ten, not inventing one.
+
+**NAFE is the tell.** It is 5.3× worse and it is the one layer that uses neither
+the limb fit nor the disc mask. So this is not geometry.
+
+What his run does have is **limb variance 0.793**, against 0.075, 0.067 and 0.052
+on the other three datasets — ten times any of them — and a disagreement rim
+62 px wide where the reference set's is 4 px. The tiers are aligned and disagree
+about the *brightness* of the same place. The likely physical cause is veiling
+glare and halation around a very bright limb differing per exposure: this is a
+240 mm f/5.6 kit zoom, not a 600 mm prime, and no flat can remove it.
+
+Now warned above 0.30, which fires on his 250 mm set alone:
+
+```
+Clifton 250mm   cov 0.793  rim  62 px   WARNS   [rings]
+Clifton 360mm   cov 0.067  rim 134 px   quiet   [rings — wrong limb circle, 0.22.6]
+Clifton 560mm   cov 0.052  rim  14 px   quiet   [broken alignment, 0.22.8]
+Nico 600mm      cov 0.075  rim   4 px   quiet   [clean]
+```
+
+Three ringing reports, three different causes, each now identified by its own
+measurement. None of them was findable from the exports alone.
+
+## 0.22.10 — three more numbers that screamed failure and passed silently
+
+Nico asked me to keep watching for errors. Clifton's 560 mm log has four numbers
+that each say the run failed; 0.22.8 caught one of them. Here are the other
+three, all the same class: printed, diagnostic of total failure, unguarded.
+
+**Per-tier limb spread.** 226 px on a 525 px Moon — 43%. The tiers are not
+looking at the same place. Now warned above 8% of R.
+
+**Limb-fit rms.** 32.77 px on R=587.3, i.e. 5.6%. The acceptance filter allows
+anything under **8% of R**, so it sailed through, and the circle it describes is
+nothing like a lunar limb. There is a wide empty band between what a real fit
+produces and what the filter admits; now warned above 2%.
+
+**Lunar track scatter.** "0.63 px/s, 6 px across the bracket; scatter about the
+line 26/39 px". The Moon moved six pixels and the per-tier measurements are
+forty pixels off a straight line — the fit is describing the alignment error.
+Now warned when scatter exceeds 2% of R.
+
+All three against the four real datasets:
+
+```
+run              limb spread   rms of fit    track scatter
+Clifton 560mm      43.0% WARN   5.58% WARN     7.4% WARN
+Clifton 360mm       3.3%  ok    1.15%  ok      0.7%  ok
+Clifton 250mm       1.0%  ok    0.30%  ok      0.0%  ok
+Nico 600mm          1.3%  ok    0.41%  ok      0.3%  ok
+```
+
+Each fires on the broken run alone. With 0.22.6 and 0.22.8 that is five
+independent checks on the same failure, which is the right number for something
+that otherwise reports "ready" — no single threshold has to be perfect.
+
+All three are repeated in the run report's alignment section.
+
+## 0.22.9 — the green sky, solved instead of advised
+
+Nico asked whether nothing improved because information was missing, because the
+data is at its limit, or because I had given up. None of those. I spent the day
+on the detail filters — the most developed part of the pipeline, with the least
+headroom — while the change with the clearest visible effect sat diagnosed and
+unshipped for a day because I left it as advice.
+
+`tint = 1.205` is a straight **20% green multiply**. After the unit-luminance
+renormalisation (green carries 0.7152 of luminance) the net is green +5%, red and
+blue −13% relative. That is the green-grey sky he has been looking at, and the
+`IMPORT_DEFAULTS` note directly below it in the same file had already measured
+this exact cast and fixed it — **for imports only**. The raw path kept the
+by-eye 0.9/1.205 from 0.12.0. Half a fix, sitting next to its own evidence.
+
+It is exactly solvable, which is the part I should have noticed first. The far
+sky is neutral before `temp`/`tint` are applied: `ratio` is driven to 1.0 where
+signal is near the noise floor, and the `bgNeutral` division is weighted by
+`cconf`, which measures **0.015** out there. So the rendered sky chroma is just
+`(temp, tint, 1/temp)` renormalised:
+
+```
+R/G = temp / tint          B/G = 1 / (temp * tint)
+```
+
+His own PixInsight version — *"lowered the green curve a bit and raised the blue
+curve a little"* — measured off his JPEG, linearised, normalised to green: sky
+R/G 1.064, B/G 1.884. Inverting the two expressions:
+
+```
+             temp    tint    sky R/G   sky B/G
+was          0.900   1.205     0.747     0.922    green-dominant
+now          0.752   0.706     1.064     1.884    his target, exactly
+```
+
+Relative to green that is R/G ×1.425 and B/G ×2.043 — his two curve moves, as
+numbers. It cools the corona too, which is why `satur` is the other half of what
+he did by hand.
+
+Still a taste call, but one with a reference instead of a memory of one, and the
+sliders remain the answer for anyone who disagrees. Takes effect on the next
+render — no re-stack.
+
+### And a bug I introduced doing it
+
+Adding 0.22.9 to the flat `CACHE_COMPAT` set silently made **every pre-0.22.5
+stack reusable again**, because `cache_ok` only asked whether both builds were
+in the one set. 0.22.5 changed the merge; anyone with an older work directory
+would have had that fix quietly withheld and been told the cache was fine.
+
+A flat set cannot express "these three groups are internally compatible and
+mutually incompatible". Replaced with `CACHE_FAMILIES` — three frozensets,
+reuse allowed only within one:
+
+```
+stack from   reusable by 0.22.9
+0.22.8            yes
+0.22.5            yes
+0.22.4            no    <- the merge changed at 0.22.5
+0.20.1            no
+```
+
+### Noted, not fixed
+
+`bgNeutral` is weighted by `cconf`, which is ~0.015 in the far sky. So the
+"Neutralise sky cast" slider still does almost nothing *to the sky* — it acts
+where confidence is high, which is where the corona is. An earlier fix corrected
+how `bg_chroma` is measured and left the weighting alone. Worth its own look.
+
+## 0.22.8 — a failed alignment now says so instead of reporting "ready"
+
+Clifton Brown's 560 mm set (Canon 450D, the 2024 eclipse, 0.20.1) is the most
+useful thing anyone has sent, because it is a run that failed completely and
+told him it was fine:
+
+```
+alignment network residual max 512.09px (half-res)      = 1024 px full-res
+per-tier lunar limb spread: 226px (R_moon 525px)        vs a 4 px radius spread
+limb half-level fit: R=587.3px, rms 32.77px             vs consensus 525px
+merged limb ramp 69px -> disc mask margin 47.0px
+1/4s  shift 108.4 px   "no usable signal in the correlation window"
+0.5s  shift 117.8 px   "no usable signal in the correlation window"
+prominence anchors: 1/15s:0 1/8s:0 1/4s:0 0.5s:0 1s:0
+...
+pipeline complete
+ready
+```
+
+A residual of 1024 px full-res is about **twice the lunar radius**. Five tiers
+had no prominence anchors, three had no correlation signal at all, and two of
+those still came out with 108 and 118 px shifts.
+
+**Three fixes, all from this one log.**
+
+**1. A large residual is now a named failure.** The unlinked-tier fallback could
+not help here — those tiers *were* linked; the links contradict each other, and
+least squares returns the best compromise between impossible constraints, which
+looks like an answer. There is no automatic repair, because which link is wrong
+is precisely what is unknown. So the run says so unmistakably, names the three
+worst-offending links, and records it in the report. Tolerance is 5% of the seed
+lunar radius, because a shift error only matters relative to the subject:
+
+```
+run                       residual   tolerance   verdict
+Clifton 560mm (0.20.1)    512.09 px    15.1 px   FAILS LOUDLY
+Clifton 360mm (0.15.1)      3.95 px    12.8 px   quiet
+Clifton 250mm (0.15.1)      0.88 px     7.1 px   quiet
+Nico 600mm    (0.22.4)      1.17 px    17.3 px   quiet
+```
+
+**2. 0.22.6's limb check is validated on data it was not built from.** That
+check came from the 360 mm set. On this 560 mm run the merged fit is 587.3 px
+against a tier consensus of 525 px ± 4 — **62 px out, but only 11.9%**, so the
+old flat 15% rule said nothing here either. The new test fires: 62.3 px against
+a 16 px threshold. Two independent broken datasets, one rule, both caught.
+
+**3. A misleading log line.** `"prominence anchors: 6 on the 1/60s tier, 11/11
+tiers linked by them"` counts LINKS, not tiers, and read as full coverage on a
+bracket where five tiers had zero anchors. It now says "giving 11 of 11 possible
+links".
+
+## 0.22.7 — a diagnostics bundle, so testers do not have to send their raws
+
+Nico: *"People don't like to share their raw data."* They are right not to want
+to. An eclipse raw is a shot someone may have crossed a continent for, and it is
+theirs. But every defect chased this week stalled on the same request, and the
+same defects then survive into the next release.
+
+Almost none of that diagnosis needs the raws. Ringing is a radial signature: it
+shows in the median of a layer taken ring by ring, and in azimuthal cuts at a
+few radii. A wrong limb circle is a step in the same profiles at R. A smeared
+merge is already in the per-tier numbers. That is a few thousand numbers, not an
+image.
+
+So every run now writes `eclipseforge_output/eclipseforge_diagnostics.zip`:
+
+```
+README.txt        what is in here, in plain words, for the tester to read first
+report.txt        the run report they can already read
+geometry.json     the fitted lunar centre and radius
+stats.json        the measurements behind the report
+profiles/*.json   each layer as numbers -- median, p10, p90 ring by ring from
+                  the limb outward, plus azimuthal cuts at 1.15, 1.6 and 2.4 R
+thumbs/*.png      each detail layer at 512 px, greyscale
+```
+
+Measured on the reference workdir: **0.48 MB** with three layers cached, so
+about 1.5 MB for a full run.
+
+**What it deliberately is not:** no raw frames, no full-resolution anything, no
+colour image, no tone-mapped result, no EXIF beyond the camera model the report
+already prints, no file paths beyond the folder name it already shows. The
+thumbnails are of the DETAIL LAYERS -- normalised high-pass fields at 512 px
+greyscale. They show structure, not a photograph, and nobody is publishing one.
+
+The README is written for the tester, not for us, because the point is that they
+can open the zip and see exactly what they would be sending before they send it.
+
+Verified that the profiles carry the signal they are for: on a well-fitted run
+the ring-by-ring median of MGN is smooth, its oscillation 6.3% of its trend.
+Concentric arcs put energy into precisely that term, with no raw frame needed to
+see it.
+
+## 0.22.6 — catch the wrong limb circle that prints rings in three layers at once
+
+Clifton Brown sent logs and exports for two of his sets (0.15.1) reporting
+ringing artifacts in both, worse at 250 mm, and that the 360 mm details look
+"stretched as if they've been misaligned". His 360 mm log contains the
+diagnosis, and the pipeline already had every number needed to catch it:
+
+```
+lunar radius consensus across tiers: 456px (spread 2px)
+limb half-level fit: ... R=470.2px, rms 5.43px   (seed fit said R=482)
+merged limb ramp 25px -> disc mask margin 22.5px
+alignment network residual max 3.95px (half-res) = 7.90 px full-res
+disagreement rim 134 px wide just outside the limb
+```
+
+His tiers agree on the lunar radius **to within 2 px** — they are the same Moon
+seconds apart — and the merged fit came back **14 px larger**. The existing
+cross-check used a flat 15% threshold, so at 3.1% it said nothing.
+
+That is the wrong statistic. Against a 2 px spread, 14 px is seven sigma. The
+merge is smeared by a cross-tier alignment error, which pushes the 50% crossing
+outward and inflates R.
+
+**And that is very likely his ringing.** R and the limb profile set the radial
+profile MGN divides out, FNRGF's rings, the deband, and the Pellett geometry.
+Build all of them on a circle 14 px too big and every one prints concentric arcs
+— which is exactly what he reports: ringing in MGN, FNRGF *and* NAFE at once.
+One wrong circle, three layers showing it.
+
+The test is now "large compared with how well the tiers agree", with a 1%-of-R
+floor so a very tight spread cannot make it fire on nothing:
+
+```
+set                consensus  spread  merged fit  |diff|  threshold  fires?
+Nico 600mm            617 px    7 px    619.1 px   2.1 px    28 px     no
+Clifton 250mm         298 px    7 px    300.2 px   2.2 px    28 px     no
+Clifton 360mm         456 px    2 px    470.2 px  14.2 px     8 px     YES
+```
+
+Discriminates exactly on the three real datasets available. The warning names
+the mechanism and the consequence, and it is repeated in the run report's
+alignment section so it survives past the scrollback.
+
+It warns rather than overriding: at 3% the per-azimuth fit is still a real
+measurement, and the right repair is the alignment, not the circle.
+
+### Also in Clifton's logs, already fixed
+
+Both runs show `sky gradient removal skipped ([Errno 22] Invalid argument:
+...hdr_rgb.npy)`, so neither got any sky-gradient removal at all. That is the
+Windows memory-map file lock, fixed after 0.15.1 — `load_big` plus releasing the
+map before the write. He needs the update, not a new fix.
+
+His 250 mm run also hit the MGN divisor bug fixed in 0.22.2: it ran **5 scales**
+(1.4, 2.4, 4.8, 9.7, 19.3 px), so that layer came out at 0.83x amplitude.
+
+## 0.22.5 — the merge weight gets its low end; photometry validated; a reader that lied
+
+Nico exported the aligned tiers, which unblocked the two items that could not be
+tested from cached products.
+
+### Both ends of the merge weight now
+
+`wsat` was a high-end shoulder alone — full weight for every pixel below the
+knee, including pixels holding nothing but read noise. Every source says
+otherwise: Druckmüller, Rušin & Minarovjech 2006 requirement (b), *"w = 0 in
+substantially underexposed **or** overexposed parts"*; the thesis, *"equal to
+zero in the highest **and the lowest** part of the dynamic range"*; Hill's
+trapezoid.
+
+It matters more here than it would elsewhere because `_pick_weight_alpha` chose
+α = 0.55, and for s < 1 that gives the **short** tiers more relative weight than
+α = 1 — deliberately, since it buys +106% coherent detail at the limb. The cost
+was paid in the outer field, where those tiers hold no signal. A per-pixel floor
+is what lets the exponent buy the limb without paying out there.
+
+Measured by rebuilding the merge from all 14 exported tiers:
+
+```
+shell        as shipped   floor 0.002  floor 0.005  floor 0.01
+1.2-1.8 R      0.3189       0.3189       0.3189      0.3190
+1.8-2.6 R      0.1162       0.1150       0.1140      0.1129
+2.6-3.4 R      0.0299       0.0289       0.0282      0.0276
+3.4-4.2 R      0.0135       0.0127       0.0123      0.0119
+```
+
+Nothing lost where the corona is bright; −2.8%, −7.7%, −11.9% going outward,
+which is the mechanism's own signature. Shipped at **half** the best measured
+value, because the reconstruction ran on the sRGB exports at quarter resolution
+and cannot separate faint real structure from noise. `_MERGE_FLOOR = 0` restores
+earlier builds exactly.
+
+### The pedestal does not exist — recommendation withdrawn
+
+I recommended adding a LinearFit-style intercept to the photometric calibration,
+on the strength of Hill's slide and the thesis's per-segment affine fit. Tested
+against the tiers, adjacent pair by adjacent pair, selecting on radius and
+saturation only:
+
+```
+pair             predicted   measured k   k/pred
+1/20 -> 1/13       1.597       1.5856      0.993
+1/13 -> 1/8        1.611       1.5967      0.991
+1/8  -> 1/5        1.602       1.5821      0.988
+1/5  -> 0.3125     1.619       1.6016      0.989
+0.3125 -> 0.5      1.630       1.6128      0.989
+0.5  -> 1.6        3.412       3.4429      1.009
+```
+
+**Our gain-only calibration reproduces every tier ratio to within 1.2%**, and the
+affine intercept buys almost nothing on the four pairs where the encoding is
+trustworthy. There is no pedestal in this data. Item closed.
+
+### A reader that lied, and the check that caught it
+
+The first two attempts at the above produced a confident, coherent, completely
+false picture — that the exported tiers used only the bottom 0.4% of the 16-bit
+range and that a large pedestal existed. Both came from **PIL misreading the
+16-bit RGB TIFFs**, returning 256 distinct values where `imageio` reads 65,530
+from the same file. The export is fine.
+
+Worth recording because the failure was invisible: the numbers were plausible,
+internally consistent, and reproducible. What caught it was reading the same file
+with a second library before drawing a conclusion.
+
+## 0.22.4 — two negative results, recorded so they are not retried
+
+Nico said "go for it". The two most promising leads from the literature audit
+were both built and both measured. Neither ships. Recording why, in the code as
+well as here, is the useful part.
+
+### ACHF's kernel is not worth having, and the reason is arithmetic
+
+The thesis calls ACHF *"the best nowadays used structure enhancement technique
+for images of the solar corona from total solar eclipses in white light"* and it
+was the one method in that literature we lack. Implemented exactly — eq. 5.1's
+Gaussian in radius crossed with a Gaussian in **arc length** along a Sun-centred
+circle, applied as `f` minus its normalized convolution with the Moon excluded,
+and with only the blurred component making the polar round trip so interpolation
+cannot reach the residual.
+
+Against an isotropic kernel through an identical normalisation and an identical
+ladder, so the only variable was kernel shape:
+
+```
+shell          isotropic     ACHF      change
+1.02-1.15 R      0.0701     0.0770      +10%
+1.15-1.40 R      0.0610     0.0607       -1%
+1.40-1.80 R      0.0438     0.0450       +3%
+1.80-2.60 R      0.0465     0.0491       +6%
+2.60-3.40 R      0.0530     0.0554       +4%
+```
+
+Side by side the two images are indistinguishable, and it costs 390 s against
+21 s at half resolution — about 26 minutes a run at full size.
+
+**Why**: the kernel is anisotropic only where σ is a large fraction of r. At
+σ = 40 px and r = 650 px an isotropic Gaussian covers the same arc to within
+0.4%; at σ = 1.25 px, to within 4×10⁻⁶. At every scale in our ladder the two
+kernels are numerically almost the same object. ACHF's shape separates from
+isotropic only at σ of several hundred pixels — large-scale structure, not the
+fine detail it was reached for.
+
+This does not reject ACHF as Druckmüller ships it (38 tuned parameters and a
+"nonlinearity in the use of filtered images" that no source specifies). It
+rejects the kernel shape as a drop-in at our scales, which is what the reading
+suggested trying.
+
+### The RHEF SNR gate was the wrong diagnosis
+
+I promised a per-annulus gate that fades RHEF out where an annulus holds no
+signal, using the data's own radial coherence rather than a noise model. Built
+it. The coherence is **0.99 at 1.5 R, 0.94 at 2.0 R, 0.78 at 2.5 R and still
+0.55 at 3.0 R** — so the gate stays fully open exactly where the grain is worst.
+
+The diagnosis was wrong. The problem is not absence of signal: it is that a rank
+transform **discards amplitude**. Inside one annulus a 1% real modulation and a
+1% noise fluctuation are both stretched across the full range, because a flat
+histogram is precisely what the method delivers. No gate on signal *presence*
+can fix that, because the signal is present — it is merely faint.
+
+RHEF stays opt-in at 0, with no recommended setting on this data, and the note in
+`DEFAULTS` now says so instead of promising a fix.
+
+## 0.22.3 — NAFE verified against the primary sources, and one claim of mine retracted
+
+Nico found the two papers the last audit could not check: Druckmüller 2013
+(ApJS 207:25) and, inside the full IWCIA proceedings at printed p. 262, the
+variable-neighbourhood paper itself. Every claim in our comments that had been
+marked unverifiable now has a verdict.
+
+**Confirmed, verbatim:** σ's published band is ⟨2σ_A, 12σ_A⟩ (2013 p.3; 2014
+p.268); w runs ⟨0.05, 0.3⟩ (2013 p.2; 2014 p.265); the n = 129 kernel is twelve
+summed Gaussians, σ_m = 2^(m/2), m = 1…12, c_m = 1 (2014 eqs. 14–16); the Fig. 2
+caption about "loss of contrast near lunar edge (edge effect)" is real, in the
+2014 paper; and **every equation number nafe.py maps is correct.**
+
+**Ours, not theirs — now labelled as such:**
+- `NAFE_K = 128`. Neither paper bins anything: the histogram runs over actual
+  discrete pixel values through a Kronecker delta (2014 eq. 6), on 14-bit data.
+  The "several thousand discrete pixel values" line we leaned on is real but
+  argues the *continuous* approximation is safe — an argument for many levels,
+  not for 128. Our own sweep is the only justification and now says so.
+- `NAFE_EPS = 0.10`. The restriction is crisp 0/1 (2014 eq. 12), which is what we
+  implement — but **no numeric value is published**: "The value of ε must be
+  found experimentally." The two failure directions our sweep found are
+  supported by the text; the number is not.
+- **Log input and the `NAFE_FLATTEN_R` pre-flatten.** Both papers assume pixel
+  values "have a linear dependence on the intensity of the coronal emission" and
+  specify no gradient removal, no log, and no lunar masking. Both of our
+  departures are now stated at the call site, with the untested alternative
+  named: NAFE on linear emission with no flatten, which is what is actually
+  specified.
+
+**Citation corrected:** the 2013 paper is **ApJS 207:25**, not ApJ 775, 88. Fixed
+in nafe.py, report.py and README.
+
+### Retraction
+
+The previous release's notes said every headline detail layer we run was
+designed for a different data regime than a white-light eclipse. **That is wrong
+about NAFE-VN and I should not have said it.** The 2014 paper targets exactly
+this data, in its abstract — "typical for imaging of solar corona by means of
+white-light coronagraphs and during total solar eclipses" — motivates itself
+with an eclipse image (Fig. 2, the lunar-edge failure), and publishes a worked
+white-light eclipse result (Fig. 5). The claim came from the survey paper's
+taxonomy, which files *NAFE* under EUV tools; the variable-neighbourhood
+generalisation is the paper that widened it, and that is the one we implement.
+
+ACHF remains the one method the literature calls best for white light that we do
+not have. That part stands.
+
+## 0.22.2 — literature audit: two real bugs, several false labels
+
+Nico put the full source library in the Literature folder and asked for an audit
+against the code rather than against memory. Six parallel readings — the MGN
+paper, the FNRGF chapter of Druckmüllerová's doctoral thesis, the NAFE and ACHF
+papers, the Hill slides, and the alignment chapters — then every actionable
+claim re-checked here by hand. Findings that changed code:
+
+### Fixed: MGN divided by the wrong number when the scale ladder is short
+
+The paper's Eq. 5 divides the multiscale sum by **n**, the number of scales.
+We divided by `sum(gains)`. With six scales and six gains that is a harmless 2%
+(5.874 vs 6) — but `scale_ladder()` collapses scales the resolution floor has
+merged and routinely returns fewer than six, while `gains` stays six long.
+`zip()` used the first n gains; the divisor stayed 5.874. The layer came out
+under-scaled:
+
+```
+scales used     5       4       3
+amplitude     x0.83   x0.66   x0.49
+```
+
+A 240 mm lens — precisely the case `resolution_floor()` was written for — lost
+up to half the MGN layer, and `mgnContrast` silently absorbed it. Nico's own
+frames get six scales, so his renders were never affected.
+
+### Fixed: NAFE's neighbourhood was 8× smaller than every label said
+
+`detail.py` divided `NAFE_NEIGH_R * R` by `NAFE_GRID` before passing it, and
+`nafe_vn()` divides by `grid` **again** to reach its decimated working grid. The
+neighbourhood actually applied was 0.13 R / 8 = 0.016 R — 10 px on the reference
+frame where the constant, the docstring and the run report all said 80 px.
+
+**And the bug was the better setting.** Corrected to a true 0.13 R the layer
+scores far higher — 0.194 → 0.939 at the limb, coherence 0.53 → 0.75 further out
+— and looks worse: blobby and lobed where the small neighbourhood is
+filamentary. Third time this session that amp×coh preferred the coarser picture.
+
+So the double division is removed and the constant is restated as what was
+always running (0.016). Behaviour is unchanged to within 2%; the number now
+means what it says and the run report stops misreporting it. Note the sweep that
+justified 0.13 ran through the bug, so it really swept 0.0075–0.064 R — 0.13 R
+had never been tested until now.
+
+### Corrected labels, no behaviour change
+
+- **We do not run phase correlation.** Both call sites pass
+  `normalization=None` to `phase_cross_correlation`, which disables the
+  amplitude normalisation — that is plain cross-correlation. The report cited
+  Druckmüller 2009 for a method the flag switches off. Report text corrected.
+  Whether to turn it on is a separate, measurable question.
+- `NAFE_GAMMA` is **dead** — used only on `nafe_vn`'s `combine=True` branch, and
+  the pipeline always passes `combine=False`. Labelled as such. `multiscale_blur`
+  and `value_neighbourhood_weight` have no callers at all.
+- `NAFE_EPS` was commented "in rank units"; `nafe.py` builds a linear level axis
+  and its own docstring says level units. Comment corrected.
+
+### Verified and NOT changed
+
+- MGN's `k=0.7`, `γ=3.2`, the Gaussian kernels and the Fig. 4 gain values are all
+  faithful to the paper. The *rationale* in our comment was wrong — those gains
+  down-weight the least reliable scale, they do not correct for it — but the
+  numbers and their multiplicative use are right.
+- The paper says nothing about masking an occulting disc; our normalized
+  convolution is an extension, not a deviation.
+
+## 0.22.1 — a control that cannot work now says so
+
+Nico: *"the detail balance slider has no effect"*. It was behaving exactly as
+designed — his work directory was stacked at 14:45 under 0.21.2 and has no
+`mgn_fine.npy`, so `detailScale` was guarded off — and that is precisely the
+problem. The app knew the control was dead and said nothing, which is the same
+failure as 0.21.0's blank preview wearing different clothes.
+
+Sliders that depend on an optional cached layer are now greyed, labelled
+"— re-stack needed", disabled, and forced to 0 so no render can carry a weight
+the layers cannot honour. Covers `detailScale` (needs `mgn_fine.npy`) and
+`rhefMix` (needs `rhef.npy`).
+
+Note for later: `mgn_fine.npy` IS reconstructible from `hdr_lum.npy` — denoise,
+subtract the Fourier background, run three scales — so an on-demand rebuild like
+RHEF's is possible and would save the re-stack. Not done here, because it has to
+reproduce `norm_span=(-half, half)` and the prominence mask exactly or the two
+layers stop being commensurable and the blend is quietly wrong. That is worth
+doing carefully, not quickly.
+
+## 0.22.0 — Detail balance: Hill's amplification factors, as a slider
+
+Nico: *"it looks bold and rough, not as fine and delicate, but full of dynamics
+and movement as in other works."* He is right, and the cause is a line nobody had
+questioned.
+
+Our per-scale gains are `0.907, 0.976, 0.994, 0.998, 0.999, 1.0` — Morgan &
+Druckmüller's **noise-normalisation** constants (their Fig. 4), correcting for a
+small kernel measuring a smaller local sigma on pure noise. They are not
+amplification factors. Their effect is that all six scales get equal say, tilted
+slightly toward the **coarse** end.
+
+Hill's talk combines the same masks as `E = 100A + 60B + 20C + 10D` (A=2 px …
+D=16 px): normalised, `1 : 0.6 : 0.2 : 0.1` — the finest scale weighted **ten
+times** the coarsest. The opposite emphasis.
+
+Side by side at matched contrast, that is the difference between slabs and
+filaments. Nico picked Hill's from a four-way sheet without hesitation.
+
+**My metric had it backwards.** amp×coh rates Hill's ladder worse in every shell
+(0.0535 → 0.0300 at the limb, −44%), because it rewards radially coherent
+structure and the coarse scales carry plenty of it. "Delicate" is not something
+it measures. This is the second time today the score and the picture disagreed,
+and the picture won both times.
+
+### How it is exposed
+
+An MGN layer is a weighted mean of its per-scale terms, so storing the three fine
+scales as their own layer makes any ladder that is constant within a group a
+**render-time blend** — not an approximation of one. Measured fine/coarse energy
+ratio:
+
+```
+as shipped            1.09
+detailScale 0.50      1.72
+detailScale 1.00      3.18
+Hill's true gains     3.32     <- indistinguishable from 1.00 side by side
+```
+
+New slider **Detail balance (fine →)**, `detailScale`, **default 1.0** — Nico's
+pick. 0 reproduces every build before this one exactly, which is asserted by a
+test rather than assumed.
+
+Costs one extra MGN pass over three scales (about half the six-scale cost) and
+one cached layer.
+
+**A re-run is needed to get it.** An older work directory still loads and renders
+exactly as before — the slider is simply inert, guarded on the layer's presence —
+but `mgn_fine.npy` cannot be reconstructed from what is cached, so the control
+does nothing until the folder is stacked again.
+
+Still open, and the other half of what Nico asked for: the background is
+green-grey rather than neutral, and the corona stops reading at about 2 R. That
+is tone and colour, not detail extraction — `radialFlatten`, `baseLift`, and a
+sky-gradient removal that reported R 1.291× / G 1.339× / B 1.449×. Not touched
+here.
+
+## 0.21.4 — RHEF off by default; what the amplification-factor question turned up
+
+**RHEF now defaults to 0.** Shipping it at 1.0 in 0.21.0 made the picture worse
+and Nico's screenshots showed it at once.
+
+RHEF forces a flat histogram in *every* annulus. Where an annulus holds corona,
+that is the whole point. Where it holds only sky — past about 3 R in a 600 mm
+frame — it stretches the noise across the entire tonal range, and the outer
+field fills with full-contrast grain manufactured out of nothing.
+
+The amp×coh score never saw it. Rank-equalised noise, plus the layer's own
+1.6 px smooth, still reads as moderately radially coherent, so the number went
+*up* while the image degraded. Gilly & Cranmer work on EUV disk imagery where
+every annulus has signal; an eclipse frame runs out of corona long before it
+runs out of frame. That difference was not thought through.
+
+The layer is still built and still worth a drag between about 1.6 and 3 R, where
+there is real signal and it measured +28% against MGN like for like. Before it
+can be on by default it needs a per-annulus SNR gate that takes the weight to
+zero once an annulus is noise.
+
+### Amplification factors: we don't have them, and the metric will not settle it
+
+Hill combines his unsharp masks as `E = 100A + 60B + 20C + 10D` (A=2 px …
+D=16 px) — normalised, `1 : 0.6 : 0.2 : 0.1`, the finest scale weighted **ten
+times** the coarsest.
+
+Ours are `0.907, 0.976, 0.994, 0.998, 0.999, 1.0`. Those are not amplification
+factors at all: they are Morgan & Druckmüller's noise-normalisation constants
+(Fig. 4), correcting for a small kernel measuring a smaller local sigma on pure
+noise. Every scale gets equal say, tilted very slightly toward the *coarse* end
+— the opposite emphasis to Hill's.
+
+Measured on the reference bracket:
+
+```
+ladder                  1.05-1.30  1.30-1.80  1.80-2.60   fine/coarse
+ours (M&D noise norm)     0.0535     0.0602     0.0425        1.09
+Hill 1:.6:.2:.1           0.0300     0.0195     0.0197        3.32
+Hill, gentler             0.0425     0.0328     0.0257        2.11
+steeper than Hill         0.0241     0.0146     0.0175        4.26
+```
+
+Hill's ladder **triples** the ratio of fine to coarse structure (1.09 → 3.32) and
+**lowers** amp×coh in every shell. Both are true and neither is a mistake: the
+score rewards radially coherent structure, and the coarse scales carry a lot of
+it, so down-weighting them costs score while producing a visibly crisper image.
+
+This is a case the metric does not adjudicate — it is an emphasis choice, and
+the honest answer is a control rather than a new constant. Not implemented yet
+because the gains are applied when `mgn.npy` is BUILT, so a render-time slider
+needs either a second MGN layer or the per-scale terms stored separately. Design
+note is in the issue list; nothing changed in this release.
+
+## 0.21.3 — fix: 0.21.0 blanked the preview
+
+`rhefMix` was registered in the slider table under the group `"detail"`. The
+groups are `structure`, `inner`, `prom`, `color`, `tone`, `ring`. There is no
+`detail`.
+
+The builder does `$("g-"+grp).appendChild(div)`, so that one wrong string threw
+a TypeError **during init** — before any sliders were built and before the first
+render. Result: no controls, no preview, no visible error. The server had
+already logged `loading layers for preview... ready`, because the server was
+fine; the failure was entirely in the browser.
+
+Two changes. The group is now `structure`, next to FNRGF share and Clarity where
+it belongs. And the builder warns and skips an unknown group instead of throwing,
+so a typo in that table can never again take the whole interface down — it was
+the silence that made this expensive, not the typo.
+
+Also added a build check that every group id used by a slider exists as a div,
+which is what should have caught this before it shipped. The syntax check I ran
+on 0.21.0 could not: the file parsed perfectly, and `getElementById` returning
+null is a runtime fact.
+
+No pipeline change; a re-stack is not needed. Reload the page.
+
 ## 0.21.2 — read Druckmullerova's FNRGF source; fixed the measuring stick instead
 
 Nico supplied `FNRGFsoftware.zip` — Druckmullerova's own Delphi implementation,

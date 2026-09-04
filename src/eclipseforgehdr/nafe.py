@@ -1,9 +1,23 @@
 """NAFE with a variable neighbourhood, and the value-based masking it implies.
 
 Druckmuller, "A noise adaptive fuzzy equalization method for processing solar
-extreme ultraviolet images" (ApJ 775, 88, 2013) and Druckmuller &
-Druckmullerova, "Noise Adaptive Fuzzy Equalization Method with Variable
-Neighborhood" (IWCIA 2014, LNCS 8466, p. 262).
+extreme ultraviolet images" (Astrophysical Journal SUPPLEMENT Series 207:25,
+2013 August, doi:10.1088/0067-0049/207/2/25 -- NOT ApJ 775, 88, which this file
+cited until the primary source was read) and Druckmuller & Druckmullerova, "A
+Noise Adaptive Fuzzy Equalization Method with Variable Neighborhood for
+Processing of High Dynamic Range Images in Solar Corona Research" (IWCIA 2014,
+LNCS 8466, pp. 262-271, doi:10.1007/978-3-319-07148-0_23).
+
+VERIFIED AGAINST BOTH PRIMARY SOURCES. Confirmed: sigma's published band is
+<2 sigma_A, 12 sigma_A> (2013 p.3; 2014 p.268, under eq.13); w runs <0.05, 0.3>
+(2013 p.2; 2014 p.265); the n=129 kernel is 12 summed Gaussians with sigma_m =
+2^(m/2), m = 1..12, c_m = 1 (2014 eqs. 14-16) -- though that matrix is L, the
+low-pass kernel, not C; and every equation number mapped below is right.
+
+NOT in the papers, and ours alone: the level count K (they bin nothing -- the
+histogram runs over actual discrete pixel values via a Kronecker delta, eq. 6),
+any numeric value for eps ("must be found experimentally", 2014 p.268), the log
+input, and the pre-flatten in detail.py.
 
 The 2014 paper lists three defects of the original method and fixes each:
 
@@ -119,12 +133,19 @@ def nafe_vn(A, sigma_sp=30.0, K=128, w=0.2, gamma=3.0, noise_sigma=None,
 
     Correspondence with the paper, term by term:
 
-      eq. 4-5   the fuzzy kernel l_{k,l}          -> `kernel`, width `sigma_sp`
+      eq. 4-5   the membership mu = l_{k,l}       -> `kernel`, width `sigma_sp`
+                (the kernel's VALUES are eqs. 14-16, not 4-5)
       eq. 6     fuzzy histogram h(x)              -> K blurred membership maps
       eq. 7-8   cumulative, normalised C(x)       -> cumsum over the level axis
       eq. 11-12 restriction to |x - a| < eps      -> `eps_frac`, in LEVEL units
       eq. 13    C(x) * G_sigma(x), sigma 2..12 A  -> `noise_mult` x sigma_A
       eq. 2     B = (1-w)T_gamma + wE             -> `combine`
+
+    DEAD PARAMETERS, stated so nobody tunes them expecting an effect: `gamma`
+    and `w` are used ONLY on the `combine=True` branch (the last line of this
+    function). The pipeline always calls with combine=False and stores E, so
+    NAFE_GAMMA in detail.py has no effect on anything. `multiscale_blur` and
+    `value_neighbourhood_weight` in this module have no callers at all.
 
     EVERY METRIC IS IN THE UNITS OF THE LEVEL AXIS (rewritten in 0.11.0)
     --------------------------------------------------------------------

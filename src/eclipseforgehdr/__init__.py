@@ -1,4 +1,4 @@
-__version__ = "0.21.2"
+__version__ = "0.22.24"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -9,9 +9,17 @@ __version__ = "0.21.2"
 # work directory changed between them: the merge, the layers, geometry.json.
 # When in doubt leave it out; a needless re-run costs time, a wrong reuse costs
 # a wrong picture.
-CACHE_COMPAT = frozenset({"0.14.0", "0.14.1", "0.14.2",
-                          "0.15.4", "0.15.5",
-                          "0.18.0", "0.19.0", "0.20.0", "0.20.1", "0.20.2", "0.20.3", "0.21.0", "0.21.1", "0.21.2"})
+# 0.22.5 changes the MERGE WEIGHT, so hdr_lum.npy and every layer built from it
+# are different data. A cached workdir from any earlier build is not reusable
+# and a full re-stack is correct -- exactly the case the "a wrong reuse costs a
+# wrong picture" rule exists for. It opens the third family below.
+# 0.22.0 adds mgn_fine.npy and CANNOT rebuild it from a finished work directory
+# -- it needs the flattened, denoised luminance that only exists during the
+# stack. An older workdir is still listed here because it loads and renders
+# exactly as it did: `detailScale` is guarded on the layer's presence and is
+# inert without it. So this is the 0.17.0 situation ("loads" is not "has the
+# feature") with the sharp edge removed -- nobody gets a wrong picture, they
+# just do not get the slider until they re-run.
 # 0.21.0 adds a cached product (rhef.npy), and would normally be excluded on
 # that ground alone. It is listed anyway because the renderer BUILDS the layer
 # on first load when the file is absent -- it is one sort of the luminance
@@ -40,7 +48,56 @@ CACHE_COMPAT = frozenset({"0.14.0", "0.14.1", "0.14.2",
 # geometry.json, which every detail layer is built against.
 
 
+# One flat set cannot express this. 0.22.5 changed the MERGE, so anything it
+# writes is different data from anything before it -- but the moment 0.22.5+
+# were added to the same set as the older builds, every pre-merge stack became
+# reusable again and the fix would have been silently withheld from anyone with
+# an old work directory. Families, not one bag.
+CACHE_FAMILIES = (
+    frozenset({"0.14.0", "0.14.1", "0.14.2", "0.15.4", "0.15.5"}),
+    frozenset({"0.18.0", "0.19.0", "0.20.0", "0.20.1", "0.20.2", "0.20.3",
+               "0.21.0", "0.21.1", "0.21.2", "0.21.3", "0.21.4",
+               "0.22.0", "0.22.1", "0.22.2", "0.22.3", "0.22.4"}),
+    # 0.22.5 changed the merge weight; .6-.9 add guards, the diagnostics bundle
+    # and render defaults, none of which is cached data.
+    frozenset({"0.22.5", "0.22.6", "0.22.7", "0.22.8", "0.22.9",
+               "0.22.10", "0.22.11", "0.22.12", "0.22.13"}),
+    # 0.22.14 moves the fitted lunar radius onto the tiers' consensus when the
+    # merged half-level fit runs large. R is what MGN's radial profile, FNRGF's
+    # rings, the deband and the disc mask are all built on, so every cached
+    # layer from an affected run is different data. Its own family.
+    frozenset({"0.22.14"}),
+    # 0.22.15 subtracts a fitted pedestal from every tier before the merge, so
+    # hdr_lum and every layer built on it are different data -- most of all in
+    # the outer field, which is the whole point. Its own family.
+    frozenset({"0.22.15"}),
+    # 0.22.16 stops the merge weight leaking into each tier's clipped region.
+    # That changes hdr_lum everywhere just outside the limb -- the whole point --
+    # so nothing earlier is reusable. Its own family.
+    # 0.22.17 and .18 change DIAGNOSTICS only -- how the tier-agreement
+    # statistic is reported, and a linearity check on the input -- and write
+    # nothing the renderer reads differently, so a 0.22.16 work directory is
+    # reused as it stands.
+    frozenset({"0.22.16", "0.22.17", "0.22.18"}),
+    # 0.22.19 changes the merge weight again -- 0.22.16's hard mask left a step
+    # at every tier's clipping contour, which printed one arc per tier. Cached
+    # products from .16-.18 carry those arcs. Its own family.
+    # 0.22.20 adds two environment switches and changes nothing by default, so
+    # a 0.22.19 work directory is reused as it stands. A run made WITH a switch
+    # set is deliberately not distinguishable here -- that is the point of a
+    # bisect, and such a directory should be re-run before it is trusted.
+    # 0.22.21 adds a third switch and changes nothing by default.
+    # 0.22.22 adds a startup log line only.
+    # 0.22.23 changes render defaults only -- nothing cached moves.
+    # 0.22.24 adds a measurement and a file in the diagnostics bundle; it
+    # changes nothing the renderer reads, so a .19+ work directory is reused.
+    frozenset({"0.22.19", "0.22.20", "0.22.21", "0.22.22", "0.22.23",
+               "0.22.24"}),
+)
+
+
 def cache_ok(build):
     """Can products written by build `build` be reused by this build?"""
-    return build == __version__ or (build in CACHE_COMPAT
-                                    and __version__ in CACHE_COMPAT)
+    if build == __version__:
+        return True
+    return any(build in f and __version__ in f for f in CACHE_FAMILIES)

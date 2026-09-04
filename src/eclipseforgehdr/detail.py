@@ -9,8 +9,10 @@ from scipy import ndimage
 from .nafe import nafe_vn
 
 # NAFE-VN defaults. w and gamma are the published working values -- Habbal,
-# Druckmuller & Morgan, IWCIA 2014, LNCS 8466, Fig. 3 caption: "gamma = 2.4,
-# w = 0.2, sigma = 12" -- rather than values guessed here. sigma is in units of
+# Druckmuller 2013 (ApJS 207:25) and Druckmuller & Druckmullerova 2014 (LNCS
+# 8466 p.262). Published working values, now checked against both primaries:
+# w in <0.05, 0.3> with 0.2 used throughout their figures, and sigma in
+# <2 sigma_A, 12 sigma_A> -- rather than values guessed here. sigma is in units of
 # the noise sigma_A and is set adaptively per level. The rest measured on the
 # reference set:
 #  * eps 0.05 (in rank units) recovers most of the near-limb contrast the
@@ -18,17 +20,63 @@ from .nafe import nafe_vn
 #    a wider window falls back towards no restriction at all.
 #  * K 64 with a Gaussian membership 1.5 bins wide keeps the cumulative
 #    histogram smooth; a narrower membership prints concentric contour rings.
-NAFE_K = 128          # histogram levels; 64 measurably cost corona contrast
+NAFE_K = 128          # histogram levels. NOT A PAPER VALUE -- both papers bin
+                      # NOTHING: their histogram runs over the actual discrete
+                      # pixel values through a Kronecker delta (2014 eq. 6), on
+                      # 14-bit AIA data, i.e. 16384 levels. Our own sweep is the
+                      # only justification: 64 measurably cost corona contrast.
+                      # (The "several thousand discrete pixel values" line this
+                      # once leaned on is real -- 2013 p.2, 2014 p.265 -- but it
+                      # argues the CONTINUOUS approximation is safe, which is an
+                      # argument for many levels, not for 128.)
 NAFE_W = 0.2          # the paper's eq.2 weight; the stored layer is E, so this
                       # is unused here -- nafeMix in render.py is the live w
-NAFE_GAMMA = 2.4
-NAFE_EPS = 0.10       # value window, in rank units. Swept on the reference set:
+NAFE_GAMMA = 2.4      # DEAD: only used on nafe_vn's combine=True branch, and the
+                      # pipeline always calls combine=False. Left for the day
+                      # that branch is used; changing it does nothing today.
+NAFE_EPS = 0.10       # value window, in LEVEL units (nafe.py builds a linear
+                      # level axis, not a rank axis -- the old "rank units" here
+                      # was wrong and contradicted nafe.py's own docstring).
+                      # The restriction is CRISP 0/1 (2014 eq. 12), which is what
+                      # nafe.py implements. NO NUMERIC VALUE IS PUBLISHED: "The
+                      # value of eps must be found experimentally" (2014 p.268).
+                      # The paper does support the two failure DIRECTIONS our
+                      # sweep found -- too small "cause image fragmentation into
+                      # small areas with very high contrast features", too large
+                      # "will result in ... nearly identical" to the unrestricted
+                      # filter -- but the number 0.10 is ours. Swept on the reference set:
                       # 0.02 prints concentric rings (the paper's "fragmentation"),
                       # 0.05 gave high-pass 0.076, 0.10 gives 0.109 at the same
                       # agreement with FNRGF (0.711 -> 0.721), and past 0.15 the
                       # curve is flat and the extra is noise.
 NAFE_NOISE_MULT = 4.0 # the paper's sigma in units of sigma_A; their range is 2..12
-NAFE_NEIGH_R = 0.13   # neighbourhood sigma as a fraction of the lunar radius.
+# THE NEIGHBOURHOOD SIGMA, AND A BUG THAT TURNED OUT TO BE THE GOOD SETTING.
+#
+# This was 0.13 and the call site divided it by NAFE_GRID before passing it --
+# and nafe_vn() then divides by `grid` AGAIN to reach its decimated working
+# grid (nafe.py, `ssp = max(sigma_sp / q, 0.7)`). So the neighbourhood actually
+# applied was 0.13 R / 8 = 0.016 R: on the reference frame, 10 px where the
+# constant, the docstring and the run report all said 80 px.
+#
+# Correcting it to a true 0.13 R measures much BETTER and looks worse. Scored
+# on the reference bracket as amp*coh:
+#
+#     shell          as shipped (0.016 R)   "fixed" (0.13 R)
+#     1.05-1.30 R    0.194 (coh 0.97)       0.939 (coh 0.99)
+#     1.30-1.80 R    0.126 (coh 0.86)       0.430 (coh 0.96)
+#     1.80-2.60 R    0.079 (coh 0.53)       0.135 (coh 0.75)
+#
+# Nearly five times the score at the limb -- and side by side the 0.13 R layer
+# is blobby and lobed where the 0.016 R one is filamentary. Same lesson as RHEF
+# and the same lesson as the scale ladder: amp*coh rewards large coherent
+# structure and cannot see "delicate". The picture decides.
+#
+# So the double division is removed and the CONSTANT is restated as what was
+# always actually running. Behaviour is unchanged; the number now means what it
+# says, and the run report stops lying about it. The old sweep that reported
+# this "flat from 0.06 R to 0.51 R" ran through the bug, so it really swept
+# 0.0075 R to 0.064 R -- 0.13 R was never tested until now.
+NAFE_NEIGH_R = 0.016  # neighbourhood sigma as a fraction of the lunar radius.
                       # Measured flat from 0.06 R to 0.51 R, so this is not
                       # critical -- but it has to scale with the disc, or the
                       # neighbourhood means something different on every camera.
@@ -135,6 +183,7 @@ _DETAIL_W = {                 # in pipeline order -- dict order is the order
     "prom":        4.0,
     "promdet":     3.0,
     "rhef":        6.0,       # one lexsort over the valid pixels
+    "mgn_fine":   99.0,       # same filter, three scales instead of six
     "pellett":    32.0,
     "earth":      20.0,       # not measured -- placeholder
 }
@@ -296,13 +345,81 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
             S = np.maximum(S, noise_k * fl)
         acc += g * np.arctan(k * (xn - B) / S)
         del B, S
-    acc /= sum(gains)
+    # DIVIDE BY THE NUMBER OF SCALES USED, NOT THE SUM OF ALL SUPPLIED GAINS.
+    #
+    # The paper's Eq. 5 is  I = h*C'_g + ((1-h)/n) * sum_i g_i C'_i,  with n the
+    # number of scales. This divided by sum(gains) instead. With the paper's six
+    # scales and six gains that is a harmless 2% (5.874 vs 6) -- but `scales` is
+    # built per image by scale_ladder(), which COLLAPSES scales the resolution
+    # floor has merged and routinely returns fewer than six, while `gains` stays
+    # six long. zip() then uses the first n gains and this line still divided by
+    # all six, so the whole layer came out under-scaled:
+    #
+    #   scales used   5      4      3
+    #   amplitude   x0.83  x0.66  x0.49
+    #
+    # A 240 mm lens or any camera whose floor merges the fine end -- exactly the
+    # case resolution_floor() was written for -- lost up to half the layer, and
+    # `mgnContrast` silently absorbed it.
+    _g = list(gains)[:len(list(scales))]
+    acc /= max(len(_g), 1)
     out = (0.5 + acc / np.pi)
     if global_wt > 0:
         out = global_wt * xn ** (1 / global_gamma) + (1 - global_wt) * out
     if m is not None:
         out = out * m + 0.5 * (1 - m)
     return out
+
+
+# ---------------------------------------------------------------------------
+# ACHF: TESTED AND REJECTED. Do not re-implement without reading this.
+#
+# Druckmullerova's thesis calls ACHF "the best nowadays used structure
+# enhancement technique for images of the solar corona from total solar eclipses
+# in white light" (p.68), and it is the one method in that literature we do not
+# have. Its kernel (thesis eq. 5.1, p.67) is
+#
+#     C_{r,phi}(rho, varphi) = exp( -[ (r-rho)^2 + (r(varphi-phi))^2 ] / 2 sigma^2 )
+#
+# -- a Gaussian in radius crossed with a Gaussian in ARC LENGTH along a
+# Sun-centred circle -- applied as f minus its normalized convolution (eq. 5.2),
+# with the Moon excluded by the weight function.
+#
+# Implemented exactly, including the arc-length term (which is what this
+# session's earlier polar-convolution attempt got wrong: it used a constant
+# kernel in polar-GRID units, i.e. an arc length growing linearly with radius),
+# and with only the blurred component making the polar round trip so that
+# interpolation cannot contaminate the residual. Then compared against an
+# isotropic kernel through an IDENTICAL normalise-and-arctan path with an
+# IDENTICAL scale ladder, so the only difference was the kernel shape:
+#
+#     shell          isotropic        ACHF           change
+#     1.02-1.15 R    0.0701           0.0770          +10%
+#     1.15-1.40 R    0.0610           0.0607           -1%
+#     1.40-1.80 R    0.0438           0.0450           +3%
+#     1.80-2.60 R    0.0465           0.0491           +6%
+#     2.60-3.40 R    0.0530           0.0554           +4%
+#
+# and side by side the two images are indistinguishable. Cost: 390s against 21s
+# at half resolution, so roughly 26 minutes a run at full resolution.
+#
+# THE REASON, which is the part worth keeping. The kernel is anisotropic only
+# where sigma is a large fraction of r. At our scales it never is:
+#
+#     sigma 1.25 px at 1.05 R  ->  0.110 deg      sigma 40 px at 1.05 R -> 3.5 deg
+#     sigma 1.25 px at 3.40 R  ->  0.034 deg      sigma 40 px at 3.40 R -> 1.1 deg
+#
+# An isotropic Gaussian of the same sigma covers the same arc to within
+# (sigma/r)^2 -- 0.4% at the worst point in our ladder, 4e-6 at the finest. The
+# two kernels are numerically almost the same object everywhere we use them.
+# ACHF's shape only separates from isotropic at sigma of several hundred pixels,
+# which is large-scale structure, not the fine detail this was reached for.
+#
+# What this does NOT reject: ACHF as Druckmuller ships it, which has 38 tuned
+# parameters and a "nonlinearity in the use of filtered images" (thesis p.68)
+# that no source specifies. It rejects the kernel SHAPE as a drop-in for ours,
+# at our scales, which is what the reading of the literature suggested trying.
+# ---------------------------------------------------------------------------
 
 
 def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35):
@@ -732,7 +849,42 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
     mgl = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half), scales=_sc)
     mgl = _deband(mgl, r, valid_stat, cy, cx, R + margin)
     np.save(os.path.join(wd, "mgn.npy"), mgl.astype(np.float32))
-    del nf, L, Lf, mgl
+    del mgl
+
+    # SECOND MGN OVER THE THREE FINE SCALES ONLY.
+    #
+    # The gains above are Morgan & Druckmuller's NOISE-NORMALISATION constants
+    # (their Fig. 4) -- 0.907 at w=1.25 rising to 1.0 by w=5 -- which correct for
+    # a small kernel measuring a smaller local sigma on pure noise. They are not
+    # amplification factors, and their effect is that all six scales get equal
+    # say, tilted very slightly toward the COARSE end.
+    #
+    # Hill combines his masks as E = 100A + 60B + 20C + 10D (A=2px..D=16px):
+    # normalised, 1 : 0.6 : 0.2 : 0.1, the finest scale weighted TEN TIMES the
+    # coarsest. That is the opposite emphasis, and side by side on the reference
+    # bracket it is the difference between slabs and filaments -- the coarse
+    # scales dominate the layer's range, so fine structure arrives already
+    # compressed against the rails.
+    #
+    # amp*coh RATES HILL'S LADDER LOWER in every shell (0.0535 -> 0.0300 at the
+    # limb) and it is still the better picture. The score rewards radially
+    # coherent structure and the coarse scales carry plenty of it; "delicate" is
+    # not a thing it measures. This is an emphasis choice, so it is a slider.
+    #
+    # Storing the fine group separately makes any ladder that is constant within
+    # a group a RENDER-TIME blend, because the layer is a weighted mean of its
+    # per-scale terms. Measured, the blend reaches the true ladder: fine/coarse
+    # energy ratio 1.09 as shipped, 3.18 at detailScale 1, 3.32 for the real
+    # Hill gains -- and the two are indistinguishable side by side.
+    progress.log("MGN, fine scales only (detail-balance slider)...",
+                 _DF.get("mgn_fine", 99.0))
+    _nf = len(_sc) // 2
+    mgf = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half),
+              scales=_sc[:_nf], gains=(0.907, 0.976, 0.994)[:_nf])
+    mgf = _deband(mgf, r, valid_stat, cy, cx, R + margin)
+    np.save(os.path.join(wd, "mgn_fine.npy"), mgf.astype(np.float32))
+    lstats["mgn_fine_scales"] = [round(x, 2) for x in _sc[:_nf]]
+    del nf, L, Lf, mgf
 
     # RHEF costs one lexsort -- seconds against MGN's minutes -- so it is built
     # unconditionally and the renderer decides on radius how much of it to use.
@@ -761,6 +913,39 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         # second copy of the base image and diluted MGN and FNRGF with it. The
         # eq. 2 mix happens in render.py instead, where the composite envelope
         # is T_gamma and the nafeMix slider is w.
+        # DEPARTURE FROM THE PAPERS, STATED AS ONE. Both NAFE papers open their
+        # method section with "In this image the pixel values have a LINEAR
+        # dependence on the intensity of the coronal emission" (2013 p.2, 2014
+        # p.265) and never revisit it. We feed LOG luminance, and we high-pass
+        # it first. Neither has any counterpart in either paper -- there is no
+        # gradient removal, no log, and no lunar masking in their procedure;
+        # NRGF and FNRGF appear in their introductions as ALTERNATIVE methods,
+        # never as a NAFE pre-step. Both departures are defensible here (see the
+        # measurements below and in nafe.py) but they are ours, and they mean no
+        # published NAFE parameter transfers to this code by units alone.
+        #
+        # TESTED. All four combinations, same filter, reference bracket:
+        #
+        #   input                          1.05-1.30 R     1.30-1.80 R    1.80-2.60 R
+        #   log + flatten (this)           0.191 (c0.97)   0.124 (c0.86)  0.079 (c0.53)
+        #   log, no flatten                0.151 (c0.95)   0.106 (c0.84)  0.070 (c0.53)
+        #   linear + flatten               1.120 (c0.85)   0.704 (c0.83)  0.133 (c0.58)
+        #   linear, no flatten (as spec'd) 0.018 (c0.44)   0.000 (c0.81)  0.001 (c0.45)
+        #
+        # The papers' literal form COLLAPSES here -- 0.018 at the limb and
+        # essentially zero beyond it. Their assumption is AIA data, whose
+        # dynamic range is a few hundred to one; an eclipse corona spans 7 EV,
+        # so a value window of fixed width on a linear axis either contains the
+        # whole neighbourhood or none of it, depending on radius.
+        #
+        # `linear + flatten` scores six times higher than what we ship and is
+        # the trap of the day: 1% of its pixels are pinned at the floor and the
+        # layer is clipped to black and white. Variance is maximised by
+        # binarising, which is why amp*coh rewards it.
+        #
+        # So both departures are justified, and now measured rather than
+        # assumed. Log is what makes eps mean the same thing at every radius.
+        #
         # Flatten the envelope first -- see NAFE_FLATTEN_R. The local mean is
         # built by normalized convolution over non-disc pixels only: a plain
         # Gaussian straddling the dark disc is what produced the black annulus.
@@ -775,7 +960,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
         _Lnf = (Ldn - _num).astype(np.float32)
         del _num
         nv = nafe_vn(_Lnf, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
-                     sigma_sp=max(NAFE_NEIGH_R * R, 8.0) / NAFE_GRID,
+                     sigma_sp=max(NAFE_NEIGH_R * R, 1.0),   # nafe_vn divides by `grid` itself
                      noise_mult=NAFE_NOISE_MULT,
                      eps_frac=NAFE_EPS, kernel="gauss", grid=NAFE_GRID)
         np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
@@ -784,7 +969,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False):
                           "flatten_px": round(max(NAFE_FLATTEN_R * R, 4.0), 1),
                           "flatten": "normalized convolution, disc excluded",
                           "noise_mult": NAFE_NOISE_MULT,
-                          "neigh_px": round(NAFE_NEIGH_R * R, 1),
+                          "neigh_px": round(max(NAFE_NEIGH_R * R, 1.0), 1),
                           }
         del nv
     except Exception as e:

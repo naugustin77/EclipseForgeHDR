@@ -262,10 +262,41 @@ def stack_variance(tiers_aligned, cy, cx, R):
     # there is no signal, so the coefficient of variation is large by
     # construction and says nothing about alignment; a rim measured across a
     # band that includes the disc interior mostly reports that plateau.
+    # HOW MANY TIERS ACTUALLY CARRY THE NUMBER. This is not bookkeeping; it is
+    # what makes the number mean anything, and leaving it out produced a false
+    # alarm that stood for three releases.
+    #
+    # Clifton's 250 mm set reported cov_limb 0.793 against 0.037 on his 360 mm
+    # set of the same eclipse, and that 20x gap was read as veiling glare --
+    # written into the report, the changelog and the backlog. Rebuilding the
+    # same statistic from that run's OWN exported tiers gives **0.021**. The
+    # 360 mm set rebuilds at 0.039 against the pipeline's 0.037, so the method
+    # is sound; the 250 mm number is not.
+    #
+    # The cause is the `n >= 3` line above meeting a bracket whose shortest tier
+    # is 1/125 s. Between 1.00 and 1.10 R that set has only TWO tiers with
+    # unclipped signal. Every pixel where a third one survived the clipping cut
+    # is a pixel where a partly-clipped tier happened to be dim -- the exclusion
+    # keeps precisely the dim tail of a blown tier -- so the median is taken
+    # over a biased remnant instead of over agreeing tiers. The 360 mm set has
+    # five or six clean tiers there and never enters that regime.
+    #
+    # So: count the clean tiers, and refuse to report rather than report a
+    # number built on two of them plus contamination.
     for lo, hi, tag in ((1.00, 1.10, "limb"), (1.3, 2.2, "corona")):
-        m = (r > lo * R) & (r < hi * R) & np.isfinite(cov)
+        band = (r > lo * R) & (r < hi * R)
+        m = band & np.isfinite(cov)
+        if band.sum() > 500:
+            out[f"tiers_{tag}"] = float(np.median(n[band]))
         if m.sum() > 500:
-            out[f"cov_{tag}"] = float(np.median(cov[m]))
+            if out.get(f"tiers_{tag}", 0.0) >= 3.0:
+                out[f"cov_{tag}"] = float(np.median(cov[m]))
+            else:
+                # the statistic is not measurable here, and saying so is the
+                # honest output -- a number from the contaminated remnant is
+                # worse than no number
+                out[f"cov_{tag}_unmeasurable"] = float(
+                    out.get(f"tiers_{tag}", 0.0))
     # Width of the high-variance rim just outside the limb: how far the CoV
     # excess over the coronal baseline persists. This is the number the user
     # reads off a Photoshop 'Variance' layer -- a misaligned stack smears the
