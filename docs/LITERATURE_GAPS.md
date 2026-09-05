@@ -96,7 +96,68 @@ like-for-like test with an existing baseline.
 
 ---
 
-## 2. FNRGF: we use order 6 with a hard cutoff; the reference uses ~50 with a taper
+## 2. FNRGF — INVESTIGATED WITH THE REFERENCE AS AN ORACLE. Nothing shipped.
+
+**Status: `tools/reference_fnrgf.py` is a faithful port of Druckmuller's own
+Delphi program, so the reference can now be RUN on our data instead of read.
+On the real `hdr_lum` it is much better than ours in the inner corona. Neither
+of the two mechanisms I tried reproduces that safely, and I am not shipping a
+guess.**
+
+Ours against the port, on Nico's actual merged luminance, standardised per
+shell (`coh` = radial coherence at lag 5 px; `struct` = azimuthal power
+m 40-250 over m 250-500):
+
+```
+variant                                1.05-1.3R      1.3-1.8R      1.8-2.6R
+ours: fnrgf_robust order 6            0.371 /  3.2   0.980 / 98.7  0.938 / 4.3
+reference, thesis optimum             0.824 / 13.5   0.974 / 20.5  0.906 / 5.4
+reference, shipped Settings.ini       0.476 / 13.4   0.709 / 13.8  0.435 / 4.4
+```
+
+**Looking at it confirms the inner shell.** The reference resolves streamers
+into individual filaments right down to the limb where ours is washed out. It
+also shows a fine radial ribbing that the thesis predicts when `A_k` is too
+high — "false glimmers of the higher-order sine and cosine functions".
+
+**Attempt 1: give our robust fit the reference's attenuation.** Implemented in
+`fnrgf_robust` (`atte_ave`, `atte_dev`, both defaulting to 0 = unchanged).
+Order 16 with A -0.06, C -0.08 per harmonic is the best of five settings and
+buys almost nothing: inner shell 0.488 / 3.5 against 0.371 / 3.2. Higher orders
+are worse. **So the order and the taper are not where the difference lives** —
+which is the opposite of what this item assumed before the port existed.
+
+**Attempt 2: the two things the reference does NOT do, both of them ours.**
+Our normalising variance is floored at `(0.3*sg)^2` — *relative* to the local
+robust scale — and our radial profile of sigma is Gaussian-smoothed over 10-40
+px. In the inner corona `sg` is large because the residual there is full of
+real structure, so the floor rises with the signal and divides the structure
+back out. Dropping the floor to 0.05 and cutting the smoothing to a quarter
+scores **0.817 / 42.6** in the inner shell — thirteen times the structure and
+better than the reference.
+
+**And it looks terrible.** Flat grey corona with a handful of blown white and
+black blobs where a few outliers stretch the range. The structure is gone, not
+enhanced; the metric was fooled by large smooth outliers, which is exactly what
+an m40-250 over m250-500 ratio rewards. Rejected on sight.
+
+Both mechanisms are therefore excluded, and the floor and the smoothing are
+load-bearing rather than sloppy. What is left as the difference: the reference
+computes its statistics per INTEGER RADIUS with no radial smoothing at all, no
+robust fitting anywhere, and an ABSOLUTE additive noise variance estimated once
+from the outermost rings (`EstimateAdditiveNoiseRing`) instead of a relative
+floor. That combination is a genuinely different estimator, not a parameter
+change, and it is the next thing to try — carefully, because this item has now
+produced two confident numbers that a glance at the picture destroyed.
+
+`fnrgf_robust` keeps the new parameters, all defaulting to today's behaviour
+(verified bit-identical), so the next attempt does not start from scratch.
+
+---
+
+### (original, before the port existed)
+
+## 2a. FNRGF: we use order 6 with a hard cutoff; the reference uses ~50 with a taper
 
 **Status: real divergence, measured, and the measurement does NOT clearly favour
 the change. Worth doing properly, not worth assuming.**
