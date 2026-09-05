@@ -5,6 +5,103 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.22.31 — the merge weight is a setting, not a guess
+
+Three releases tried to choose the feather automatically. 0.22.28 leaked the
+answer between folders; 0.22.29 fixed the leak and the measurement underneath
+turned out to be meaningless; 0.22.30 fixed the measurement and it still read
+**99%** on Clifton's 360 mm — a bracket the offline bench puts at **13%**, and
+where the same function, run on arrays rebuilt from that dataset's own exported
+tiers, returns **0.33**. So the maths is right and my model of what
+`stacks_half` and `sat_half` contain at that point is not. Nico got the pink rim
+three times while I iterated on that.
+
+**The trial no longer decides.** The merge weight is a control in the toolbar:
+
+- **Detail (hides rings)** — the plain feather. Default, and what Nico's 600 mm
+  set wants.
+- **Photometric (no rim)** — the leak-free weight. Correct brightness just
+  outside the limb, rings visible.
+
+The trial still runs and prints what it measured, labelled as advice, together
+with the fact that it has been wrong: *"this estimator read 99% on a bracket the
+offline bench puts at 13%"*. A number that has not earned a decision should not
+be allowed to make one silently.
+
+`opts.json` records the setting and the cache check compares it, so switching it
+re-runs rather than serving a work directory merged the other way.
+`ECLIPSEFORGE_FEATHER` still overrides everything.
+
+**Why this is the better product, not a retreat.** Which weight to use is a
+trade with no correct answer — it depends on the bracket and on what the picture
+is for. A labelled switch shows what it is doing and can be changed in a second;
+the automation could only ever be as good as an estimator that is currently
+wrong by a factor of seven.
+
+## 0.22.30 — the feather trial was measuring nothing
+
+0.22.29 fixed the leak that stopped the trial running. It then ran on Clifton's
+360 mm set, reported **96%**, chose the plain feather, and the pink rim was
+still there. Nico's 600 mm set had reported 95%. Two brackets that differ by a
+factor of six in the thing being measured, both reading ~95%: the estimator was
+not measuring the leak at all.
+
+**The bug.** `_pick_feather` treated `stacks_half` as a per-channel maximum in
+raw units and compared it against `0.87 * sat_level`. It is neither: it is a
+LUMA of the Bayer quad, and it is taken after the flat. A quad with one channel
+at the ceiling has a luma well below `sat_level`, so the knee almost never
+fired, the hard cut never fired, and the plain and leak-free weights came out
+nearly identical — hence ~95% on everything.
+
+`sat_half` is the array that is right at this resolution: true where ANY
+photosite in the quad hit the ceiling, measured before the flat. The trial now
+uses it for the hard cut and for validity, and scales the soft knee by the luma
+at which each tier actually clips (the median luma over its own saturated
+pixels).
+
+**Validated against the two ratios the offline bench measured**, by running the
+real function on the pipeline's own arrays rebuilt from the exported tiers:
+
+```
+                estimator   bench   decision
+Nico 600mm        0.809     0.747   plain
+Clifton 360mm     0.329     0.126   taper
+```
+
+The magnitudes still differ from the bench — half-resolution luma against a
+full-resolution per-channel maximum is a different proxy — but the ordering is
+right and both sit well clear of the 0.60 threshold. Before this fix they were
+0.95 and 0.96, i.e. indistinguishable.
+
+**Three releases to get one measurement working**: 0.22.28 leaked the answer
+between folders, 0.22.29 fixed the leak but the measurement underneath was
+meaningless, 0.22.30 measures. The lesson is the one from the alignment revert
+in 0.22.28 — a number is not evidence until something independent says it is
+the right number.
+
+## 0.22.29 — the feather choice leaked between folders in one session
+
+Nico ran his 600 mm set, then Clifton's 360 mm, and the second came out with
+the pink rim the 0.22.28 trial exists to prevent. Line 2 of that run says why:
+
+```
+switches honoured by this build (0.22.28): ECLIPSEFORGE_FEATHER=plain
+feather held at 'plain' by ECLIPSEFORGE_FEATHER
+```
+
+The trial never ran. 0.22.28 wrote its choice back into `os.environ` so the
+merge loop could pick it up — and the app is **one long-running process**. His
+600 mm set chose `plain`, that write set the variable, and every folder
+processed afterwards in the same session read it at startup and skipped its own
+measurement. Clifton's 360 mm, which is exactly the set that needs the
+leak-free weight, inherited a decision made about someone else's data.
+
+The write was also unnecessary: `_fm` is passed to `_feather_weight`
+explicitly. Removed.
+
+**If you ran more than one folder under 0.22.28, only the first got a real
+choice.** Re-run the others.
+
 ## 0.22.28 — the feather is chosen per dataset, by measurement
 
 Nico on 0.22.26: *"my data looks good, Cliftons have a pink rim again (other

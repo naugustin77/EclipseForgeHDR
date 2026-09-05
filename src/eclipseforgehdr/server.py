@@ -174,6 +174,9 @@ def start_run():
     if STATE["thread"] and STATE["thread"].is_alive():
         return jsonify({"ok": False, "error": "already running"}), 400
     force = bool(request.json.get("force", False)) if request.is_json else False
+    feather = request.json.get("feather", "plain") if request.is_json else "plain"
+    if feather not in ("plain", "taper", "masked"):
+        feather = "plain"
     denoise = request.json.get("denoise", "fine") if request.is_json else "fine"
     if denoise is True:
         denoise = "fine"
@@ -226,6 +229,7 @@ def start_run():
                         and o.get("import_mtime") == int(os.path.getmtime(import_path))
                         and o.get("import_size") == int(os.path.getsize(import_path))
                         and o.get("denoise") == denoise
+                        and o.get("feather", "plain") == feather
                         and _cache_ok(o.get("build")))
                 have = all(os.path.exists(os.path.join(wd, f))
                            for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))
@@ -273,7 +277,7 @@ def start_run():
                         os.remove(opts_path)
                     except OSError:
                         pass
-                run_pipeline(folder, prog, denoise=denoise,
+                run_pipeline(folder, prog, denoise=denoise, feather=feather,
                              earthshine=earthshine, despeckle=despeckle,
                              frames=frames, export_tiers=export_tiers,
                              tier_linear=tier_linear, flat_dir=flat_dir)

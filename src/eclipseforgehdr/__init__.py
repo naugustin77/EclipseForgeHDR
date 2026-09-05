@@ -1,4 +1,4 @@
-__version__ = "0.22.28"
+__version__ = "0.22.31"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -109,7 +109,19 @@ CACHE_FAMILIES = (
     frozenset({"0.22.27"}),
     # 0.22.28 chooses the merge feather per dataset, so hdr_lum can differ from
     # a .27 run on the same folder. Its own family.
+    # 0.22.29 fixes a leak that let one folder's feather choice apply to the
+    # next folder in the same session, so a .28 work directory may have been
+    # merged with the wrong weight. Its own family.
     frozenset({"0.22.28"}),
+    frozenset({"0.22.29"}),
+    # 0.22.30 fixes the feather trial, which was measuring nothing and so
+    # returned "plain" on every dataset. hdr_lum differs wherever the trial now
+    # picks the other weight. Its own family.
+    # 0.22.31 makes the feather a setting rather than an automatic choice, so
+    # a work directory carries whichever weight was asked for; opts.json now
+    # records it and the cache check compares it. Its own family.
+    frozenset({"0.22.30"}),
+    frozenset({"0.22.31"}),
 )
 
 

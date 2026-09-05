@@ -120,6 +120,14 @@ button:disabled{opacity:.45;cursor:default}
           <option value="medium">Fine + medium</option>
           <option value="strong">Strong</option>
         </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How the merge weight is feathered at each tier's clipping edge, which is a trade with no right answer. Detail: hides a ring artifact that lives just outside the limb, at the cost of real brightness there - on some brackets a little, on others a lot, and when it is a lot it shows as a coloured rim. Photometric: correct brightness, rings visible. The log prints what the trade would cost on YOUR data, measured, so you can decide.">
+        Merge weight
+        <select id="feather" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="plain" selected>Detail (hides rings)</option>
+          <option value="taper">Photometric (no rim)</option>
+        </select></label>
       <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
         title="Off by default: earthshine needs long tiers with real headroom over the scattered glare, which most totality brackets do not have.">
         <input type="checkbox" id="earthshine"> Earthshine</label>
@@ -313,6 +321,7 @@ async function startRun(){
   $("start").disabled = true;
   await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({force:false, denoise: $("denoise").value,
+      feather: $("feather").value,
                           earthshine: $("earthshine").checked,
                           despeckle: $("despeckle").checked,
                           exportTiers: $("exportTiers").checked,

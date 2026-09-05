@@ -248,22 +248,21 @@ def build(stats):
           f"the frame invalid (worst tier {_w[0]}s); those pixels were entering "
           f"the merge at full weight carrying interpolated clipped data")
     _fm = stats.get("feather_mode"); _fr = stats.get("feather_ratio")
-    _rt = (f" On this bracket it reads {100 * _fr:.0f}% of the leak-free level "
-           f"at 1.02 R." if _fr else "")
-    if _fm == "plain":
-        A("merge weight : plain feather, CHOSEN BY MEASUREMENT on this dataset."
-          + _rt +
-          " It suppresses the ring artifact and is not a fix — it covers it "
-          "with a compensating error of the same shape, so the corona just "
-          "outside the limb reads low. Fine for pictures; do not take "
-          "photometry from that band. ECLIPSEFORGE_FEATHER=taper forces the "
-          "correct brightness with the rings visible")
-    elif _fm:
-        A(f"merge weight : {_fm} feather, CHOSEN BY MEASUREMENT on this "
-          f"dataset." + _rt + " The plain feather's leak would print as a rim "
-          f"around the limb on this bracket, so the leak-free weight was used. "
-          f"Brightness near the limb is correct; the ring artifact is visible "
-          f"and is the smaller error here")
+    if _fm:
+        _n = {"plain": "Detail (hides rings)",
+              "taper": "Photometric (no rim)"}.get(_fm, _fm)
+        A(f"merge weight : {_n} — a SETTING, not a measurement. 'Detail' "
+          f"suppresses a ring artifact just outside the limb by covering it "
+          f"with an error of the same shape, so the corona reads low there; "
+          f"on some brackets that is a few percent, on others it is large "
+          f"enough to show as a coloured rim. 'Photometric' gives the correct "
+          f"brightness with the rings visible. Change it in the toolbar")
+        if _fr:
+            A(f"             : the trial measured the Detail weight at "
+              f"{100 * _fr:.0f}% of the Photometric level at 1.02 R. ADVICE "
+              f"ONLY — this estimator read 99% on a bracket the offline bench "
+              f"puts at 13%, so it does not choose and should not be trusted "
+              f"over the picture")
     _lg = stats.get("linearity_gamma")
     if _lg is not None and abs(_lg - 1.0) > 0.08:
         A(f"linearity    : *** NOT scene-linear — the photometric links are "

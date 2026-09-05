@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.22.28
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.22.31
 
 A local desktop app that turns a folder of exposure-bracketed raw files shot
 during totality into a finished corona image. Point it at the folder, wait

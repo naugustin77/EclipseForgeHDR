@@ -1091,7 +1091,8 @@ def _fit_azimuthal_affine(vals, wts, secs_order):
 
 
 def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
-                  cym, cxm, Rseed, alpha, sigma_half, progress):
+                  cym, cxm, Rseed, alpha, sigma_half, progress,
+                  advise_only=False):
     """Choose the merge feather from THIS dataset, not from a global default.
 
     0.22.25 put the plain feather back because it hides the ring artifact.
@@ -1125,14 +1126,28 @@ def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
     acc = {"plain": None, "taper": None}
     wsum = {"plain": None, "taper": None}
     for s in secs:
-        cmax = stacks_half[s].astype(np.float32)
-        v = (~sat_half[s]).astype(np.float32)
-        q = 0.5 * (1.0 + np.tanh((0.87 * sat_level - cmax) / (0.06 * sat_level)))
+        # `stacks_half` is a LUMA of the Bayer quad, after the flat -- not a
+        # per-channel maximum in raw units. 0.22.28 compared it against
+        # 0.87*sat_level anyway, so the knee almost never fired, both weights
+        # came out nearly identical, and every dataset reported 95-96%
+        # whatever its bracket actually did. The saturation mask is the thing
+        # that is right at this resolution: `sat_half` is true where ANY
+        # photosite in the quad hit the ceiling, measured before the flat.
+        # So scale the knee by the luma at which THIS tier clips.
+        lum_h = stacks_half[s].astype(np.float32)
+        sat = sat_half[s]
+        v = (~sat).astype(np.float32)
+        _lsat = float(np.median(lum_h[sat])) if sat.any() else 0.0
+        if _lsat <= 0:
+            x = np.zeros_like(lum_h)          # nothing clips: no knee to apply
+        else:
+            x = lum_h / np.float32(_lsat)
+        q = 0.5 * (1.0 + np.tanh((0.87 - x) / 0.06)).astype(np.float32)
+        q[sat] = 0.0
+        _lo = _MERGE_FLOOR
+        q *= 0.5 * (1.0 + np.tanh((x - _lo) / (0.5 * _lo)))
         q = q.astype(np.float32)
-        q[cmax > 0.97 * sat_level] = 0.0
-        _lo = _MERGE_FLOOR * sat_level
-        q *= 0.5 * (1.0 + np.tanh((cmax - _lo) / (0.5 * _lo)))
-        val = (cmax - pedestal) / np.float32(s * cal[s])
+        val = (lum_h - pedestal) / np.float32(s * cal[s])
         sa = np.float32(s ** alpha)
         ws = {"plain": sa * _feather_weight(q, v, sigma_half, "plain"),
               "taper": sa * _feather_weight(q, v, sigma_half, "taper")}
@@ -1140,7 +1155,7 @@ def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
             if acc[k] is None:
                 acc[k] = np.zeros_like(val); wsum[k] = np.zeros_like(val)
             acc[k] += w * val; wsum[k] += w
-        del cmax, v, q, val, ws
+        del lum_h, sat, v, q, val, ws, x
     out = {}
     for k in acc:
         lum = acc[k] / np.maximum(wsum[k], 1e-9)
@@ -1601,7 +1616,7 @@ def resolve_flat_dir(folder, flat_dir=None):
 
 def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         earthshine=False, despeckle=True, frames="all", export_tiers=False,
-        tier_linear=False, flat_dir=None):
+        tier_linear=False, flat_dir=None, feather="plain"):
     from . import flat as _flat
     wd = workdir(folder)
     paths = list_raws(folder)
@@ -1626,6 +1641,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          "despeckle": bool(despeckle), "frames": frames,
                          "export_tiers": bool(export_tiers),
                          "tier_linear": bool(tier_linear),
+                         "feather": str(feather),
                          "flat_dir": _flat_dir},
              "camera_info": read_camera_info(paths[0])}
 
@@ -2940,23 +2956,55 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _fsat = None
     if flat_master is not None and flat_master.shape == (H2, W2):
         _fsat = _flat.superpixel_full(flat_master)
-    _fm = os.environ.get("ECLIPSEFORGE_FEATHER", "").lower()
-    _fratio = float("nan")
-    if not _fm:
-        try:
-            _fm, _fratio = _pick_feather(
-                stacks_half, sat_half, secs, cal, pedestal,
-                float(color_info["sat_level"]), cym, cxm, _Rseed, _walpha,
-                _feather / 2.0, progress)
-        except Exception as _e:
-            _fm = _FEATHER_DEFAULT
-            progress.log(f"feather trial skipped ({_e}) — using {_fm}", None)
-    else:
-        progress.log(f"feather held at '{_fm}' by ECLIPSEFORGE_FEATHER", None)
+    # THE TRIAL ADVISES; IT DOES NOT DECIDE.
+    #
+    # 0.22.28 through .30 tried to pick the feather automatically from a
+    # half-resolution reconstruction of the merge. Three releases, and it still
+    # read 99% on a bracket the offline bench measures at 13% -- the same
+    # function, run on arrays rebuilt from that dataset's own exported tiers,
+    # returns 0.33, so the estimator is not wrong about the maths, it is wrong
+    # about what `stacks_half` and `sat_half` actually contain at this point.
+    # Until that is understood the number has not earned a decision.
+    #
+    # So the feather is a SETTING (GUI: "Merge weight"), and the trial prints
+    # what it measured next to it, with its own disagreement stated. A control
+    # the user can see and change in a second beats a guess that silently picks
+    # wrong -- which is what shipped a pink rim on Clifton's data twice.
+    _fm = (os.environ.get("ECLIPSEFORGE_FEATHER") or feather or
+           _FEATHER_DEFAULT).lower()
+    if _fm not in ("plain", "taper", "masked"):
+        _fm = _FEATHER_DEFAULT
     stats["feather_mode"] = _fm
-    if np.isfinite(_fratio):
-        stats["feather_ratio"] = round(_fratio, 4)
-    os.environ["ECLIPSEFORGE_FEATHER"] = _fm
+    _fratio = float("nan")
+    try:
+        _adv, _fratio = _pick_feather(
+            stacks_half, sat_half, secs, cal, pedestal,
+            float(color_info["sat_level"]), cym, cxm, _Rseed, _walpha,
+            _feather / 2.0, progress, advise_only=True)
+        if np.isfinite(_fratio):
+            stats["feather_ratio"] = round(_fratio, 4)
+            progress.log(
+                f"merge weight: '{_fm}' (setting). The trial measures the "
+                f"plain feather at {100 * _fratio:.0f}% of the leak-free level "
+                f"at 1.02 R and would suggest '{_adv}' — ADVICE ONLY, and this "
+                f"estimator has been wrong before: it read 99% on a bracket "
+                f"the offline bench puts at 13%. Trust the picture, not this "
+                f"number.", None)
+        else:
+            progress.log(f"merge weight: '{_fm}' (setting); the trial could "
+                         f"not measure a ratio on this bracket", None)
+    except Exception as _e:
+        progress.log(f"merge weight: '{_fm}' (setting); trial skipped ({_e})",
+                     None)
+    # DO NOT write the choice back into os.environ. 0.22.28 did, so that the
+    # merge loop could pick it up -- and the app is ONE LONG-RUNNING PROCESS.
+    # The first folder's trial set the variable, every later folder in the same
+    # session read it at startup, skipped its own trial, and reported "feather
+    # held at 'plain' by ECLIPSEFORGE_FEATHER". Nico's 600 mm set chose plain,
+    # and Clifton's 360 mm -- which needs the leak-free weight -- then inherited
+    # it and came out with the pink rim the trial exists to prevent.
+    # `_fm` is passed to _feather_weight explicitly below, so nothing needs the
+    # environment; writing to it only leaked state between runs.
 
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
