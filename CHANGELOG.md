@@ -5,6 +5,158 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.22.28 — the feather is chosen per dataset, by measurement
+
+Nico on 0.22.26: *"my data looks good, Cliftons have a pink rim again (other
+than that, it looks good)"*. Both are consequences of the same line — 0.22.25
+made the plain feather the global default — and the second one is my fault for
+shipping a global default at all when I had already measured that its cost is
+not a constant:
+
+```
+plain feather's level at 1.02 R, against the leak-free merge
+  Nico's 600 mm     0.747      he calls this good, no rim
+  Clifton's 360 mm  0.126      a pink rim around the limb
+```
+
+A factor of eight against a quarter. One default cannot serve both.
+
+So the feather is no longer defaulted. Before the merge, `_pick_feather`
+rebuilds both weights on the half-resolution stacks that are already in memory,
+takes the worst near-limb ratio over 1.01-1.15 R, and picks: plain while its
+deficit stays under 40%, the leak-free taper when it does not. A few hundred
+milliseconds against a run of minutes. `ECLIPSEFORGE_FEATHER` still overrides,
+and the report says which was chosen, the measured ratio, and why.
+
+The threshold is 0.60, calibrated on exactly those two datasets. Anything in
+(0.13, 0.75) separates them, so this is not pinned down; a third dataset
+landing between them is what would settle it. Said plainly in the source.
+
+### The 0.22.27 alignment change is REVERTED — it was a regression
+
+Nico's real 600 mm run, 0.22.26 against 0.22.27:
+
+```
+                                   0.22.26   0.22.27
+alignment network residual (half)   1.17 px   2.67 px
+per-tier lunar limb spread          8 px      12 px
+track scatter about the line        1/2 px    2/4 px
+that step's run time                13 s      1m25s
+```
+
+More than double the residual. Back to a flat 25 px.
+
+**Why the test lied, because that is the part worth keeping.** The sweep in
+0.22.27 was real, and it measured the wrong thing:
+
+- it ran on the **exported** tiers, which are the *output* of alignment —
+  already registered, resampled and mean-stacked. Their low frequencies match
+  almost perfectly, which is exactly what a weak high-pass needs and exactly
+  what the aligner never sees.
+- both crops came from the same origin. Real pairs are windowed on their own
+  per-tier origins, up to ~50 px apart on this bracket.
+- there was no signal-weight mask; `prep_pair` multiplies by `wgt`.
+
+So it measured sub-pixel refinement on an easy pair and I read it as alignment.
+A synthetic test that cannot fail the way the real thing fails is not evidence,
+and "measured" is not a synonym for "measured the right thing".
+
+What survives from 0.22.27 is the phase-correlation result — that one compared
+two estimators on the same data, so the *relative* answer holds even though the
+absolute numbers came from an easy case.
+
+### Two bugs found while building it, both worth naming
+
+- `_feather_weight` took its mode from the environment, so the trial compared
+  the plain feather **with itself** and returned exactly 1.000 on brackets that
+  were 100% blown at the limb. The mode is now an explicit argument, with the
+  environment as the fallback.
+- With every tier clipped across the band the leak-free merge has no weight
+  left to average and the ratio came out as 8e17, which would have selected
+  "plain" on a nonsense number. The leak can only pull the level *down*, so
+  anything above 1.2 is now treated as degenerate and reported as such.
+
+Neither would have been caught without a synthetic bracket built to blow at
+the limb; both were silent.
+
+### What has not changed
+
+The ring artifact is still not understood, and the plain feather still hides it
+with a compensating error rather than fixing it. This only stops that trade
+being made on data where it costs a factor of eight.
+
+## 0.22.27 — the alignment filter, and phase correlation settled by measurement
+
+0.22.1 corrected the report to say we do not run phase correlation and left the
+question open: *"Whether to turn it on is a separate, measurable question."*
+It is now measured, and the answer is no.
+
+### The test
+
+Two already-aligned tiers are taken from the exported set, so their true
+relative shift is zero. A known sub-pixel shift is injected into one by an
+exact FFT phase ramp, and the estimator has to recover it. Only adjacent tier
+pairs, which is what the network actually links. Every estimator gets the same
+parabolic sub-pixel refinement, so only the estimator differs. A self-test
+recovers a known shift to ~0.1 px, which is what makes the rest trustworthy.
+
+### Phase correlation is worse here, and the band-pass is why it looked close
+
+RMS error over 4 adjacent pairs x 8 shifts on the 600 mm set:
+
+```
+ours, plain cross-correlation                     3.02 px
+best of 36 regularised phase-correlation settings 5.00 px
+the same band-pass, WITHOUT the whitening         2.91 px
+```
+
+So the band-pass filter `H` is worth about 0.1 px and the amplitude whitening
+costs 2.1 px. Textbook phase correlation (no `H`, no regularisation) is worse
+still, 12.5 px against our 5.9 px on the full pair set.
+
+The reason is specific to this problem rather than to the method. Whitening
+gives every spatial frequency equal weight, and in a 1/2000 s frame most
+frequencies hold nothing but read noise. Druckmullerova's thesis recommends
+phase correlation for registering eclipse images of *comparable* quality; a
+14-stop bracket is a different case, and the flag that has been in the code all
+along turns out to have been the right setting for the wrong reason.
+
+The report no longer describes this as a deviation. It is a choice, with a
+number behind it.
+
+### What DID help: our high-pass was far too aggressive
+
+`prep_pair` high-passed at a flat 25 px before correlating. At the reference
+geometry that is 0.08 R -- it removes nearly everything the corona looks like
+and leaves the correlation working on fine texture, which is exactly where a
+fast tier has no signal. Sweeping it, RMS error in px:
+
+```
+sigma        0.05R  0.10R  0.20R  0.32R  0.50R  0.75R   none
+600mm +/-3    3.01   2.64   2.40   2.35   2.42   2.54   2.18
+600mm +/-12   2.99   2.61   2.36   2.31   2.38   2.48   2.15
+360mm +/-3    1.01   0.90   0.77   0.72   0.71   0.71   0.71
+```
+
+Now `0.5 R`, clamped to [25 px, S/6]. **18-22% lower error on both datasets and
+at both shift magnitudes.** The old value sits at the left edge of that table.
+
+Dropping the high-pass entirely is very slightly better again on one set and is
+deliberately not taken: with no high-pass the correlation is driven by the
+overall brightness distribution, which is precisely what differs between
+exposures under thin cloud or a different distribution of diffuse light -- the
+case the thesis names as the hard one. A large but finite high-pass keeps
+almost all of the gain without that exposure.
+
+Only the cross-exposure filter is changed. `prep_pc`, which aligns frames
+*within* one exposure, was not part of this test and is left at 30 px.
+
+### Also tested and rejected
+
+The tangential-blur high-pass used by `naavis/eclipsetools` -- blur along
+azimuth only, so the radial gradient goes and azimuthal structure stays. It
+sounds right and measures 5.40 px against our 3.02. Not adopted.
+
 ## 0.22.26 — the clipping test moves onto the mosaic, and the merge gains LDIC's azimuthal term
 
 Two things Nico asked for, both from the collar measurement and the thesis.

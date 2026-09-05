@@ -893,12 +893,15 @@ _MERGE_FLOOR = 0.005
 # blur does not remove the artifact. It covers it with a compensating error of
 # the same shape -- both are bounded by each tier's saturation contour.
 #
-# So this default is a deliberate, documented trade of 25% of the true
-# brightness at 1.02 R (on Nico's 600 mm set; 8x on Clifton's 360 mm, it is
-# dataset-dependent) for pictures that do not show rings. It is the wrong
-# default for photometry and the right one for what this tool is used for
-# today, and the report says so on every run. Set ECLIPSEFORGE_FEATHER=taper
-# for the photometrically honest merge with the artifact visible.
+# So the plain feather is a deliberate, documented trade of brightness near the
+# limb for pictures that do not show rings -- and the price is NOT a constant.
+# 25% of the true level at 1.02 R on Nico's 600 mm set; a factor of EIGHT on
+# Clifton's 360 mm, where it prints as a pink rim. He reported exactly that on
+# 0.22.26, which is what killed this as a global default.
+#
+# Since 0.22.28 the feather is chosen per dataset by measuring that ratio on
+# the half-resolution stacks before the merge -- see _pick_feather. This
+# constant is only the fallback for when that measurement cannot run.
 #
 # The artifact itself is NOT understood. What is known: it follows each tier's
 # saturation contour; it survives per-tier correction by scale, by colour, by
@@ -1087,7 +1090,104 @@ def _fit_azimuthal_affine(vals, wts, secs_order):
     return out
 
 
-def _feather_weight(w, valid, sigma):
+def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
+                  cym, cxm, Rseed, alpha, sigma_half, progress):
+    """Choose the merge feather from THIS dataset, not from a global default.
+
+    0.22.25 put the plain feather back because it hides the ring artifact.
+    That was right for Nico's 600 mm set, where the leak it trades for costs
+    25% of the true brightness at 1.02 R, and wrong for Clifton's 360 mm set,
+    where the same leak costs a factor of EIGHT and prints as a pink rim
+    around the limb -- which is exactly what he reported on 0.22.26.
+
+    The severity is a property of the bracket (how much weight a blown tier
+    carries, how steep the limb gradient is), it is not knowable in advance,
+    and it is cheap to measure: merge the half-resolution stacks both ways and
+    compare the near-limb level. A few hundred milliseconds against a run of
+    minutes.
+
+    The rule: use the plain feather while its error stays small enough not to
+    read as a rim, and fall back to the leak-free taper when it does not. The
+    threshold is 25%, which is where the one dataset known to be acceptable
+    sits -- so this ships the picture Nico already approved on his data and
+    refuses the 8x version on Clifton's.
+
+    Returns (mode, ratio) with ratio = plain level / taper level at 1.02 R.
+    """
+    H, W = stacks_half[secs[0]].shape
+    rmax = min(cym, cxm, H - cym, W - cxm) - 2.0
+    rs = np.arange(1.00 * Rseed, min(1.30 * Rseed, rmax), 0.01 * Rseed)
+    if rs.size < 6:
+        return "plain", float("nan")
+    th = np.linspace(0, 2 * np.pi, 360, endpoint=False)
+    ys = np.clip((cym + rs[:, None] * np.sin(th)).astype(np.int32), 0, H - 1)
+    xs = np.clip((cxm + rs[:, None] * np.cos(th)).astype(np.int32), 0, W - 1)
+    acc = {"plain": None, "taper": None}
+    wsum = {"plain": None, "taper": None}
+    for s in secs:
+        cmax = stacks_half[s].astype(np.float32)
+        v = (~sat_half[s]).astype(np.float32)
+        q = 0.5 * (1.0 + np.tanh((0.87 * sat_level - cmax) / (0.06 * sat_level)))
+        q = q.astype(np.float32)
+        q[cmax > 0.97 * sat_level] = 0.0
+        _lo = _MERGE_FLOOR * sat_level
+        q *= 0.5 * (1.0 + np.tanh((cmax - _lo) / (0.5 * _lo)))
+        val = (cmax - pedestal) / np.float32(s * cal[s])
+        sa = np.float32(s ** alpha)
+        ws = {"plain": sa * _feather_weight(q, v, sigma_half, "plain"),
+              "taper": sa * _feather_weight(q, v, sigma_half, "taper")}
+        for k, w in ws.items():
+            if acc[k] is None:
+                acc[k] = np.zeros_like(val); wsum[k] = np.zeros_like(val)
+            acc[k] += w * val; wsum[k] += w
+        del cmax, v, q, val, ws
+    out = {}
+    for k in acc:
+        lum = acc[k] / np.maximum(wsum[k], 1e-9)
+        out[k] = np.median(lum[ys, xs], axis=1)
+    # Over a BAND, not one radius, and with a degeneracy guard. The leak can
+    # only ever pull the merged level DOWN, so a ratio above 1 means the
+    # comparison is meaningless -- which happens when every tier is clipped
+    # across the band and the leak-free merge has no weight left to average.
+    # A synthetic bracket blown 100% at the limb returned 8e17 before this.
+    band = (rs >= 1.01 * Rseed) & (rs <= 1.15 * Rseed)
+    with np.errstate(all="ignore"):
+        rr = out["plain"][band] / np.where(out["taper"][band] > 0,
+                                           out["taper"][band], np.nan)
+    rr = rr[np.isfinite(rr)]
+    # the MINIMUM over the band, not the median: a rim is visible where the
+    # deficit is worst, and the deficit shrinks quickly with radius (on
+    # Clifton's 360 mm, 0.13 at 1.02 R but 0.49 by 1.06 R -- a median over the
+    # band would blur the two datasets together).
+    ratio = float(np.min(rr)) if rr.size >= 3 else float("nan")
+    if not np.isfinite(ratio) or ratio > 1.2:
+        progress.log("feather trial: no usable comparison at the limb on this "
+                     "bracket (every tier clipped there, or no signal) — "
+                     "keeping the plain feather", None)
+        return "plain", float("nan")
+    # THRESHOLD, AND WHAT IT IS CALIBRATED ON. Two real numbers, measured by
+    # rebuilding both merges from the exported tiers:
+    #     Nico's 600 mm   0.747  -- he calls this good, no rim
+    #     Clifton's 360mm 0.126  -- he reported a pink rim on 0.22.26
+    # Anything in (0.13, 0.75) separates them; 0.60 means "accept up to a 40%
+    # deficit". Two calibration points that far apart do not pin it down, and
+    # a third dataset landing between them is what would.
+    mode = "plain" if ratio >= 0.60 else "taper"
+    if mode == "plain":
+        progress.log(f"feather trial: the plain feather reads "
+                     f"{100 * ratio:.0f}% of the leak-free level at 1.02 R — "
+                     f"small enough to keep, and it suppresses the ring "
+                     f"artifact", None)
+    else:
+        progress.log(f"feather trial: the plain feather reads only "
+                     f"{100 * ratio:.0f}% of the leak-free level at 1.02 R on "
+                     f"this bracket — that prints as a rim around the limb, so "
+                     f"the leak-free weight is used instead. The ring artifact "
+                     f"will be visible; it is the smaller error here", None)
+    return mode, ratio
+
+
+def _feather_weight(w, valid, sigma, mode=None):
     """Smooth a merge weight so it neither leaks into, nor steps at, the edge of
     the region where the tier is clipped.
 
@@ -1137,7 +1237,12 @@ def _feather_weight(w, valid, sigma):
     """
     if sigma <= 0:
         return np.asarray(w, np.float32)
-    _mode = os.environ.get("ECLIPSEFORGE_FEATHER", _FEATHER_DEFAULT).lower()
+    # `mode` explicit beats the environment. _pick_feather has to be able to
+    # ask for BOTH forms in one process, and reading the variable here made it
+    # silently compare a thing with itself -- the trial returned exactly 1.000
+    # on brackets that were 100% blown at the limb.
+    _mode = (mode or os.environ.get("ECLIPSEFORGE_FEATHER",
+                                    _FEATHER_DEFAULT)).lower()
     if _mode == "plain":                       # <= 0.22.15, leaks into the clip
         return ndimage.gaussian_filter(np.asarray(w, np.float32),
                                        sigma).astype(np.float32)
@@ -1905,10 +2010,56 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         med = np.median(a); sig = 1.4826 * np.median(np.abs(a - med))
         good = (~sat2) & (ndimage.gaussian_filter(a, 3) > med + 5 * sig)
         wgt = ndimage.gaussian_filter(good.astype(np.float32), 5)
+        # HOW HARD TO HIGH-PASS BEFORE CORRELATING ACROSS EXPOSURES.
+        #
+        # This was a flat 25 px, which is aggressive: at the reference set's
+        # geometry that is 0.08 R, so almost everything the corona actually
+        # looks like is removed and the correlation is left with fine texture
+        # -- which is where a 1/2000 s tier has nothing but noise.
+        #
+        # MEASURED. Two aligned tiers are taken from the exported set (so their
+        # true relative shift is zero), a known sub-pixel shift is injected into
+        # one by an exact FFT phase ramp, and the estimator has to recover it.
+        # Adjacent tier pairs only, which is what the network actually links.
+        # RMS error in px, over 6 random shifts x 4 pairs:
+        #
+        #   sigma        0.05R  0.10R  0.20R  0.32R  0.50R  0.75R   none
+        #   600mm +/-3    3.01   2.64   2.40   2.35   2.42   2.54   2.18
+        #   600mm +/-12   2.99   2.61   2.36   2.31   2.38   2.48   2.15
+        #   360mm +/-3    1.01   0.90   0.77   0.72   0.71   0.71   0.71
+        #
+        # The old 25 px sits at the left end of that. 0.5 R is at the flat
+        # optimum on both sets and at both shift magnitudes, and is 18-22%
+        # better. Dropping the high-pass entirely is very slightly better again
+        # on one set, and is NOT taken: with no high-pass the correlation is
+        # driven by the overall brightness distribution, which is exactly what
+        # differs between exposures when there is thin cloud or a different
+        # distribution of diffuse light -- the case Druckmullerova's thesis
+        # names as the hard one. A large but finite high-pass keeps almost all
+        # of the gain without that exposure.
+        #
+        # REVERTED IN 0.22.28. On Nico's real 600 mm run the network residual
+        # went 1.17 -> 2.67 px (half-res), per-tier limb spread 8 -> 12 px,
+        # track scatter 1/2 -> 2/4 px, and the step took 1m25s instead of 13s.
+        # The table above is real but it was measured on the wrong thing:
+        #
+        #   * it used the EXPORTED tiers, which are the OUTPUT of alignment --
+        #     already registered, resampled and mean-stacked. Their low
+        #     frequencies match almost perfectly, which is exactly what a weak
+        #     high-pass needs and exactly what the aligner never gets.
+        #   * both crops came from the same origin. Real pairs are windowed on
+        #     their own per-tier origins with up to ~50 px between them.
+        #   * it had no signal-weight mask; prep_pair multiplies by `wgt`.
+        #
+        # So the harness measured sub-pixel refinement on an easy pair and
+        # called it alignment. A synthetic test that cannot fail the way the
+        # real thing fails is not evidence. Back to 25 px, which is what
+        # produced the 1.17 px residual.
+        _hp = 25.0
         out = []
         for img in (a, b):
             x = np.log1p(np.clip(img, 0, None) / max(med + 5 * sig, 1e-3))
-            x -= ndimage.gaussian_filter(x, 25)
+            x -= ndimage.gaussian_filter(x, _hp)
             out.append(x * wgt * np.hanning(S)[:, None] * np.hanning(S)[None, :])
         return out
 
@@ -2278,20 +2429,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # a set that had been clean. Guessing which one is slower than letting the
     # person with the data turn each off for one run, so:
     #   ECLIPSEFORGE_NO_PEDESTAL=1   restores the pre-0.22.15 merge exactly
-    #   ECLIPSEFORGE_FEATHER=plain   the DEFAULT again since 0.22.25 -- see
-    #                                _FEATHER_DEFAULT for why, and what it costs
+    #   ECLIPSEFORGE_FEATHER=plain   hides the rings, leaks at the limb
     #   ECLIPSEFORGE_FEATHER=masked  the 0.22.16 one (steps at the clip edge)
-    #   ECLIPSEFORGE_FEATHER=taper   0.22.19-0.22.24: leak-free, rings visible
-    _fm = os.environ.get("ECLIPSEFORGE_FEATHER", _FEATHER_DEFAULT).lower()
-    stats["feather_mode"] = _fm
-    if _fm == "plain":
-        progress.log("merge weight: plain feather (0.22.25 default). Hides the "
-                     "ring artifact; costs real brightness just outside the "
-                     "limb. ECLIPSEFORGE_FEATHER=taper for the honest merge",
-                     None)
-    else:
-        progress.log(f"merge weight: {_fm} feather — photometrically correct "
-                     f"near the limb, ring artifact NOT suppressed", None)
+    #   ECLIPSEFORGE_FEATHER=taper   leak-free, rings visible
+    # Since 0.22.28 the feather is CHOSEN BY MEASUREMENT per dataset rather
+    # than defaulted; setting the variable overrides that. See _pick_feather.
     if os.environ.get("ECLIPSEFORGE_NO_PEDESTAL") == "1":
         progress.log("shared pedestal DISABLED by ECLIPSEFORGE_NO_PEDESTAL=1 — "
                      "this run reproduces the pre-0.22.15 merge", None)
@@ -2798,6 +2940,24 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _fsat = None
     if flat_master is not None and flat_master.shape == (H2, W2):
         _fsat = _flat.superpixel_full(flat_master)
+    _fm = os.environ.get("ECLIPSEFORGE_FEATHER", "").lower()
+    _fratio = float("nan")
+    if not _fm:
+        try:
+            _fm, _fratio = _pick_feather(
+                stacks_half, sat_half, secs, cal, pedestal,
+                float(color_info["sat_level"]), cym, cxm, _Rseed, _walpha,
+                _feather / 2.0, progress)
+        except Exception as _e:
+            _fm = _FEATHER_DEFAULT
+            progress.log(f"feather trial skipped ({_e}) — using {_fm}", None)
+    else:
+        progress.log(f"feather held at '{_fm}' by ECLIPSEFORGE_FEATHER", None)
+    stats["feather_mode"] = _fm
+    if np.isfinite(_fratio):
+        stats["feather_ratio"] = round(_fratio, 4)
+    os.environ["ECLIPSEFORGE_FEATHER"] = _fm
+
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
     _segmap = None
@@ -2926,7 +3086,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # s**alpha, not s: alpha is 1.0 unless the trial above measured that
         # tilting toward the shorter, sharper tiers buys limb detail without
         # costing the outer field. See _pick_weight_alpha.
-        w = np.float32(s ** _walpha) * _feather_weight(wsat, _valid, _feather)
+        w = np.float32(s ** _walpha) * _feather_weight(wsat, _valid, _feather,
+                                                       _fm)
         mw = moon_weight(s)
         if mw is not None:
             w *= mw

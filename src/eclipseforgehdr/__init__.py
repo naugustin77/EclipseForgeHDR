@@ -1,4 +1,4 @@
-__version__ = "0.22.26"
+__version__ = "0.22.28"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -103,6 +103,13 @@ CACHE_FAMILIES = (
     # correctly marked invalid and every tier's contribution to the merge
     # changes. hdr_lum and every layer differ. Its own family.
     frozenset({"0.22.26"}),
+    # 0.22.27 changes the cross-exposure alignment filter, so every tier's
+    # shift can differ and everything downstream of the stack is different
+    # data. Its own family.
+    frozenset({"0.22.27"}),
+    # 0.22.28 chooses the merge feather per dataset, so hdr_lum can differ from
+    # a .27 run on the same folder. Its own family.
+    frozenset({"0.22.28"}),
 )
 
 

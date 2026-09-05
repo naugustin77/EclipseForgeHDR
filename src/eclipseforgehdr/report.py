@@ -17,11 +17,13 @@ METHODS = [
      "hot/dead photosites mapped on the shortest tier against a fitted photon+read "
      "noise model, repaired by the median of same-colour neighbours"),
     ("Alignment",
-     "cross-correlation of a gradient-flattened log corona, after Druckmuller "
-     "2009 (ApJ 706, 1605) -- but WITHOUT that paper's phase normalisation: "
-     "skimage is called with normalization=None, so the amplitude spectrum is "
-     "not divided out and this is not, strictly, phase correlation; "
-     "lag-1 and lag-2 links solved together by weighted least squares"),
+     "cross-correlation of a gradient-flattened log corona, high-passed at "
+     "25 px, with lag-1 and lag-2 links solved together by weighted least "
+     "squares. Deliberately NOT phase correlation: the amplitude normalisation "
+     "is off (normalization=None), which was tested directly in 0.22.27 by "
+     "injecting known shifts into aligned tiers and is 66% WORSE on this kind "
+     "of data -- whitening gives a nearly signal-free short tier the same "
+     "weight as a well exposed one"),
     ("Prominence anchors",
      "the fastest tiers hold almost no corona to correlate on, so they are also tied in "
      "by normalized cross-correlation of prominence patches -- solar features, unlike the "
@@ -245,18 +247,23 @@ def build(stats):
           f"photosite is now flagged. This run marks up to {_w[1]:.2f}% more of "
           f"the frame invalid (worst tier {_w[0]}s); those pixels were entering "
           f"the merge at full weight carrying interpolated clipped data")
-    _fm = stats.get("feather_mode")
+    _fm = stats.get("feather_mode"); _fr = stats.get("feather_ratio")
+    _rt = (f" On this bracket it reads {100 * _fr:.0f}% of the leak-free level "
+           f"at 1.02 R." if _fr else "")
     if _fm == "plain":
-        A("merge weight : plain feather (0.22.25 default). This SUPPRESSES the "
-          "ring artifact and it is not a fix — it covers it with a compensating "
-          "error of the same shape, so the corona just outside the limb reads "
-          "low (25% at 1.02 R on the reference set, dataset-dependent). Fine "
-          "for pictures; do not take photometry from that band. "
-          "ECLIPSEFORGE_FEATHER=taper gives the correct brightness with the "
-          "rings visible")
+        A("merge weight : plain feather, CHOSEN BY MEASUREMENT on this dataset."
+          + _rt +
+          " It suppresses the ring artifact and is not a fix — it covers it "
+          "with a compensating error of the same shape, so the corona just "
+          "outside the limb reads low. Fine for pictures; do not take "
+          "photometry from that band. ECLIPSEFORGE_FEATHER=taper forces the "
+          "correct brightness with the rings visible")
     elif _fm:
-        A(f"merge weight : {_fm} feather — correct brightness near the limb, "
-          f"ring artifact not suppressed")
+        A(f"merge weight : {_fm} feather, CHOSEN BY MEASUREMENT on this "
+          f"dataset." + _rt + " The plain feather's leak would print as a rim "
+          f"around the limb on this bracket, so the leak-free weight was used. "
+          f"Brightness near the limb is correct; the ring artifact is visible "
+          f"and is the smaller error here")
     _lg = stats.get("linearity_gamma")
     if _lg is not None and abs(_lg - 1.0) > 0.08:
         A(f"linearity    : *** NOT scene-linear — the photometric links are "

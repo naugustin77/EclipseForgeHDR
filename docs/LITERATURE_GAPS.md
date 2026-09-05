@@ -9,7 +9,46 @@ Everything here is either a quotation from a source or a measurement on Nico's
 
 ---
 
-## 1. Our alignment is not phase correlation, and the sources say why that costs
+## 1. Phase correlation — TESTED AND REJECTED (0.22.27). I was wrong.
+
+**Status: measured on two datasets. Turning phase normalisation on is 66%
+WORSE. What the test did find was a different, real 18-22% win.**
+
+I ranked this highest. It was the wrong call, and the measurement says so:
+
+```
+ours, plain cross-correlation                     3.02 px
+best of 36 regularised phase-correlation settings 5.00 px
+the same band-pass, WITHOUT the whitening         2.91 px
+```
+
+The band-pass `H` is worth ~0.1 px; the amplitude whitening costs 2.1 px.
+Whitening weights every spatial frequency equally, and in a 1/2000 s frame most
+frequencies hold only read noise. The thesis recommends phase correlation for
+registering images of *comparable* quality — a 14-stop bracket is a different
+problem, and `normalization=None` turns out to be right.
+
+The tangential-blur high-pass from `eclipsetools` (item 5 below) was tested in
+the same run: 5.40 px against our 3.02. Also rejected.
+
+**What the test seemed to find, and did not:** that our high-pass was too
+aggressive, and 0.5 R was 18-22% better. Shipped in 0.22.27 and **reverted in
+0.22.28** — on Nico's real run the network residual went 1.17 -> 2.67 px
+(half-res) and the per-tier limb spread 8 -> 12 px. The sweep ran on the
+*exported* tiers, which are the output of alignment: already registered and
+mean-stacked, from a common origin, with no signal-weight mask. It measured
+sub-pixel refinement on an easy pair, not alignment.
+
+The phase-correlation result above still stands: that comparison put two
+estimators on the same data, so the relative answer survives even though the
+absolute numbers came from an easy case.
+
+The original text of this item is kept below, because the reasoning looked
+sound and was not.
+
+---
+
+### (original, refuted)
 
 **Status: real gap, well specified, not yet built. The best-supported item here.**
 
@@ -224,8 +263,9 @@ fixed. Correct as it stands — do not move that order.
 
 | # | item | evidence | expected value |
 |---|---|---|---|
-| 1 | Regularised phase correlation for alignment | thesis §4.1.3 + eq. 4.13; our report already flags the deviation; 2.34 px residual to beat | **high**, and directly measurable |
-| 5 | Tangential-blur high-pass before correlation | `eclipsetools`; pairs with item 1 | high, cheap |
+| ~~1~~ | ~~Regularised phase correlation~~ | **REJECTED 0.22.27**: 5.00 px against our 3.02 | none — the whitening costs 2.1 px |
+| ~~1b~~ | ~~Relax the alignment high-pass to 0.5 R~~ | **REVERTED 0.22.28**: real residual 1.17 -> 2.67 px; the sweep ran on already-aligned tiers | none |
+| ~~5~~ | ~~Tangential-blur high-pass~~ | **REJECTED 0.22.27**: 5.40 px against our 3.02 | none |
 | 2 | FNRGF attenuation series, robust fit kept | thesis §6.1.2 with stated optima; +23% inner structure/noise, other shells worse | medium, needs the clean test |
 | 5 | De-trend before convolution, re-trend after | `eclipsetools`; targets the near-limb band | medium, cheap |
 | 3 | Additive noise variance on σ | reference `EstimateAdditiveNoiseRing` | medium |
