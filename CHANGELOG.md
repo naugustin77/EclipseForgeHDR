@@ -5,6 +5,47 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.22.33 — the azimuthal correction was applied as a 60-step staircase
+
+Nico ran Clifton's 250 mm set on 0.22.32 and got broad radial wedges over the
+whole frame, from the disc to the corners, in FNRGF, RHEF, Pellett and faintly
+in MGN and the composite. *"That's new."* It was: 0.22.26 introduced it, and
+that set is the first to run through it with an amplitude big enough to see.
+
+**The bug.** LDIC's `k_i(phi)`, `q_i(phi)` are fitted in 60 azimuthal segments
+and then smoothed with an order-4 trigonometric polynomial — so the corrected
+gain is a *smooth* function of azimuth by construction. The merge then did
+
+```python
+rgb *= _kk[_segmap]        # _segmap = the segment INDEX, 0..59
+```
+
+which throws the smoothness away and re-quantises it to 60 steps: a hard gain
+discontinuity every 6 degrees, running from the disc to the frame edge. The
+step size is the slope times 6 degrees, so it scales with the fit amplitude —
+on a synthetic 30% gain the neighbouring segments jump 7%, and on the 250 mm
+set, where k spans 82%, about 17%. That is a radial wedge pattern, drawn by us.
+
+**Fixed** by evaluating the polynomial itself. The coefficients now come back
+from the fit and the merge indexes a 16384-bin table built from them, so the
+residual step is 0.026% of k instead of 7-17%. Verified: the table reproduces
+the fitted samples at the segment centres to 2.4e-4 (float32 precision), keeps
+the azimuthal mean at exactly 1.000 for k and 0 for q, and is still exactly
+identity on identical tiers. The running composite inside the fit uses the same
+continuous form, so each tier is fitted against what the merge will actually
+build.
+
+**Also fixed: the correction was extrapolated.** It is fitted over 1.0-2.5 R
+and was applied at full strength to the frame corners — 4.3 R on this set.
+A per-tier diffuse-light term has no meaning where it was never measured, and
+that extrapolation is the second half of what filled the outer field with fans
+(a smooth 40% azimuthal gain still prints as broad wedges in RHEF, which ranks
+pixels within an annulus). It now fades to identity over the half lunar radius
+above the fit's outer edge, and the log line says where.
+
+Neither half is dataset-specific: both were wrong on every run since 0.22.26,
+just below the visible threshold on brackets whose tiers agree better.
+
 ## 0.22.32 — Clear cache, and the merge weight belongs in the cache key
 
 **Clear cache button**, next to Start. It deletes the app's own

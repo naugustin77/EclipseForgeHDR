@@ -13,3 +13,11 @@ venv/
 # EclipseForgeHDR working products, written next to the raw files
 .eclipseforgehdr/
 eclipseforge_output/
+
+# Working notes, not for publication: the open-items file records unfinished
+# diagnoses, rejected hypotheses and tester data by name. Kept on disk, kept
+# out of the repo.
+TODO.md
+
+# transfer tarballs dropped in the repo root
+*.tar.gz

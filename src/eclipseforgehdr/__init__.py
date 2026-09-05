@@ -1,4 +1,4 @@
-__version__ = "0.22.32"
+__version__ = "0.22.33"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -127,6 +127,13 @@ CACHE_FAMILIES = (
     # so a 0.22.31 directory is reused as it stands -- correctly now, which is
     # the fix.
     frozenset({"0.22.31", "0.22.32"}),
+    # 0.22.33 fixes how the azimuthal per-tier correction is APPLIED: 0.22.26
+    # looked k and q up by 60-segment index, which made a smooth function into
+    # a staircase and printed a radial edge every 6 degrees, and it applied the
+    # fit at full strength far outside the radii it was fitted on. Every tier's
+    # contribution to the merge changes, so hdr_lum and every layer differ.
+    # Its own family.
+    frozenset({"0.22.33"}),
 )
 
 

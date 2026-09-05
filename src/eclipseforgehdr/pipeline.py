@@ -1003,6 +1003,27 @@ def _fit_pedestal(prof, scale, pmax):
 
 _LDIC_SEGMENTS = 60
 _LDIC_ORDER = 4
+_LDIC_TABLE = 16384          # azimuth bins the merge evaluates k and q on
+
+
+def _ldic_tables(k, q, ck, cq):
+    """k(phi) and q(phi) sampled on `_LDIC_TABLE` bins, for the merge to index.
+
+    Both are order-4 trigonometric polynomials, so this is the exact function,
+    not an interpolation of the 60 fitted samples. `ck`/`cq` are None only on
+    the degenerate path in `smooth()`, where the fit fell back to a constant.
+    """
+    if ck is None or cq is None:
+        return (np.full(_LDIC_TABLE, np.float32(k[0])),
+                np.full(_LDIC_TABLE, np.float32(q[0])))
+    ang = np.arange(_LDIC_TABLE, dtype=np.float64) / _LDIC_TABLE * 2 * np.pi
+    kt = np.full(_LDIC_TABLE, float(ck[0]))
+    qt = np.full(_LDIC_TABLE, float(cq[0]))
+    for o in range(1, _LDIC_ORDER + 1):
+        c, s = np.cos(o * ang), np.sin(o * ang)
+        kt += ck[2 * o - 1] * c + ck[2 * o] * s
+        qt += cq[2 * o - 1] * c + cq[2 * o] * s
+    return kt.astype(np.float32), qt.astype(np.float32)
 
 
 def _fit_azimuthal_affine(vals, wts, secs_order):
@@ -1050,11 +1071,20 @@ def _fit_azimuthal_affine(vals, wts, secs_order):
     B = np.vstack(B).T
 
     def smooth(v, fallback):
+        """Returns (values at the 60 segment centres, trig coefficients or None).
+
+        The COEFFICIENTS are what the caller wants. k and q are band-limited by
+        construction -- an order-4 trigonometric polynomial -- so they can be
+        evaluated at any azimuth exactly. Returning only the 60 samples was the
+        0.22.26 mistake: the merge then looked the value up by segment index,
+        which turns a smooth function into a 60-step staircase and prints a
+        radial edge every 6 degrees across the whole frame.
+        """
         m = np.isfinite(v)
         if m.sum() < 2 * _LDIC_ORDER + 3:
-            return np.full(NS, fallback if not m.any() else np.nanmedian(v))
+            return np.full(NS, fallback if not m.any() else np.nanmedian(v)), None
         sol, *_ = np.linalg.lstsq(B[m], v[m], rcond=None)
-        return B @ sol
+        return B @ sol, sol
 
     out = {}
     C = np.zeros_like(vals[0]); Wt = np.zeros_like(vals[0])
@@ -1074,17 +1104,39 @@ def _fit_azimuthal_affine(vals, wts, secs_order):
                 sol, *_ = np.linalg.lstsq(A, y[ok], rcond=None)
                 ks[j], qs[j] = sol
             if np.isfinite(ks).sum() >= 20:
-                k = smooth(ks, 1.0); q = smooth(qs, 0.0)
+                k, ck = smooth(ks, 1.0); q, cq = smooth(qs, 0.0)
                 km = float(np.mean(k))
                 if np.isfinite(km) and km > 1e-6:
                     k = k / km                       # azimuthal mean 1
                     q = q - float(np.mean(q))        # azimuthal mean 0
+                    # the same normalisation on the coefficients, so the
+                    # continuous form and the sampled form are the same
+                    # function: scale everything by km, then drop the constant
+                    # term of q (B's first column is the constant 1).
+                    if ck is not None:
+                        ck = np.asarray(ck, np.float64) / km
+                    if cq is not None:
+                        cq = np.asarray(cq, np.float64).copy()
+                        cq[0] = 0.0
                     if np.isfinite(k).all() and np.isfinite(q).all():
-                        out[sec] = (k.astype(np.float32), q.astype(np.float32))
+                        out[sec] = (k.astype(np.float32), q.astype(np.float32),
+                                    ck, cq)
         adj = f
         if sec in out:
-            kk, qq = out[sec]
-            adj = f * np.repeat(kk, per)[None, :NA] + np.repeat(qq, per)[None, :NA]
+            kk, qq, ck, cq = out[sec]
+            if ck is not None and cq is not None:
+                # continuous, exactly as the merge applies it -- so the running
+                # composite the NEXT tier is fitted against is the same
+                # function, not a staircase version of it
+                ang = np.arange(NA) / NA * 2 * np.pi
+                kf = np.full(NA, ck[0]); qf = np.full(NA, cq[0])
+                for o in range(1, _LDIC_ORDER + 1):
+                    c, sn = np.cos(o * ang), np.sin(o * ang)
+                    kf += ck[2 * o - 1] * c + ck[2 * o] * sn
+                    qf += cq[2 * o - 1] * c + cq[2 * o] * sn
+            else:
+                kf = np.repeat(kk, per)[:NA]; qf = np.repeat(qq, per)[:NA]
+            adj = f * kf[None, :] + qf[None, :]
         good = np.isfinite(adj) & (w > 0)
         C += np.where(good, adj * w, 0.0); Wt += np.where(good, w, 0.0)
     return out
@@ -2580,12 +2632,16 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # Fitted here on the half-res stacks, where every tier is already in the
     # common frame, and applied in the merge loop below.
     _ldic = {}
+    _ldic_rout = 2.5 * _Rseed        # half-res; the fit's outer radius, and the
+                                     # radius past which the merge tapers it off
     try:
         if os.environ.get("ECLIPSEFORGE_NO_LDIC") == "1":
             raise RuntimeError("disabled by ECLIPSEFORGE_NO_LDIC=1")
         _Hh, _Wh = stacks_half[secs[0]].shape
         _rmax = min(cym, cxm, _Hh - cym, _Wh - cxm) - 2.0
         _rs = np.arange(1.00 * _Rseed, min(2.5 * _Rseed, _rmax), 0.02 * _Rseed)
+        if _rs.size:
+            _ldic_rout = float(_rs[-1])
         _NA = 12 * _LDIC_SEGMENTS
         if _rs.size >= 10:
             _th = np.linspace(0, 2 * np.pi, _NA, endpoint=False)
@@ -2619,7 +2675,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 f"({_exp_name(float(_wk[0]))} tier), which one scalar per tier "
                 f"cannot express. Corrected on {len(_ldic)} of {len(secs)} "
                 f"tiers, mean-preserving so the photometric chain and the "
-                f"shared pedestal are untouched.", None)
+                f"shared pedestal are untouched; applied continuously in "
+                f"azimuth and faded out beyond "
+                f"{_ldic_rout / max(_Rseed, 1e-6):.1f} R, where it was no "
+                f"longer fitted.", None)
         else:
             progress.log("azimuthal per-tier correction: not enough overlap to "
                          "fit; tiers left as they are", None)
@@ -3008,7 +3067,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
 
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
-    _segmap = None
+    _angmap = None
     for k, s in enumerate(secs):
         rgb = demosaic_rggb(stacks_bayer[s])
         # cmax is the CLIPPING test, so it has to be measured in raw units,
@@ -3069,16 +3128,53 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # residual, which is one number per photosite at this point -- exactly
         # the argument that puts the shared pedestal before white balance.
         if _ldic.get(s) is not None:
-            if _segmap is None:
+            if _angmap is None:
+                # Azimuth itself, not a segment index. 0.22.26 built a segment
+                # INDEX here and looked k and q up in a 60-entry table, which
+                # made a smooth function into a 60-step staircase: a hard gain
+                # discontinuity every 6 degrees, running from the disc to the
+                # frame edge. On Clifton's 250 mm set, where k spans 82%, the
+                # steps between neighbouring segments reach ~17% and the whole
+                # frame filled with radial wedges. Reported by Nico on 0.22.32.
                 _yy = np.arange(H2, dtype=np.float32)[:, None] - 2.0 * cym
                 _xx = np.arange(W2, dtype=np.float32)[None, :] - 2.0 * cxm
-                _segmap = np.clip(((np.arctan2(_yy, _xx) % (2 * np.pi))
-                                   / (2 * np.pi) * _LDIC_SEGMENTS
-                                   ).astype(np.int32), 0, _LDIC_SEGMENTS - 1)
+                # A 16384-entry index, not a per-pixel trig evaluation: eight
+                # cos/sin passes over an 8100x5357 frame, once per tier, is
+                # gigabytes of temporaries for nothing. At this table size the
+                # residual step is 0.06% of k, three orders below the 17% the
+                # 60-segment lookup was making.
+                _angmap = ((np.arctan2(_yy, _xx) % (2 * np.pi))
+                           / (2 * np.pi) * _LDIC_TABLE).astype(np.uint16)
+                np.minimum(_angmap, _LDIC_TABLE - 1, out=_angmap)
+                # ... and the radius, to keep the correction inside the band it
+                # was actually fitted on (1.0-2.5 R). Beyond that it was pure
+                # extrapolation applied at full strength out to the corners,
+                # which is what put broad fans into the outer field even where
+                # the steps were invisible. Cosine taper to identity over the
+                # half-radius above the fit's outer edge.
+                _rmapf = np.sqrt(_yy * _yy + _xx * _xx, dtype=np.float32)
                 del _yy, _xx
-            _kk, _qq = _ldic[s]
-            rgb *= _kk[_segmap][:, :, None]
-            rgb += _qq[_segmap][:, :, None]
+                _r_in = np.float32(2.0 * _ldic_rout)          # half-res -> full
+                _r_out = np.float32(2.0 * _ldic_rout + _Rseed)
+                _t = np.clip((_rmapf - _r_in) / max(float(_r_out - _r_in), 1e-6),
+                             0.0, 1.0)
+                _ldic_amp = (0.5 * (1.0 + np.cos(np.pi * _t))).astype(np.float32)
+                del _rmapf, _t
+            _kk, _qq, _ck, _cq = _ldic[s]
+            _ktab, _qtab = _ldic_tables(_kk, _qq, _ck, _cq)
+            # gain first, then offset, each freed before the next -- these are
+            # full-frame float32 arrays and the merge loop is already the
+            # memory high-water mark of the run
+            _kf = _ktab[_angmap]
+            _kf -= np.float32(1.0)             # taper to identity (k=1, q=0)
+            _kf *= _ldic_amp                   # outside the fitted band
+            _kf += np.float32(1.0)
+            rgb *= _kf[:, :, None]
+            del _kf
+            _qf = _qtab[_angmap]
+            _qf *= _ldic_amp
+            rgb += _qf[:, :, None]
+            del _qf
         # THE MERGE WEIGHT NEEDS BOTH ENDS, NOT JUST THE TOP.
         #
         # This was a high-end shoulder alone: full weight for every pixel below
