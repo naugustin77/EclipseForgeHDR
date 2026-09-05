@@ -1,4 +1,4 @@
-__version__ = "0.22.31"
+__version__ = "0.22.32"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -121,7 +121,12 @@ CACHE_FAMILIES = (
     # a work directory carries whichever weight was asked for; opts.json now
     # records it and the cache check compares it. Its own family.
     frozenset({"0.22.30"}),
-    frozenset({"0.22.31"}),
+    # 0.22.32 adds a Clear cache button and puts the merge weight into the
+    # cache key (it was compared on the import path only). Nothing that writes
+    # into the work directory moved, and opts.json already recorded the weight,
+    # so a 0.22.31 directory is reused as it stands -- correctly now, which is
+    # the fix.
+    frozenset({"0.22.31", "0.22.32"}),
 )
 
 

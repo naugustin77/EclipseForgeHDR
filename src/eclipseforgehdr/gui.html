@@ -151,6 +151,8 @@ button:disabled{opacity:.45;cursor:default}
           <option value="best">Best only (max detail)</option>
         </select></label>
       <button class="primary" id="start" disabled>Start</button>
+      <button id="clearcache" disabled
+        title="Delete everything the app has computed for this folder (its .eclipseforgehdr subfolder) so the next Start redoes the whole pipeline from the raw files. Your raws, flats and exports are not touched. Needed after changing something the cache key does not cover, or when a run ended badly.">Clear cache</button>
       <span class="status" id="status">choose a folder containing the bracketed raw files · scroll = zoom · drag = pan · double-click = reset</span>
       <span id="views" style="display:none;gap:6px">
         <button data-view="composite" class="vbtn primary">Composite</button>
@@ -306,19 +308,51 @@ async function loadFolder(){
                 : " · no flats folder") +
     (j.cached ? " · cached pipeline products found (Start reuses them)" : "");
   $("start").disabled = false;
+  $("clearcache").disabled = false;
   ready = false; $("export").disabled = true;
 }
+
+/* ---- clear cache -----------------------------------------------------
+   Two clicks, not a confirm() dialog: this deletes tens of gigabytes of
+   computed products and a modal in a local page is easy to dismiss by
+   reflex. The second click has to land within 4s, and the label says so. */
+let ccArmed = 0;
+$("clearcache").addEventListener("click", async () => {
+  const b = $("clearcache");
+  if (Date.now() > ccArmed){
+    ccArmed = Date.now() + 4000;
+    b.textContent = "Click again to confirm";
+    setTimeout(() => { if (Date.now() > ccArmed){ b.textContent = "Clear cache"; } }, 4200);
+    return;
+  }
+  ccArmed = 0; b.textContent = "Clear cache"; b.disabled = true;
+  const r = await fetch("/api/clearcache", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({importPath: $("importPath").value})});
+  const j = await r.json();
+  b.disabled = false;
+  if (!j.ok){ $("status").textContent = j.error; return; }
+  ready = false; $("export").disabled = true; $("views").style.display = "none";
+  $("status").textContent = j.files
+    ? `cache cleared — ${j.files} files, ${(j.bytes/1073741824).toFixed(2)} GB · `
+      + "Start now redoes the full pipeline"
+    : "nothing was cached for this folder";
+});
 
 // Importing one finished HDR needs no raw folder -- the products go beside the
 // image. Start was enabled only by a successful loadFolder(), so a tester who
 // pasted a TIFF and nothing else found the button greyed out forever.
 function syncStart(){
-  if ($("importPath").value.trim()) $("start").disabled = false;
+  if ($("importPath").value.trim()){
+    $("start").disabled = false;
+    $("clearcache").disabled = false;
+  }
 }
 $("importPath").addEventListener("input", syncStart);
 
 async function startRun(){
   $("start").disabled = true;
+  $("clearcache").disabled = true;
   await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({force:false, denoise: $("denoise").value,
       feather: $("feather").value,
@@ -399,9 +433,11 @@ async function pollProgress(){
   $("pbar").style.width = (j.frac*100).toFixed(1)+"%";
   runSync(j);
   if (j.error){ $("status").textContent = "error — see log"; $("log").textContent += "\n"+j.error;
-    runStop("✕", "failed"); $("start").disabled = false; return; }
+    runStop("✕", "failed"); $("start").disabled = false;
+    $("clearcache").disabled = false; return; }
   if (j.done && j.ready){ runStop("✓", "done");
-    await loadLayers(); $("start").disabled = false; return; }
+    await loadLayers(); $("start").disabled = false;
+    $("clearcache").disabled = false; return; }
   setTimeout(pollProgress, 800);
 }
 

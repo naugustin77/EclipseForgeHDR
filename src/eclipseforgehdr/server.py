@@ -156,6 +156,60 @@ def set_folder():
                     "tiffs": cand[:24]})
 
 
+@app.post("/api/clearcache")
+def clear_cache():
+    """Throw away everything the app computed for this folder.
+
+    There was no way to do this from the GUI. The log line said "Start with
+    force to redo", but the page never sent force -- that flag was reachable
+    only from the command line, so from the GUI a stale cache was permanent.
+    Deleting opts.json by hand is not enough either: the next run writes it
+    again, so the run after that reports the cache as valid, which is exactly
+    what it looked like from the outside.
+
+    Scope: only the app's own `.eclipseforgehdr` subfolder. The raws, the
+    flats, and anything exported into the folder are not touched. The name is
+    checked before anything is removed -- this deletes a directory tree, and
+    the one guard that matters is that it is OUR directory.
+    """
+    if STATE["thread"] and STATE["thread"].is_alive():
+        return jsonify({"ok": False,
+                        "error": "a run is in progress — wait for it to finish"}), 400
+    folder = STATE["folder"]
+    if not folder:
+        _ip = os.path.expanduser(str((request.json or {}).get("importPath", "")).strip()) \
+            if request.is_json else ""
+        if _ip and os.path.isfile(_ip):
+            folder = os.path.dirname(os.path.abspath(_ip))
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"ok": False, "error": "choose a folder first"}), 400
+    wd = os.path.join(folder, ".eclipseforgehdr")
+    if os.path.basename(wd) != ".eclipseforgehdr":
+        return jsonify({"ok": False, "error": "refusing to clear that path"}), 400
+    if not os.path.isdir(wd):
+        STATE["layers"] = None
+        return jsonify({"ok": True, "files": 0, "bytes": 0, "path": wd,
+                        "note": "nothing cached"})
+    n = size = 0
+    for root, _dirs, files in os.walk(wd):
+        for f in files:
+            try:
+                size += os.path.getsize(os.path.join(root, f))
+                n += 1
+            except OSError:
+                pass
+    # Drop the preview's handles first: Layers holds memory maps into these
+    # files, and on Windows an open map makes the delete fail outright.
+    STATE["layers"] = None
+    import shutil, gc
+    gc.collect()
+    try:
+        shutil.rmtree(wd)
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"could not clear: {e}"}), 400
+    return jsonify({"ok": True, "files": n, "bytes": size, "path": wd})
+
+
 @app.post("/api/run")
 def start_run():
     # An import needs no raw folder: its products belong beside the image. The
@@ -259,6 +313,12 @@ def start_run():
                            and o.get("frames", "all") == frames
                            and bool(o.get("export_tiers", False)) == export_tiers
                            and bool(o.get("tier_linear", False)) == tier_linear
+                           # The merge weight changes the merged data itself, so
+                           # it belongs in the key. It was checked on the import
+                           # path only, which meant switching Detail/Photometric
+                           # on a raw folder quietly reused the previous merge
+                           # and the setting appeared to do nothing.
+                           and o.get("feather", "plain") == feather
                            and _cache_ok(o.get("build"))
                            # ... and the input files themselves. Without this,
                            # adding or removing a frame and pressing Start (not
@@ -282,7 +342,8 @@ def start_run():
                              frames=frames, export_tiers=export_tiers,
                              tier_linear=tier_linear, flat_dir=flat_dir)
             else:
-                prog.log("using cached pipeline products (Start with force to redo)", 0.9)
+                prog.log("using cached pipeline products "
+                         "(press Clear cache to redo from the raws)", 0.9)
             prog.log("loading layers for preview...", None)
             STATE["layers"] = Layers(wd)
             prog.log("ready", 1.0)

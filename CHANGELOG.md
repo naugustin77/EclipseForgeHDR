@@ -5,6 +5,28 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.22.32 — Clear cache, and the merge weight belongs in the cache key
+
+**Clear cache button**, next to Start. It deletes the app's own
+`.eclipseforgehdr` subfolder for the loaded folder and nothing else — the raws,
+the flats and anything exported stay where they are — so the next Start redoes
+the whole pipeline from the raw files. Two clicks, four seconds apart, because
+it throws away tens of gigabytes of computed products.
+
+There was no way to do this from the GUI. The log line said *"Start with force
+to redo"*, but the page never sent `force`: that flag existed only on the
+command line. Deleting `opts.json` by hand does not settle it either — the next
+run writes the file again, so the run after that reports the cache as valid,
+which from the outside looks exactly like the delete having no effect. Reported
+from the field, and the log line now names the button instead.
+
+**The merge weight is now part of the cache key.** `opts.json` recorded it from
+0.22.31 and the *import* path compared it, but the stacking path did not. So on
+a raw folder, switching Detail ↔ Photometric and pressing Start reused the
+previous merge and the setting appeared to do nothing. Cached products from
+0.22.31 are still valid data and are reused as they stand; what changes is that
+the reuse is now conditional on the weight matching.
+
 ## 0.22.31 — the merge weight is a setting, not a guess
 
 Three releases tried to choose the feather automatically. 0.22.28 leaked the
