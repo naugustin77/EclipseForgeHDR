@@ -103,34 +103,207 @@ signal and is unclipped, smoothed in radius. The profiles already computed by
 
 ---
 
-## 1d. The render blends layers across fixed radii, and that is ring-shaped
+## 1d. REJECTED: the render's fixed-radius blends are not the artifact
 
-**Status:** identified in the source, not yet tested. Costs a slider move.
+`wI` does fade the inner layer out across an absolute radius (1.05-1.45 R) and
+`wf` fades FNRGF in across another, and both are the failure mode the codebase
+already documents for `wG`. But they cannot be what Nico is reporting, and it
+took him telling me twice before I checked: `render()` returns at
 
-Nico, on two sets whose tiers agree to 10-12%: *"some concentric rings in the
-composite, likely from Inner."* The render has two blends keyed to absolute
-radius, both landing in the 1.0-1.6 R band where the rings are:
+```python
+if view == "mgn":   return ...        # before wf and wI are ever computed
+if view == "fnrgf": return ...
+```
+
+so the layer views bypass both blends entirely. The artifact is visible in the
+MGN and FNRGF views, therefore it is upstream of the renderer — in `hdr_lum`,
+i.e. in the merge. Nico's own bisect said so before this item was written:
+`ECLIPSEFORGE_FEATHER=plain` was *"basically gone"*, and that switch touches
+nothing but the merge weight.
+
+Leaving the two blends alone anyway is not defensible on this evidence, only
+un-prioritised: they are still boundary-shaped, and if a ring ever survives in
+the composite that is absent from every layer view, this is the first suspect.
+
+---
+
+## 1e. The merge bench — what has been excluded, and what is still open
+
+**Status:** measurement infrastructure built; cause not yet found.
+
+`tools/feather_bench.py` and its siblings rebuild the merge from the exported
+aligned-tier TIFFs, so any weight form can be tried in about twenty seconds
+with no re-stack. This should have existed before 0.22.16 shipped. Run on
+Clifton's 360 mm set, all figures against the unfeathered merge:
 
 ```
-wI = smoothstep((1.45R - r) / 0.40R)      inner corona: fades OUT, gone at 1.45 R
-wf = smoothstep((r - 1.02R) / 0.55R)      FNRGF share: fades IN,  full at 1.57 R
+variant     1.02R   1.06R   1.20R    azimuthal power, 1.05-1.25 R (m20-80)
+none        1.000   1.000   1.000        9.08
+plain       0.126   0.486   0.996        1.00
+masked      1.001   1.000   1.000        9.16
+taper       1.002   0.994   1.000        9.38
 ```
 
-`wI` blends a DIFFERENT layer in and out again over 1.05-1.45 R. Wherever the
-inner layer and MGN disagree, that blend traces the disagreement as an annulus —
-by construction, not by accident.
+**Excluded as the cause, each by its own measurement:**
 
-**The codebase already knows this failure mode.** The glare-dim term used to
-share `wI`, and the comment where it was given its own profile says it plainly:
-*"its smoothstep window closes at 1.45 R -- and at full strength that is a 3.3x
-brightness ramp ending at a definite radius, which prints as a ring."* `wG` was
-fixed. `wI` was not.
+- *The feather.* `none` — no blur, no mask, no contour term of any kind —
+  scores the same as the shipped taper. The weight's shape is not the source.
+- *Short-tier noise.* Single tiers score 28x apart in this band, scaling with
+  how short the exposure is, which is shot noise. But a proper inverse-variance
+  weight, `w = (s·cal)²/(x + x_r)`, changes the merged result by under 1%
+  everywhere: `s¹` already suppresses the short tiers there. See `invvar.py`.
+- *My own candidate.* A weight rolled to exact zero, C1, at 0.90 sat — below
+  the 0.97 validity threshold, so the mask has nothing left to step on — is
+  indistinguishable from the taper (rms 0.3493 against 0.3492). Rejected
+  before shipping, which is the entire point of building the bench.
 
-**The test costs nothing and needs no re-run:** set Short-exposure detail
-(`innerMix`) to 0 and look; then FNRGF share (`fnMix`) to 0. Both re-render from
-cached layers in seconds. If the rings go with `innerMix`, the fix is to give
-the inner layer a profile with no boundary — an exponential decay from the mask
-edge, exactly as `wG` was given — rather than a window that shuts at a radius.
+**What survived:** the per-tier radial error of item 1a accounts for about 26%
+of the structure in that shell (1.00 -> 0.74 with `k_i(r)` applied), fitted only
+from rings where a tier is ≥98% unclipped. Real, worth building, not the whole
+story.
+
+**What `plain` actually buys.** Not a cure — a smother. It suppresses the
+metric by leaking weight to the long tiers near the limb, and it costs a factor
+of eight in inner-corona photometry: 0.126 of the true level at 1.02 R. On the
+360 mm set the visible difference between plain and taper is almost entirely
+one bright halo ring at the limb.
+
+### On Nico's own 600 mm set (14 tiers, alpha 0.55) — the rings are located
+
+The tier export exists now, so the bench runs on the set that actually shows
+the artifact. The difference image between the plain blur and the shipped taper
+is unmistakable: **nested closed contours, one per tier, following the corona's
+own isophotes.** They are each tier's saturation contour, printed.
+
+Ring metric — polar transform, high-pass along RADIUS, power at m < 20. A ring
+is sharp in radius and smooth in azimuth; a streamer is the opposite, so this
+separates them. All figures against `none`, the exact unfeathered merge:
+
+```
+variant     1.02R   1.06R   1.20R   1.50R   ring power
+none        1.000   1.000   1.000   1.000       1.00
+plain       0.752   0.932   0.997   1.000       0.63
+taper       1.006   1.001   1.000   1.000       1.11
+nonorm      1.002   1.003   1.000   1.000       0.97
+cont_pl     0.753   0.934   0.998   1.000       0.63
+iv          0.992   0.963   0.999   0.983       1.15
+```
+
+**`none` already scores 1.00.** The rings are in the merge with no feather of
+any kind. Nothing about the weight's shape creates them; blurring the weight
+softens them by 37%, which is the whole of what `plain` buys, and it costs 25%
+of the true brightness at 1.02 R.
+
+**Ruled out, each by measurement on this set:**
+
+| candidate | result |
+| --- | --- |
+| per-tier radial photometry, `k_i(r)` | rms 0.016 against the rings' 0.272 |
+| per-tier colour (one scalar `cal[s]`) | ≤ 8%, and flat where the rings are |
+| the `1/den` renormalisation | 13% of the ring power (see below) |
+| inverse-variance weighting | 1.15x — worse, not better |
+| a C1 weight rolled to zero at 0.90 sat | indistinguishable from the taper |
+| per-tier nonlinearity vs signal level | ≤ 1-3% for every adjacent pair |
+
+### FOUND: a large photometric error in a collar around each tier's saturation
+
+Every correction above treated a tier as *globally* wrong — a scale, a colour,
+a nonlinearity. None of them can touch an error whose SHAPE is the saturated
+region itself. There is one, and it is big. Adjacent tier pairs on Nico's
+600 mm set, the longer tier's radiance estimate over the shorter one's, binned
+by distance OUTSIDE the longer tier's saturated region:
+
+```
+pair                 0-2px   2-4px   4-8px  8-16px  16-32px  ...  128-256px
+0.333s / 0.2s        2.964   2.044   1.210   0.991    0.991         0.993
+0.125s / 0.0769s     1.888   1.958   1.019   0.991    0.988         0.991
+0.2s   / 0.125s      1.103   1.088   1.014   0.994    0.990         0.993
+0.5s   / 0.333s      0.797   0.946   1.000   0.989    0.993         1.001
+1.6s   / 0.5s        0.348   0.403   0.667   0.969    0.983         1.013
+```
+
+Beyond about 8-16 px every pair agrees to ~1%. Inside it they disagree by up to
+**3x, and the sign differs between tiers.** High is what charge spill or veiling
+glare off a large saturated area does; low is what a demosaic does when its
+kernel reaches into saturated photosites — `cmax` is measured after demosaic, so
+a pixel whose own photosite was fine but whose neighbour clipped is silently
+interpolated from a clipped value and is never flagged.
+
+This is contour-shaped by construction, it lives in the tier data, and no
+reweighting can remove it — which is precisely why eight weight forms all
+failed. It is the first candidate whose shape, amplitude and location all match
+the artifact.
+
+**Next:** establish which of the two mechanisms dominates (they are separable —
+spill scales with the saturated area, demosaic contamination does not), then
+decide whether the fix is to widen the invalid collar, or to measure `cmax`
+before demosaic on the Bayer plane where clipping actually happens.
+
+### 2. THE MERGE FORMULA ITSELF IS MISSING A TERM (Nico's question, and he is right)
+
+Druckmullerova, *Doctoral thesis* §4.1.4, eq. 4.15 — the LDIC composition that
+Hill says works best:
+
+```
+g(r,phi) = SUM_i  w(f_i(r,phi)) * ( k_i(phi) * f_i(r,phi) + q_i(phi) )
+```
+
+`k_i` and `q_i` are an AFFINE transform per image that VARIES WITH AZIMUTH,
+fitted by linear regression in 60 angular segments against the composite
+accumulated so far — longest exposure first — then smoothed with a
+trigonometric polynomial of order <= 4. The thesis states what they are for:
+*"to compose images with different distribution of diffuse light in the optical
+system ... or even images that were taken through thin clouds."*
+
+EclipseForgeHDR has **one scalar `cal[s]` per tier and one shared additive
+pedestal.** That expresses the median of `k_i` and nothing else. Fitted on
+Nico's 600 mm set exactly as the thesis describes:
+
+```
+tier        k median   k spread across azimuth   |q| as % of local signal
+0.5s          0.923            23.8%                      9.28
+0.33s         0.967             3.9%                      4.62
+0.125s        0.980             5.0%                      3.22
+0.0167s       0.994            10.6%                      1.49
+0.002s        0.998            13.5%                      1.41
+0.0005s       1.023            27.3%                      2.34
+```
+
+k varies with azimuth by **3-27%** depending on the tier and q runs to **9%**
+of the local signal. Both are real terms we do not correct, both are azimuthal,
+and an azimuthal error changes wherever the tier mix changes — which is along
+the saturation contours where the rings are. Note also that the median k sits
+BELOW 1 for eleven of twelve tiers, so `cal[s]` is biased as well.
+
+**Also note our item 1a had this as a RADIAL correction `k_i(r)`.** The
+reference method makes it azimuthal. That is very likely why fitting `k_i(r)`
+bought 26% on one set and nothing on this one.
+
+**Implemented and measured (`tools/ldic_merge.py`):** the full LDIC
+composition, sequential from the longest exposure, 60 segments, order-4
+trigonometric smoothing. Ring power **0.87x** against the shipped merge. Real,
+worth having, not a cure — and it shifts the radial profile by ~20%, since it
+references everything to the longest exposure rather than to exposure time.
+
+**Instrument note.** These numbers are now trustworthy: the bench reproduces
+the pipeline's own `hdr_lum` to 0.7-2.5% at every radius, and running the
+pipeline's real MGN path on the bench's output gives plain/cur = 0.70x against
+the crude metric's 0.66x. The crude metric was not the problem.
+
+**Alignment** (Nico asked): 2.34 px max network residual at full resolution,
+limb fit 2.37 px rms over 720/720 rays — 0.4% of R. Not sub-pixel, worth
+improving, but a shift error is not ring-shaped and does not explain this.
+
+**Still untested:** per-tier PSF differences,
+and per-tier flat residual. A tier-pair ratio binned by signal level does show
+an additive residual on the two longest tiers (1.09 at low signal falling to
+0.97 at high), which the single shared pedestal of 0.22.15 cannot absorb — that
+is a real finding but it lives in the faint outer field, not where the rings are.
+
+**One free improvement, measured and shippable:** dropping the `1/den`
+renormalisation (`nonorm`) is better on BOTH axes than the shipped taper — ring
+power 0.97 against 1.11, radial profile 1.002 against 1.006. It is not the fix
+and must not be sold as one.
 
 ---
 

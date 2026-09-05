@@ -217,6 +217,56 @@ _KD = np.array([[0, 0, -1.5, 0, 0], [0, 2, 0, 2, 0], [-1.5, 0, 6, 0, -1.5],
                 [0, 2, 0, 2, 0], [0, 0, -1.5, 0, 0]], np.float32) / 8
 
 
+def cfa_clip_max(cfa):
+    """The largest PHOTOSITE value that feeds each demosaiced pixel.
+
+    THIS IS THE CLIPPING TEST, AND IT HAS TO BE ASKED OF THE MOSAIC.
+
+    Until 0.22.26 the merge asked it of the demosaiced result --
+    `demosaic_rggb(cfa).max(axis=2)` -- which is a different question and
+    silently the wrong one. Two of a demosaiced pixel's three channels are
+    interpolated from photosites up to two away through the kernels above, and
+    those kernels have negative lobes: an interpolated channel next to a
+    saturated photosite can come out BELOW the clipping threshold. The pixel is
+    then declared valid and enters the merge at full weight carrying a value
+    reconstructed, in part, from a photosite that hit the ceiling.
+
+    Measured on Nico's 600 mm set: adjacent tiers disagree by up to 3x within
+    0-8 px outside the longer tier's saturated region and by ~1% beyond
+    8-16 px. This is one of the two mechanisms that can produce that collar --
+    the other, charge spill or veiling glare off the saturated area, is real
+    physics and is not fixed here.
+
+    The footprint is the union of the four kernels' non-zero taps, not a full
+    5x5 square: the corners are zero in every one of them, so a corner
+    photosite genuinely does not reach the centre pixel and excluding it would
+    be needlessly conservative.
+
+    A single saturated photosite in an otherwise dim field, ceiling 16000 ADU,
+    background 300:
+
+        old test (demosaiced max)      new test (mosaic max)
+          0.3   0.3   0.3               0.3  16.0   0.3
+          0.3   4.2   8.2   4.2         16.0 16.0  16.0
+          0.3   8.2  16.0   8.2         16.0 16.0  16.0     (x1000 ADU)
+
+    It contaminates 13 pixels and the old test flags 1. The nearest neighbours
+    read 8200 and 4200 against a 16000 ceiling -- half-built from a clipped
+    photosite and comfortably under any threshold -- and the diamond tips at
+    distance 2 read exactly the background, reaching the centre only through a
+    negative lobe, undetectable by any test applied after the demosaic.
+
+    Honesty about what this buys: hard-excluding a collar of 2-16 px around
+    each tier's saturated region was measured on the bench (tools/collar.py)
+    and moved the ring artifact by 1-2%. This is a correctness fix -- clipped
+    photosites no longer enter the merge unflagged -- not a cure for that.
+    """
+    from scipy import ndimage
+    fp = ((_KG != 0) | (_KR != 0) | (_KC != 0) | (_KD != 0))
+    fp[2, 2] = True                     # the pixel's own photosite
+    return ndimage.maximum_filter(cfa, footprint=fp, mode="nearest")
+
+
 def demosaic_rggb(cfa):
     from scipy import ndimage
     conv = lambda k: ndimage.convolve(cfa, k, mode="mirror")

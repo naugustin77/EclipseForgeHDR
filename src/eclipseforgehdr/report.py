@@ -29,10 +29,17 @@ METHODS = [
      "compact azimuthal peaks on the limb; a link is used only while its anchors agree "
      "with each other, and enters the same least-squares network as an extra link"),
     ("Demosaic",
-     "Malvar-He-Cutler gradient-corrected bilinear interpolation"),
+     "Malvar-He-Cutler gradient-corrected bilinear interpolation; the clipping "
+     "test is asked of the MOSAIC, so a pixel interpolated in part from a "
+     "saturated photosite is flagged (the kernels have negative lobes, so such "
+     "a pixel can otherwise read below threshold)"),
     ("Photometric calibration",
      "per-tier scale factors from median ratios of overlapping unsaturated signal, "
-     "chained to the middle tier"),
+     "chained to the middle tier; plus a per-tier affine transform varying with "
+     "azimuth (k_i(phi), q_i(phi)) fitted in 60 angular segments against the "
+     "running composite and smoothed by a trigonometric polynomial, after "
+     "Druckmullerova's LDIC (doctoral thesis eq. 4.15), applied mean-preserving "
+     "so it corrects only what a scalar cannot"),
     ("HDR merge",
      "saturation-weighted linear-colour merge (Debevec-style weighting) in camera "
      "native colour, then to sRGB primaries"),
@@ -221,6 +228,35 @@ def build(stats):
             A(f"             : merged limb 20-80% transition "
               f"{aq['limb_width_med']:.1f} px (p90 "
               f"{aq.get('limb_width_p90', float('nan')):.1f} px)")
+    _ls = stats.get("ldic_k_spread_pct")
+    if _ls:
+        _w = max(_ls.items(), key=lambda kv: kv[1])
+        A(f"azimuthal fit: per-tier gain and offset varying with azimuth "
+          f"(Druckmullerova thesis eq. 4.15), fitted in 60 segments against "
+          f"the running composite and mean-preserved. Worst tier varied "
+          f"{_w[1]:.0f}% around the limb ({_fmt_exp(float(_w[0]))}); a single "
+          f"photometric scalar per tier cannot express that. Corrected on "
+          f"{len(_ls)} tiers")
+    _ce = stats.get("cfa_clip_extra")
+    if _ce:
+        _w = max(_ce.items(), key=lambda kv: kv[1])
+        A(f"clipping test: asked of the MOSAIC since 0.22.26, not of the "
+          f"demosaiced result — a pixel built in part from a saturated "
+          f"photosite is now flagged. This run marks up to {_w[1]:.2f}% more of "
+          f"the frame invalid (worst tier {_w[0]}s); those pixels were entering "
+          f"the merge at full weight carrying interpolated clipped data")
+    _fm = stats.get("feather_mode")
+    if _fm == "plain":
+        A("merge weight : plain feather (0.22.25 default). This SUPPRESSES the "
+          "ring artifact and it is not a fix — it covers it with a compensating "
+          "error of the same shape, so the corona just outside the limb reads "
+          "low (25% at 1.02 R on the reference set, dataset-dependent). Fine "
+          "for pictures; do not take photometry from that band. "
+          "ECLIPSEFORGE_FEATHER=taper gives the correct brightness with the "
+          "rings visible")
+    elif _fm:
+        A(f"merge weight : {_fm} feather — correct brightness near the limb, "
+          f"ring artifact not suppressed")
     _lg = stats.get("linearity_gamma")
     if _lg is not None and abs(_lg - 1.0) > 0.08:
         A(f"linearity    : *** NOT scene-linear — the photometric links are "

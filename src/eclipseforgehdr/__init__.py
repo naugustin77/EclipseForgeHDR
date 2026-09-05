@@ -1,4 +1,4 @@
-__version__ = "0.22.24"
+__version__ = "0.22.26"
 
 # Builds whose cached pipeline products are interchangeable with this one's.
 # A release that only changes the interface should not cost the user another
@@ -93,6 +93,16 @@ CACHE_FAMILIES = (
     # changes nothing the renderer reads, so a .19+ work directory is reused.
     frozenset({"0.22.19", "0.22.20", "0.22.21", "0.22.22", "0.22.23",
                "0.22.24"}),
+    # 0.22.25 changes the DEFAULT merge weight back to the plain feather, so
+    # hdr_lum and every layer built on it are different data from .19-.24 --
+    # deliberately so. Its own family. A run made with ECLIPSEFORGE_FEATHER set
+    # is not distinguishable here, which is the point of a bisect switch; such
+    # a directory should be re-run before it is trusted.
+    frozenset({"0.22.25"}),
+    # 0.22.26 moves the clipping test onto the mosaic, so more pixels are
+    # correctly marked invalid and every tier's contribution to the merge
+    # changes. hdr_lum and every layer differ. Its own family.
+    frozenset({"0.22.26"}),
 )
 
 

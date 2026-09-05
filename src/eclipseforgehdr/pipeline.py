@@ -43,7 +43,7 @@ def input_fingerprint(folder):
 
 
 from .raw import (open_frame, list_raws, read_exif, demosaic_rggb,
-                  hot_pixel_map, repair_hot, read_camera_info)
+                  cfa_clip_max, hot_pixel_map, repair_hot, read_camera_info)
 from . import report as _report
 from . import __version__
 
@@ -867,6 +867,46 @@ done inside each of these files.
 # the gain that is not in doubt.
 _MERGE_FLOOR = 0.005
 
+# WHICH FEATHER SHIPS BY DEFAULT, AND WHY IT IS THE ONE WITH THE KNOWN ERROR.
+#
+# 0.22.16 replaced the plain blur with a leak-free weight and fixed the radial
+# profile exactly. It also made a ring artifact visible that the plain blur had
+# been hiding, on every dataset, in MGN, FNRGF and NAFE alike. Fifteen weight
+# forms were then rebuilt from Nico's own aligned tiers and scored (tools/):
+#
+#   variant                              1.02R    ring power
+#   none (no feather at all)             1.000       0.94
+#   the shipped taper                    1.000       1.00
+#   plain blur (<= 0.22.15)              0.747       0.66
+#   hard collar exclusion, 2-16 px       0.998    1.01-1.02
+#   inverse-variance weighting           0.992       1.15
+#   C1 roll-off to zero below the cut    1.002       0.99
+#   weight from a smoothed intensity     1.006    0.96-0.97
+#   two-pass fill + plain blur           0.993       1.00
+#   LDIC azimuthal affine (thesis 4.15)  0.809       0.87
+#
+# The unfeathered merge -- no blur, no mask, no contour term anywhere -- carries
+# the rings at full strength, so no property of the weight creates them. And the
+# two-pass fill is decisive about what the plain blur actually does: give the
+# clipped collar a correct value instead of the clipped tier's under-report and
+# the photometry comes back to 0.993 while the rings return to 1.00. The plain
+# blur does not remove the artifact. It covers it with a compensating error of
+# the same shape -- both are bounded by each tier's saturation contour.
+#
+# So this default is a deliberate, documented trade of 25% of the true
+# brightness at 1.02 R (on Nico's 600 mm set; 8x on Clifton's 360 mm, it is
+# dataset-dependent) for pictures that do not show rings. It is the wrong
+# default for photometry and the right one for what this tool is used for
+# today, and the report says so on every run. Set ECLIPSEFORGE_FEATHER=taper
+# for the photometrically honest merge with the artifact visible.
+#
+# The artifact itself is NOT understood. What is known: it follows each tier's
+# saturation contour; it survives per-tier correction by scale, by colour, by
+# radius and by signal level; adjacent tiers disagree by up to 3x within 0-8 px
+# outside the longer one's saturated region and by ~1% beyond 8-16 px. See
+# TODO 1e and 2.
+_FEATHER_DEFAULT = "plain"
+
 # Largest pedestal this will believe, as a fraction of sensor saturation.
 # 0.002 is 33 ADU of a 14-bit raw; the three real datasets that show one land at
 # 2.9, 5.5 and -2.0 ADU. Anything past this is not a black-level residual and
@@ -958,6 +998,95 @@ def _fit_pedestal(prof, scale, pmax):
     return float(P * shrink), float(P), sig, before, after
 
 
+_LDIC_SEGMENTS = 60
+_LDIC_ORDER = 4
+
+
+def _fit_azimuthal_affine(vals, wts, secs_order):
+    """Per-tier affine transform that varies with AZIMUTH -- Druckmullerova,
+    doctoral thesis eq. 4.15, the LDIC composition.
+
+        g(r,phi) = SUM_i  w(f_i) * ( k_i(phi) * f_i(r,phi) + q_i(phi) )
+
+    k and q are fitted by linear regression in 60 angular segments against the
+    composite accumulated so far, starting from the longest exposure, then
+    smoothed with a trigonometric polynomial of low order. The thesis says what
+    they are for: "to compose images with different distribution of diffuse
+    light in the optical system ... or even images that were taken through thin
+    clouds." Diffuse light off a large saturated area differs from tier to tier
+    and is not axisymmetric, so one scalar per tier cannot express it.
+
+    WHAT WE HAD: one scalar `cal[s]` per tier plus one shared additive
+    pedestal. Fitted on Nico's 600 mm set, k varies 3-27% around the limb
+    depending on the tier and q runs to 9% of the local signal. That is the
+    part a scalar cannot reach, and it is azimuthal -- so it changes wherever
+    the mix of tiers changes, which is along each tier's saturation contour.
+
+    NORMALISED, DELIBERATELY. The raw transform re-references every tier onto
+    the longest exposure and moves the whole radial profile by ~20%, discarding
+    the photometric chain and the shared pedestal that are already fitted and
+    already measured. Taking the azimuthal MEAN out of k and q leaves exactly
+    the part those two cannot express and changes nothing else: measured on the
+    bench, ring power 0.87x with the radial profile held inside 4% (the raw
+    form scores the same 0.87x and costs 20%).
+
+    Honest about size: 0.87x is a real improvement and not a fix. The ring
+    artifact survives it, as it survives every per-tier correction tried so far
+    -- by scale, by colour, by radius, by signal level. See TODO 1e.
+
+    `vals[i]` and `wts[i]` are one tier's sampled radiance and weight on a
+    (radius x angle) ring grid, angles evenly spaced from 0. Returns
+    {sec: (k[NS], q[NS])}.
+    """
+    NS, NA = _LDIC_SEGMENTS, vals[0].shape[1]
+    per = max(NA // NS, 1)
+    cen = (np.arange(NS) + 0.5) / NS * 2 * np.pi
+    B = [np.ones(NS)]
+    for o in range(1, _LDIC_ORDER + 1):
+        B += [np.cos(o * cen), np.sin(o * cen)]
+    B = np.vstack(B).T
+
+    def smooth(v, fallback):
+        m = np.isfinite(v)
+        if m.sum() < 2 * _LDIC_ORDER + 3:
+            return np.full(NS, fallback if not m.any() else np.nanmedian(v))
+        sol, *_ = np.linalg.lstsq(B[m], v[m], rcond=None)
+        return B @ sol
+
+    out = {}
+    C = np.zeros_like(vals[0]); Wt = np.zeros_like(vals[0])
+    for i, sec in enumerate(secs_order):
+        f, w = vals[i], wts[i]
+        if i and Wt.max() > 0:
+            comp = np.where(Wt > 1e-9, C / np.maximum(Wt, 1e-9), np.nan)
+            ks = np.full(NS, np.nan); qs = np.full(NS, np.nan)
+            for j in range(NS):
+                sl = slice(j * per, (j + 1) * per)
+                x = f[:, sl].ravel(); y = comp[:, sl].ravel()
+                ok = (np.isfinite(x) & np.isfinite(y) & (w[:, sl].ravel() > 0.5)
+                      & (Wt[:, sl].ravel() > 0.05) & (x > 0))
+                if ok.sum() < 50:
+                    continue
+                A = np.vstack([x[ok], np.ones(int(ok.sum()))]).T
+                sol, *_ = np.linalg.lstsq(A, y[ok], rcond=None)
+                ks[j], qs[j] = sol
+            if np.isfinite(ks).sum() >= 20:
+                k = smooth(ks, 1.0); q = smooth(qs, 0.0)
+                km = float(np.mean(k))
+                if np.isfinite(km) and km > 1e-6:
+                    k = k / km                       # azimuthal mean 1
+                    q = q - float(np.mean(q))        # azimuthal mean 0
+                    if np.isfinite(k).all() and np.isfinite(q).all():
+                        out[sec] = (k.astype(np.float32), q.astype(np.float32))
+        adj = f
+        if sec in out:
+            kk, qq = out[sec]
+            adj = f * np.repeat(kk, per)[None, :NA] + np.repeat(qq, per)[None, :NA]
+        good = np.isfinite(adj) & (w > 0)
+        C += np.where(good, adj * w, 0.0); Wt += np.where(good, w, 0.0)
+    return out
+
+
 def _feather_weight(w, valid, sigma):
     """Smooth a merge weight so it neither leaks into, nor steps at, the edge of
     the region where the tier is clipped.
@@ -1008,7 +1137,7 @@ def _feather_weight(w, valid, sigma):
     """
     if sigma <= 0:
         return np.asarray(w, np.float32)
-    _mode = os.environ.get("ECLIPSEFORGE_FEATHER", "taper").lower()
+    _mode = os.environ.get("ECLIPSEFORGE_FEATHER", _FEATHER_DEFAULT).lower()
     if _mode == "plain":                       # <= 0.22.15, leaks into the clip
         return ndimage.gaussian_filter(np.asarray(w, np.float32),
                                        sigma).astype(np.float32)
@@ -2149,9 +2278,20 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # a set that had been clean. Guessing which one is slower than letting the
     # person with the data turn each off for one run, so:
     #   ECLIPSEFORGE_NO_PEDESTAL=1   restores the pre-0.22.15 merge exactly
-    #   ECLIPSEFORGE_FEATHER=plain   restores the pre-0.22.16 feather (leaks)
+    #   ECLIPSEFORGE_FEATHER=plain   the DEFAULT again since 0.22.25 -- see
+    #                                _FEATHER_DEFAULT for why, and what it costs
     #   ECLIPSEFORGE_FEATHER=masked  the 0.22.16 one (steps at the clip edge)
-    #   ECLIPSEFORGE_FEATHER=taper   the default, 0.22.19
+    #   ECLIPSEFORGE_FEATHER=taper   0.22.19-0.22.24: leak-free, rings visible
+    _fm = os.environ.get("ECLIPSEFORGE_FEATHER", _FEATHER_DEFAULT).lower()
+    stats["feather_mode"] = _fm
+    if _fm == "plain":
+        progress.log("merge weight: plain feather (0.22.25 default). Hides the "
+                     "ring artifact; costs real brightness just outside the "
+                     "limb. ECLIPSEFORGE_FEATHER=taper for the honest merge",
+                     None)
+    else:
+        progress.log(f"merge weight: {_fm} feather — photometrically correct "
+                     f"near the limb, ring artifact NOT suppressed", None)
     if os.environ.get("ECLIPSEFORGE_NO_PEDESTAL") == "1":
         progress.log("shared pedestal DISABLED by ECLIPSEFORGE_NO_PEDESTAL=1 — "
                      "this run reproduces the pre-0.22.15 merge", None)
@@ -2276,6 +2416,58 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                         None)
     except Exception as _e:
         progress.log(f"per-tier radial check skipped ({_e})", None)
+
+    # ------------------------------------------------------------------
+    # LDIC's per-tier AZIMUTHAL affine transform. See _fit_azimuthal_affine.
+    # Fitted here on the half-res stacks, where every tier is already in the
+    # common frame, and applied in the merge loop below.
+    _ldic = {}
+    try:
+        if os.environ.get("ECLIPSEFORGE_NO_LDIC") == "1":
+            raise RuntimeError("disabled by ECLIPSEFORGE_NO_LDIC=1")
+        _Hh, _Wh = stacks_half[secs[0]].shape
+        _rmax = min(cym, cxm, _Hh - cym, _Wh - cxm) - 2.0
+        _rs = np.arange(1.00 * _Rseed, min(2.5 * _Rseed, _rmax), 0.02 * _Rseed)
+        _NA = 12 * _LDIC_SEGMENTS
+        if _rs.size >= 10:
+            _th = np.linspace(0, 2 * np.pi, _NA, endpoint=False)
+            _ys = np.clip((cym + _rs[:, None] * np.sin(_th)).astype(np.int32),
+                          0, _Hh - 1)
+            _xs = np.clip((cxm + _rs[:, None] * np.cos(_th)).astype(np.int32),
+                          0, _Wh - 1)
+            _sl = float(color_info["sat_level"])
+            _order = sorted(secs, reverse=True)      # longest exposure first
+            _vals, _wts = [], []
+            for s in _order:
+                _f = (stacks_half[s][_ys, _xs].astype(np.float64) - pedestal)
+                _fr = stacks_half[s][_ys, _xs].astype(np.float64) / max(_sl, 1e-9)
+                _u = np.clip((0.85 - _fr) / 0.10, 0, 1)
+                _l = np.clip((_fr - 0.004) / 0.008, 0, 1)
+                _w = (_u * _u * (3 - 2 * _u)) * (_l * _l * (3 - 2 * _l))
+                _w = np.where(sat_half[s][_ys, _xs], 0.0, _w)
+                _vals.append(_f / (s * cal[s]))
+                _wts.append(_w)
+            _ldic = _fit_azimuthal_affine(_vals, _wts, _order)
+            del _vals, _wts
+        if _ldic:
+            _sp = {("%g" % k): round(float(100 * (np.percentile(v[0], 90) -
+                                                  np.percentile(v[0], 10))), 1)
+                   for k, v in _ldic.items()}
+            stats["ldic_k_spread_pct"] = _sp
+            _wk = max(_sp.items(), key=lambda kv: kv[1])
+            progress.log(
+                f"azimuthal per-tier correction (Druckmullerova thesis 4.15): "
+                f"the gain varies around the limb by up to {_wk[1]:.0f}% "
+                f"({_exp_name(float(_wk[0]))} tier), which one scalar per tier "
+                f"cannot express. Corrected on {len(_ldic)} of {len(secs)} "
+                f"tiers, mean-preserving so the photometric chain and the "
+                f"shared pedestal are untouched.", None)
+        else:
+            progress.log("azimuthal per-tier correction: not enough overlap to "
+                         "fit; tiers left as they are", None)
+    except Exception as _e:
+        _ldic = {}
+        progress.log(f"azimuthal per-tier correction skipped ({_e})", None)
 
     stats["quality"] = {str(k): v for k, v in quality.items()}
     stats["tiers"] = [{"sec": float(s), "n": len(quality[s]["used"]),
@@ -2608,6 +2800,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         _fsat = _flat.superpixel_full(flat_master)
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
+    _segmap = None
     for k, s in enumerate(secs):
         rgb = demosaic_rggb(stacks_bayer[s])
         # cmax is the CLIPPING test, so it has to be measured in raw units,
@@ -2619,9 +2812,22 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # of px away. Neutral pixels are unaffected either way -- for a neutral
         # subject green is the largest raw channel and WB leaves it alone --
         # which is why this never showed on the corona itself.
-        cmax = rgb.max(axis=2)
+        # THE CLIPPING TEST IS ASKED OF THE MOSAIC, NOT OF THE DEMOSAICED
+        # RESULT. See raw.cfa_clip_max: two of every pixel's three channels are
+        # interpolated through 5x5 kernels with negative lobes, so a pixel next
+        # to a saturated photosite could come out below threshold and enter the
+        # merge unflagged, carrying a value partly reconstructed from a
+        # photosite that hit the ceiling.
+        cmax = cfa_clip_max(stacks_bayer[s])
         if _fsat is not None:
             cmax *= _fsat            # back to raw units -- see _fsat above
+        _nclip_before = float((rgb.max(axis=2) *
+                               (_fsat if _fsat is not None else 1.0)
+                               > 0.97 * sat_level).mean())
+        _nclip_after = float((cmax > 0.97 * sat_level).mean())
+        if _nclip_after > _nclip_before:
+            stats.setdefault("cfa_clip_extra", {})[f"{s:g}"] = \
+                round(100.0 * (_nclip_after - _nclip_before), 3)
         # The shared pedestal comes off HERE: after demosaic, before white
         # balance. A black-level residual is one number per photosite, so it is
         # the same in all three channels at this point and becomes three
@@ -2647,6 +2853,24 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         ady, adx = 2 * ady, 2 * adx
         for c in range(3):
             rgb[:, :, c] = ndimage.shift(rgb[:, :, c], (ady, adx), order=1, mode="nearest")
+        # LDIC's k_i(phi), q_i(phi) -- applied AFTER the shift, so the azimuth
+        # map is the common frame's. Mean-preserving (see
+        # _fit_azimuthal_affine), so this only removes the variation around the
+        # limb that a scalar cal[s] cannot carry. Same correction on all three
+        # channels: k is a gain on the incident light and q is a black-level
+        # residual, which is one number per photosite at this point -- exactly
+        # the argument that puts the shared pedestal before white balance.
+        if _ldic.get(s) is not None:
+            if _segmap is None:
+                _yy = np.arange(H2, dtype=np.float32)[:, None] - 2.0 * cym
+                _xx = np.arange(W2, dtype=np.float32)[None, :] - 2.0 * cxm
+                _segmap = np.clip(((np.arctan2(_yy, _xx) % (2 * np.pi))
+                                   / (2 * np.pi) * _LDIC_SEGMENTS
+                                   ).astype(np.int32), 0, _LDIC_SEGMENTS - 1)
+                del _yy, _xx
+            _kk, _qq = _ldic[s]
+            rgb *= _kk[_segmap][:, :, None]
+            rgb += _qq[_segmap][:, :, None]
         # THE MERGE WEIGHT NEEDS BOTH ENDS, NOT JUST THE TOP.
         #
         # This was a high-end shoulder alone: full weight for every pixel below
@@ -2744,7 +2968,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     accn = None; accw = None
     for s in inner_secs:
         rgb = demosaic_rggb(stacks_bayer[s])
-        cmax = rgb.max(axis=2)            # raw units -- see the merge loop
+        cmax = cfa_clip_max(stacks_bayer[s])   # see the merge loop
         if _fsat is not None:
             cmax *= _fsat
         rgb *= wb[None, None, :]

@@ -5,6 +5,148 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.22.26 — the clipping test moves onto the mosaic, and the merge gains LDIC's azimuthal term
+
+Two things Nico asked for, both from the collar measurement and the thesis.
+
+### The clipping test was asking the wrong question
+
+`cmax` was computed from the DEMOSAICED result — `demosaic_rggb(cfa).max(axis=2)`
+— in both the main merge and the inner-corona merge. Two of every pixel's three
+channels are interpolated through 5x5 Malvar-He-Cutler kernels, and those
+kernels have negative lobes, so a pixel next to a saturated photosite can come
+out BELOW the threshold and enter the merge at full weight carrying a value
+partly reconstructed from a photosite that hit the ceiling.
+
+One saturated photosite in a dim field, ceiling 16000 ADU, background 300:
+
+```
+      old test (demosaiced max)          new test (mosaic max)
+        0.3    0.3    0.3    0.3          0.3   16.0    0.3   0.3
+        0.3    4.2    8.2    4.2         16.0   16.0   16.0  16.0    x1000 ADU
+        0.3    8.2   16.0    8.2         16.0   16.0   16.0  16.0
+```
+
+It contaminates 13 pixels and the old test flags 1. The nearest neighbours read
+8200 and 4200 against a 16000 ceiling; the diamond tips at distance 2 read
+exactly the background, reaching the centre only through a negative lobe, and
+are undetectable by any test applied after the demosaic.
+
+`raw.cfa_clip_max` now asks it of the mosaic, over the union of the four
+kernels' non-zero taps (not a full 5x5 — the corners are zero in all of them).
+The report says how much more of each frame this marks invalid.
+
+**Stated plainly: this is a correctness fix, not a cure for the rings.** Hard
+exclusion of a 2-16 px collar around each tier's saturated region was measured
+on the bench and moved the ring artifact by 1-2%. Clipped photosites no longer
+enter the merge unflagged, which is worth having on its own.
+
+### The merge gains the term the reference method has and we did not
+
+Druckmullerova, doctoral thesis eq. 4.15 — the LDIC composition Hill adapts:
+
+```
+g(r,phi) = SUM_i  w(f_i) * ( k_i(phi) * f_i(r,phi) + q_i(phi) )
+```
+
+`k` and `q` are an affine transform PER IMAGE that VARIES WITH AZIMUTH, fitted
+by regression in 60 angular segments against the composite accumulated so far,
+longest exposure first, then smoothed by a trigonometric polynomial. The thesis
+states the purpose: "to compose images with different distribution of diffuse
+light in the optical system ... or even images that were taken through thin
+clouds."
+
+We had one scalar `cal[s]` per tier and one shared additive pedestal. Fitted on
+Nico's 600 mm set, the gain varies **3-27% around the limb** depending on the
+tier and the offset runs to **9% of the local signal** — and the median gain
+sits below 1 for eleven of twelve tiers, so the scalar was biased too.
+
+Applied **mean-preserving**: the azimuthal mean is taken out of both k and q,
+so this corrects only the variation a scalar cannot carry and leaves the
+photometric chain and the fitted pedestal exactly as they were. Measured on the
+bench: ring power **0.87x** with the radial profile held inside 4%. The raw
+(un-normalised) transform scores the same 0.87x and costs 20% of the profile,
+which is why it is not what ships.
+
+Verified on synthetic data: a 10% cosine gain is recovered to 0.1% in amplitude
+and phase, and identical tiers give exactly k = 1, q = 0.
+
+`ECLIPSEFORGE_NO_LDIC=1` disables it.
+
+### What neither of these does
+
+The ring artifact survives both. It survives every per-tier correction tried —
+by scale, by colour, by radius, by signal level, and now by azimuth — and it is
+present in the exact unfeathered merge. 0.22.25's plain-feather default still
+carries the picture; these two make the data underneath it more nearly right.
+
+## 0.22.25 — the merge default goes back to what worked, with the reason written down
+
+**The default merge weight is the plain feather again (pre-0.22.16).** Nico's
+own data was clean before 0.22.16 and has not been since; this restores that.
+It is a deliberate trade and the report now says so on every run.
+
+**What the fifteen-variant bench established.** `tools/` rebuilds the merge from
+the exported aligned-tier TIFFs, so a weight form costs twenty seconds instead
+of a re-stack. Every figure below is from Nico's 600 mm set at its own exposure
+exponent (0.55), scored by ring power — polar transform, high-pass along RADIUS,
+power at m < 20, which separates a ring (sharp in radius, smooth in azimuth)
+from a streamer (the opposite):
+
+```
+variant                              1.02R    ring power
+none (no feather at all)             1.000       0.94
+the shipped taper (.19-.24)          1.000       1.00
+plain blur (<= 0.22.15)              0.747       0.66
+hard collar exclusion, 2-16 px       0.998    1.01-1.02
+inverse-variance weighting           0.992       1.15
+C1 roll-off to zero below the cut    1.002       0.99
+weight from a smoothed intensity     1.006    0.96-0.97
+two-pass fill + plain blur           0.993       1.00
+LDIC azimuthal affine (thesis 4.15)  0.809       0.87
+```
+
+Two rows carry the argument. **`none`** -- no blur, no mask, no contour term of
+any kind -- has the rings at full strength, so nothing about the weight's shape
+creates them. And **the two-pass fill** says what the plain blur is really
+doing: give the clipped collar a correct value instead of the clipped tier's
+under-report, and the photometry returns to 0.993 while the rings return to
+1.00. The plain blur never removed the artifact. It covers it with a
+compensating error of the same shape -- both bounded by each tier's saturation
+contour.
+
+So 0.22.25 ships two errors that cancel, knowingly, because the pictures are
+what this tool is for. The report prints the cost: the corona just outside the
+limb reads about 25% low at 1.02 R on the reference set, dataset-dependent (8x
+on Clifton's 360 mm). `ECLIPSEFORGE_FEATHER=taper` gives the correct brightness
+with the artifact visible. **Do not take photometry from that band under the
+default.**
+
+**What was ruled out, each by measurement rather than by argument:** the
+renderer's fixed-radius layer blends (`render()` returns before they are
+computed for every layer view, so they cannot reach MGN or FNRGF at all); the
+feather; short-tier noise; per-tier correction by scale, by colour, by radius
+and by signal level; and a hard exclusion of the contaminated collar.
+
+**What was found and is not yet a fix.** Adjacent tiers disagree by up to 3x
+within 0-8 px outside the longer one's saturated region, and by ~1% beyond
+8-16 px -- charge spill or veiling glare off the saturated area, and the
+demosaic reaching into clipped photosites (`cmax` is measured after demosaic,
+so a pixel whose neighbour clipped is interpolated from a clipped value and is
+never flagged). And the merge formula is missing a term the reference method
+has: Druckmullerova's LDIC (thesis eq. 4.15) applies `k_i(phi) f_i + q_i(phi)`
+per image, fitted in 60 azimuth segments against the running composite, to
+absorb differing diffuse light between exposures. We apply one scalar per tier.
+Fitted on Nico's set, that gain varies 3-27% with azimuth and the offset runs
+to 9% of local signal. Implementing it scores 0.87. Real, and not the answer.
+
+**Bench fidelity, stated because every number above rests on it:** the
+reconstruction reproduces the pipeline's own `hdr_lum` to 0.7-2.5% at every
+radius from 1.02 to 2.0 R, and running the pipeline's real MGN path on its
+output gives plain/cur = 0.70 against the crude metric's 0.66.
+
+**Also:** the render's Warmth and Tint defaults stay at 1.0 (0.22.23).
+
 ## 0.22.24 — the pipeline now measures the thing TODO 1a is about
 
 TODO 1a was reopened on a rough rig: one raw per tier, the stacked tier's shift
