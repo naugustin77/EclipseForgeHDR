@@ -386,72 +386,160 @@ own cache.
 Intermediates live in `.eclipseforgehdr/` inside the raw folder; outputs land in
 `eclipseforge_output/` next to the raws.
 
-## Processing settings — what to change, and when
+## Processing settings — what each one does, and when to change it
 
 The defaults are what the measurements in this repository were made on. Leave
-them alone unless one of the cases below describes what you are looking at. Each
-setting is recorded in the run report, so two runs can always be compared, and
-each is part of the cache key, so changing one re-stacks rather than serving a
-stale result.
+them alone unless one of the cases below describes what you are looking at.
+Every setting is written into the run report, so two runs can always be
+compared, and every one is part of the cache key, so changing one re-stacks
+rather than serving a stale result.
 
-**Simple stack** — the fallback. Align, average each exposure group, measure the
-exposure ratios from the pixels and merge. No dark, no flat, no hot-pixel
-repair, no photometric ladder, no LDIC, no feather. Every stage that can fail on
-an awkward bracket is absent, so a set the normal path cannot handle still gives
-a clean stack, and the result gets all the usual enhancement layers.
+### Simple stack
+
+The fallback. Align the frames, average each exposure group, measure the
+exposure ratios from the pixels, merge. Nothing else: no dark, no flat, no
+hot-pixel repair, no photometric ladder, no LDIC, no feather, no tier
+projection. Every stage that can fail on an awkward bracket is absent, so a set
+the normal path cannot handle still gives a clean stack, and the result opens in
+the preview with all the usual enhancement layers.
+
+It also subtracts each frame's own corner level per channel, which removes the
+SKY as well as the black level — something the normal merge has no model for.
 
 *Use it when* the normal path gives you something obviously wrong and you want a
-picture rather than a diagnosis — or as a control, to find out whether a problem
-is in the merge or in the data. It also subtracts each frame's own corner level
-per channel, which removes the sky as well as the black level.
+picture rather than a diagnosis, or as a control to find out whether a problem
+is in the merge or in the data.
 
 *Its limit:* one number per frame cannot follow a sky that varies across the
 frame. On a narrow field it works; on a wide one expect colour blotches in the
-far outer corona. Judge it by eye.
+far outer corona. Judge it by eye. When it is on, most of the settings below are
+not consulted and the report marks them `[bypassed]`.
 
-**Correlation** — how two frames are matched during alignment.
+### Denoise — Off / Fine / Fine + medium / Strong
+
+Multiscale soft thresholding of the merged luminance against a per-pixel
+photon-noise model, before the detail layers are built. *Fine* is the default.
+Raise it for a short, noisy bracket; drop it to Off if you intend to denoise
+yourself afterwards.
+
+### Merge weight — Blended edge / Exact edge
+
+How the merge weight behaves at each tier's clipping boundary. A trade with no
+right answer. *Blended edge* blurs the weight across the boundary: the tiers
+join without a seam and a ring just outside the limb is suppressed, but weight
+leaks from clipped pixels into unclipped ones and the corona reads low there —
+on some brackets a little, on others enough to show as a coloured rim. *Exact
+edge* keeps the weight exact: radiometrically correct, rings visible. The log
+prints what the trade costs on your data.
+
+### White balance — Camera (as shot) / Daylight / None
+
+Applied to the raw channels before the camera matrix. *Camera* uses the
+multipliers your own setting produced and is the default. *Daylight* uses
+LibRaw's value, which for a body it has no table entry for is DERIVED from the
+colour matrix rather than measured — on one 45 MP body that is 39% less blue
+than the camera's own Fine Weather preset, which renders the corona too orange.
+*None* leaves the sensor channels alone.
+
+### Photometry — Per-channel (linear fit) / Single scale factor
+
+How each exposure is put on a common brightness scale. *Per-channel* fits a
+slope and an offset between neighbouring exposures separately in R, G and B, so
+it can correct a colour difference between tiers that one number cannot.
+*Single scale factor* is one number per tier fitted on luminance, which is what
+the app did before 0.22.86.
+
+### Photometric solve — Chain / Network
+
+How the per-tier factors are combined once each neighbouring pair is measured.
+*Chain* walks out from the middle tier one link at a time, so a link that is off
+by 3% moves every tier beyond it by 3% and the errors compound. *Network* also
+measures each tier against the one two steps away and solves all the links
+together by least squares, so a single bad link is outvoted instead of
+propagated. Where no two-step link is measurable the two are the same
+computation and the app says so. Chain is the default because it is what every
+released build has done.
+
+### Tiers — By shutter speed / Per frame
+
+What counts as one exposure tier. *By shutter speed* groups every frame claiming
+the same shutter speed and averages them: a free sqrt(N) gain in signal-to-noise,
+and right whenever the metadata is right. *Per frame* groups nothing — each
+frame is calibrated and merged on its own. *Choose that when the exposure times
+cannot be trusted* — typed in by hand, recovered from video, or rewritten by a
+converter — because grouping is the one step that believes the header instead of
+measuring it. It costs run time roughly in proportion to the frame count.
+
+### Correlation — Semi-phase / Cross-correlation / Full phase
+
+How two frames are matched during alignment.
 
 - *Semi-phase (default).* The cross-power spectrum divided by the two amplitude
-  spectra plus a small constant, so the whitening has a noise floor. Measured on
-  a bench that injects an exact shift into realistic tiers: 1.187 px rms error
-  and a 0.041 px pull toward zero shift, against 1.524 px and 0.200 px for plain
+  spectra plus a small additive constant, so the whitening has a noise floor.
+  Measured against an injected exact shift: 1.187 px rms error and 0.041 px of
+  pull toward zero shift, against 1.524 px and 0.200 px for plain
   cross-correlation. The pull is the estimator locking onto what both frames
   share — dust, fixed pattern, the lunar edge.
 - *Cross-correlation.* What 0.23.1 and earlier did. Pick it to reproduce an
   older run.
 - *Full phase.* Complete whitening. Weights every spatial frequency equally,
-  including those carrying only read noise, and measures worse on a 14-stop
+  including those carrying only read noise, and measures worse on a wide
   bracket. Present for comparison.
 
-**Align filter** — the high-pass applied before correlating.
+### Align filter — Isotropic high-pass / Tangential
 
-- *Isotropic (default).* Subtracts a blurred copy.
-- *Tangential.* Subtracts a copy blurred along a Sun-centred arc, so anything
-  constant around a circle cancels — including the radial gradient and, in
-  principle, the moving saturation edge. Measured 12% better than plain
-  correlation and 2% better than semi-phase, which is inside the spread of 33
-  samples: a real candidate, not a proven win. *Try it if* the alignment section
-  of the report shows a large residual.
+The high-pass applied before correlating. *Isotropic* subtracts a blurred copy.
+*Tangential* subtracts a copy blurred along a Sun-centred arc, so anything
+constant around a circle cancels — the radial gradient, and in principle the
+moving saturation edge. Measured 2% better than semi-phase, which is inside the
+spread of 33 samples: a candidate, not a proven win. *Try it if* the alignment
+section of the report shows a large residual.
 
-**Tier combine** — how the frames within one exposure group are combined.
+### Tier combine — Mean / Clipped mean (kappa-sigma)
 
-- *Mean (default).* Every frame counts.
-- *Clipped mean (κσ).* Rejects per-pixel outliers against a fitted noise model.
-  On a tier carrying a cosmic-ray hit it cut the resulting error from 19864 ADU
-  to 9.3. It needs every frame of a tier in memory at once, so it costs RAM.
-  *Use it if* you have a satellite trail, an aircraft, or a particle strike in
-  one frame of one tier.
+How the frames within one exposure group are combined. *Mean* counts every
+frame. *Clipped mean* rejects per-pixel outliers against a fitted noise model:
+on a tier carrying a particle strike it cut the resulting error from 19864 ADU
+to 9.3. It needs every frame of a tier in memory at once, so it costs RAM.
+*Use it if* one frame of one tier has a satellite trail, an aircraft or a
+cosmic-ray hit.
 
-**FNRGF** — the order of the Fourier fit in that detail layer.
+### FNRGF — EFHDR (order 6) / Published (order 30, attenuated)
 
-- *EFHDR, order 6 with a hard cutoff (default).*
-- *Published, order 30 with attenuation.* The setting the published papers
-  describe. A higher order lets the fitted background follow finer azimuthal
-  structure, so more of that structure is treated as background and removed:
-  measured on a real bracket it keeps **less** structure than order 6 at every
-  radius, for the same ring fraction. That is the expected direction, not a
-  fault. *Use it if* the background behind the streamers looks lumpy and you are
-  willing to trade contrast for smoothness.
+The order of the Fourier fit in that detail layer. A higher order lets the
+fitted background follow finer azimuthal structure, so more of that structure is
+treated as background and removed: measured on a real bracket, the published
+setting keeps LESS structure than order 6 at every radius for the same ring
+fraction. That is the expected direction, not a fault. *Use it if* the
+background behind the streamers looks lumpy and you will trade contrast for
+smoothness.
+
+### Earthshine — off by default
+
+Builds a separate earthshine layer from the longest tiers. Off by default
+because earthshine needs long tiers with real headroom over the scattered
+glare, which most totality brackets do not have.
+
+### Fix hot pixels — on by default
+
+Maps hot and dead photosites on the shortest tier against a fitted photon+read
+noise model and repairs them in every frame.
+
+### Frames — All / Best half / Best only
+
+Which frames of each tier are used, ranked by a per-frame sharpness score.
+*All* is the default and gives the best signal-to-noise. *Best half* and *Best
+only* trade that for sharpness when seeing varied through totality.
+
+### Export aligned tier TIFFs, and scene-linear
+
+Also writes each aligned exposure tier as a 16-bit TIFF into
+`eclipseforge_output/aligned_tiers/`, for blending or HDR combining elsewhere.
+Aligned and demosaiced but not merged or tone mapped, so the exposure
+relationship between tiers is preserved, with an ICC profile embedded.
+*scene-linear* writes them at gamma 1.0 with a linear profile — choose that for
+PixInsight or your own HDR combine; leave it off for Photoshop and Affinity,
+where sRGB-encoded files open looking correct.
 
 ## Importing a finished HDR
 
