@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.3
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
 
