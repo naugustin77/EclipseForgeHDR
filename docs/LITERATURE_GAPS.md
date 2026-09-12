@@ -1,0 +1,466 @@
+# What the literature has that we do not
+
+A pass over the papers, theses and reference source in `Literature and
+resources/`, plus a search for comparable projects, looking for capability we
+are missing rather than for confirmation. Ordered by expected value.
+
+Everything here is either a quotation from a source or a measurement on the reference set's
+600 mm set. Where a measurement did not support the idea, that is said.
+
+---
+
+## 1. Phase correlation — REJECTED IN 0.22.27, THEN SHIPPED AS THE DEFAULT IN 0.23.2
+
+**Status: BOTH results below are real and they are not in conflict, because the
+two benches measured different things. Read this box before acting on anything
+further down this item.**
+
+The 0.22.27 rejection (5.00 px against our 3.02, and 5.40 px for the tangential
+high-pass) ran on the EXPORTED tiers: already registered, resampled,
+mean-stacked, both crops taken from the same origin, no signal weight. Its low
+frequencies matched almost perfectly. That is sub-pixel refinement on an easy
+pair, not alignment -- the same flaw that forced the 0.22.28 revert recorded in
+item 1b, noticed there and not applied back to this item.
+
+`tools/abench.py` (0.23.2) rebuilds the tiers from the merged corona and the
+master flat, so the lunar edge, the per-tier saturation edge and the sensor's
+fixed pattern are all present and the injected shift is exact. It also reports
+ZERO-PULL: the shift an estimator returns for a pair with no real shift, which
+is what the literature is actually about and what the old harness cancelled out
+by construction. On that bench:
+
+    estimator                          rms err     zero-pull
+    plain cross-correlation             1.524 px     0.200 px
+    semi-phase, p = q = 1e-4 max|F|     1.187 px     0.041 px
+
+So semi-phase correlation (Druckmullerova Def. 3.25 -- p and q are ADDITIVE
+constants in the denominator, not exponents) is the default from 0.23.2, and the
+tangential filter is a selector. **Do not revert either on the strength of the
+numbers below.** What the 0.22.27 result still establishes is narrower and worth
+keeping: full amplitude whitening, with no floor, costs 2.1 px on a 14-stop
+bracket. The additive p and q are that floor.
+
+---
+
+### (the 0.22.27 measurement, kept for the whitening result)
+
+**Status: measured on two datasets. Turning phase normalisation on is 66%
+WORSE. What the test did find was a different, real 18-22% win.**
+
+I ranked this highest. It was the wrong call, and the measurement says so:
+
+```
+ours, plain cross-correlation                     3.02 px
+best of 36 regularised phase-correlation settings 5.00 px
+the same band-pass, WITHOUT the whitening         2.91 px
+```
+
+The band-pass `H` is worth ~0.1 px; the amplitude whitening costs 2.1 px.
+Whitening weights every spatial frequency equally, and in a 1/2000 s frame most
+frequencies hold only read noise. The thesis recommends phase correlation for
+registering images of *comparable* quality — a 14-stop bracket is a different
+problem, and `normalization=None` turns out to be right.
+
+The tangential-blur high-pass from `eclipsetools` (item 5 below) was tested in
+the same run: 5.40 px against our 3.02. Also rejected.
+
+**What the test seemed to find, and did not:** that our high-pass was too
+aggressive, and 0.5 R was 18-22% better. Shipped in 0.22.27 and **reverted in
+0.22.28** — on the reference run the network residual went 1.17 -> 2.67 px
+(half-res) and the per-tier limb spread 8 -> 12 px. The sweep ran on the
+*exported* tiers, which are the output of alignment: already registered and
+mean-stacked, from a common origin, with no signal-weight mask. It measured
+sub-pixel refinement on an easy pair, not alignment.
+
+The phase-correlation result above still stands: that comparison put two
+estimators on the same data, so the relative answer survives even though the
+absolute numbers came from an easy case.
+
+The original text of this item is kept below, because the reasoning looked
+sound and was not.
+
+---
+
+### (original, refuted)
+
+**Status: real gap, well specified, not yet built. The best-supported item here.**
+
+Our own run report already admits it:
+
+> Alignment: cross-correlation of a gradient-flattened log corona, after
+> Druckmuller 2009 (ApJ 706, 1605) — but **WITHOUT that paper's phase
+> normalisation**: skimage is called with `normalization=None`, so the
+> amplitude spectrum is not divided out and this is not, strictly, phase
+> correlation.
+
+Druckmüllerová's thesis §4.1.3 states exactly the property we are giving up:
+
+> The phase correlation proved to be a powerful tool [...] **It can register
+> images taken with different exposure times, different distribution of diffuse
+> light**, can be extended to subpixel precision.
+
+Different exposure times and differing diffuse light is precisely our bracket —
+and "differing distribution of diffuse light" is the same phrase the thesis
+uses to justify LDIC's `k_i(φ), q_i(φ)`. Plain cross-correlation is dominated
+by the brightest low-frequency content, which is exactly what changes between a
+1/2000 s and a 1.6 s frame.
+
+Current cost, from the last run: **2.34 px max network residual** at full
+resolution, limb fit **2.37 px rms** over 720/720 rays. That is 0.4% of R and
+not sub-pixel.
+
+The thesis gives the practical regularised form (eq. 4.13) rather than the
+textbook one, because the textbook version divides by an amplitude that can be
+near zero:
+
+```
+P(x,y) = F^-1 {  H(ξ,η) · F1(ξ,η) F2*(ξ,η) / ( (|F1(ξ,η)|+p) · (|F2(ξ,η)|+q) )  }
+```
+
+with `H` a bounded even function (a band-pass window) and `p, q > 0`. It also
+covers rotation and scale via the polar amplitude spectrum (Reddy & Chatterji
+1996), which we do not need — the thesis says parallactic rotation over a few
+minutes is negligible — and sub-pixel extension, which we do need.
+
+**What to do:** implement eq. 4.13 as the link estimator, keep the existing
+weighted-least-squares network over lag-1/lag-2 links, and compare network
+residual and limb-fit rms directly against the current numbers. This is a
+like-for-like test with an existing baseline.
+
+---
+
+## 2. FNRGF — INVESTIGATED WITH THE REFERENCE AS AN ORACLE. Nothing shipped.
+
+**Status: `tools/reference_fnrgf.py` is a faithful port of Druckmuller's own
+Delphi program, so the reference can now be RUN on our data instead of read.
+On the real `hdr_lum` it is much better than ours in the inner corona. Neither
+of the two mechanisms I tried reproduces that safely, and I am not shipping a
+guess.**
+
+Ours against the port, on the reference set's actual merged luminance, standardised per
+shell (`coh` = radial coherence at lag 5 px; `struct` = azimuthal power
+m 40-250 over m 250-500):
+
+```
+variant                                1.05-1.3R      1.3-1.8R      1.8-2.6R
+ours: fnrgf_robust order 6            0.371 /  3.2   0.980 / 98.7  0.938 / 4.3
+reference, thesis optimum             0.824 / 13.5   0.974 / 20.5  0.906 / 5.4
+reference, shipped Settings.ini       0.476 / 13.4   0.709 / 13.8  0.435 / 4.4
+```
+
+**Looking at it confirms the inner shell.** The reference resolves streamers
+into individual filaments right down to the limb where ours is washed out. It
+also shows a fine radial ribbing that the thesis predicts when `A_k` is too
+high — "false glimmers of the higher-order sine and cosine functions".
+
+**Attempt 1: give our robust fit the reference's attenuation.** Implemented in
+`fnrgf_robust` (`atte_ave`, `atte_dev`, both defaulting to 0 = unchanged).
+Order 16 with A -0.06, C -0.08 per harmonic is the best of five settings and
+buys almost nothing: inner shell 0.488 / 3.5 against 0.371 / 3.2. Higher orders
+are worse. **So the order and the taper are not where the difference lives** —
+which is the opposite of what this item assumed before the port existed.
+
+**Attempt 2: the two things the reference does NOT do, both of them ours.**
+Our normalising variance is floored at `(0.3*sg)^2` — *relative* to the local
+robust scale — and our radial profile of sigma is Gaussian-smoothed over 10-40
+px. In the inner corona `sg` is large because the residual there is full of
+real structure, so the floor rises with the signal and divides the structure
+back out. Dropping the floor to 0.05 and cutting the smoothing to a quarter
+scores **0.817 / 42.6** in the inner shell — thirteen times the structure and
+better than the reference.
+
+**And it looks terrible.** Flat grey corona with a handful of blown white and
+black blobs where a few outliers stretch the range. The structure is gone, not
+enhanced; the metric was fooled by large smooth outliers, which is exactly what
+an m40-250 over m250-500 ratio rewards. Rejected on sight.
+
+**Attempt 3: the reference's ABSOLUTE noise variance** (estimated its way,
+median segment variance on the outer rings: 1.14e-5, sigma 0.0034 in log10),
+replacing the relative floor, with reduced sigma smoothing. Scores better in
+ALL THREE shells -- inner 0.718/19.5 against 0.371/3.2, outer 0.947/8.2
+against 0.938/4.3, mid unchanged. **And it also looks worse**: flatter, less
+streamer contrast, blown blobs at the prominences. Rejected on sight, like
+attempt 2.
+
+Three attempts, three times the metric said better and the picture said worse.
+The metric is retired for this layer: judge FNRGF by eye against the reference
+render, or not at all.
+
+Both mechanisms are therefore excluded, and the floor and the smoothing are
+load-bearing rather than sloppy. What is left as the difference: the reference
+computes its statistics per INTEGER RADIUS with no radial smoothing at all, no
+robust fitting anywhere, and an ABSOLUTE additive noise variance estimated once
+from the outermost rings (`EstimateAdditiveNoiseRing`) instead of a relative
+floor. That combination is a genuinely different estimator, not a parameter
+change, and it is the next thing to try — carefully, because this item has now
+produced two confident numbers that a glance at the picture destroyed.
+
+`fnrgf_robust` keeps the new parameters, all defaulting to today's behaviour
+(verified bit-identical), so the next attempt does not start from scratch.
+
+---
+
+### (original, before the port existed)
+
+## 2a. FNRGF: we use order 6 with a hard cutoff; the reference uses ~50 with a taper
+
+**Status: real divergence, measured, and the measurement does NOT clearly favour
+the change. Worth doing properly, not worth assuming.**
+
+The zip in the literature folder is the **Delphi source of Druckmüller's own
+FNRGF program**, not a description of it. From `ImgProc.pas` and `Settings.ini`:
+
+- `SegmentCount 100`, and `FourOrder := (SegmentCount-1) div 2` → **order 49**.
+- Two separate per-harmonic attenuation tables, `Atte[Ave,k]` and `Atte[Dev,k]`,
+  applied when the polynomial is evaluated (`PointAttenFourier`) — a smooth
+  taper, not a truncation.
+- The shipped defaults decay linearly: the mean series to 0.51 at k=49, the
+  standard-deviation series to 0.02.
+- The segment standard deviation is Bessel-corrected and carries an **additive
+  noise variance** inside the square root, estimated from the data by
+  `EstimateAdditiveNoiseRing` (median of segment deviations at the outermost
+  radii).
+
+Thesis §6.1.2 explains the design and gives an optimum:
+
+> The middle image has about optimal setting of attenuation coefficients (A_k
+> set to (1, 0.97, 0.94, ...), C_k set to (1, 0.96, 0.92, ...), **ω = 50**)
+
+and states the constraint plainly:
+
+> using a high order of the trigonometric polynomial **for standard deviations
+> which is not in accordance with the order for the averages gives completely
+> wrong results**. Using a high order for averages not followed by the standard
+> deviations, on the other hand, is not such a big mistake.
+
+and the failure mode of pushing A too far:
+
+> If the A_k s are set too high, it causes **artificial brightenings in
+> low-contrast parts of the image. They are false glimmers of the higher-order
+> sine and cosine functions.**
+
+**Ours:** `fnrgf_robust(order=6)`, hard cutoff, and the *same* `1e-3·m²` ridge
+on the mean and the deviation. By the thesis's own account that is the "too low
+for both" regime — safe, but "they only do not make use of the full advantage
+of the FNRGF".
+
+**Measured** on the 600 mm reference set, half resolution, everything standardised per
+shell so the comparison is scale-free (amplitude is not comparable between
+variants, each normalises by its own σ):
+
+```
+variant                                1.05-1.3R      1.3-1.8R      1.8-2.6R
+                                       coh / struct   coh / struct  coh / struct
+ours: fnrgf_robust, order 6            0.748 / 69.4   0.977 / 52.2  0.916 / 3.3
+attenuated, order 20, A -.03, C -.04   0.661 / 84.8   0.965 / 33.1  0.788 / 3.2
+attenuated, order 40, A -.03, C -.04   0.657 / 85.4   0.961 / 32.1  0.784 / 3.4
+attenuated, order 49, A -.02, C -.02   0.577 / 69.3   0.926 / 24.0  0.622 / 3.0
+```
+
+`coh` is radial coherence at lag 5 px, the codebase's own separator of real
+radial streamers from texture; `struct` is azimuthal power m 40-250 over m
+250-500 on ring-median-normalised data — structure against noise.
+
+The one clear signal is **+23% structure-to-noise in the inner shell** at order
+20-40. Everything else is worse, and coherence drops in every shell.
+
+**The test is not clean, and that matters more than the numbers.** The
+attenuated variants were written as plain least squares; they do not have our
+IRLS/Huber robust fitting, our coverage-matched order, or our ridge. So this
+compares "attenuated high order, non-robust" against "low order, robust" and
+cannot separate the two effects. A fair test keeps the robust fit and changes
+only the order and the attenuation.
+
+**What to do:** add the two attenuation series to `fnrgf_robust` itself,
+keeping the IRLS and the coverage matching, and re-run this table. If the inner
+shell keeps its +23% without losing coherence, ship it.
+
+---
+
+## 3. The noise floor on the normalising σ is a different quantity from ours
+
+The reference adds an **estimated additive noise variance** to the segment
+variance before the square root, and estimates it from the outermost rings of
+the actual image. Ours (`fnrgf_robust`) clips the variance at `(0.3·sg)²` — a
+floor *relative to the local robust scale* — and MGN clips at an absolute
+`0.004` plus a `photon_floor` map.
+
+These are not the same thing. A relative floor scales with whatever the local
+scatter happens to be, including where that scatter is real structure; an
+absolute noise variance estimated once from the faint field does not. Cheap to
+try, and the reference's estimator is fully specified in
+`EstimateAdditiveNoiseRing`.
+
+---
+
+## 4. MGN's global term: the paper uses h = 0.7, we use 0.12
+
+Morgan & Druckmüller 2014 §2:
+
+> C_g is included to give contextual information of the largest scale
+> structure. We used **h = 0.7** in this work.
+
+We use `global_wt = 0.12`, a factor of six lower. For an eclipse image the
+global gamma-transformed term reinstates exactly the radial gradient we work to
+remove, so a lower value is defensible — but it is a large departure from the
+published value and there is no measurement in the tree justifying the number.
+Worth one sweep to find out whether 0.12 was chosen or inherited.
+
+Everything else in our MGN matches the paper: scales 1.25-40 px, k = 0.7, gains
+rising to 1 with kernel width.
+
+---
+
+## 5. Comparable projects
+
+Very little is published; it is true that people do not share. Two useful
+finds.
+
+**`naavis/eclipsetools`** (Python, on GitHub) is the closest comparable
+pipeline. It uses:
+
+- **Phase correlation** for alignment, with a specific preprocessing: mask the
+  Moon and edges, then high-pass by subtracting a *tangentially blurred*
+  version — which removes the radial gradient without touching azimuthal
+  structure. Our flattening is radial-profile subtraction; a tangential blur is
+  a different and arguably better matched filter for this. Independent
+  confirmation of item 1.
+- **Linear fits of each exposure to a reference** for the HDR combine — the
+  same family as LDIC and as Hill's PixInsight LinearFit, and confirmation that
+  a per-image affine transform is the standard approach rather than one scalar.
+- **Enhanced unsharp masking with partial convolution**, kernels excluding
+  Moon-contaminated pixels — we do this in MGN already.
+- One trick we do **not** use: **fit and remove a linear trend before the
+  convolution, then reapply it afterwards**, to stop the bright lunar edge
+  contaminating a wide kernel. That is a cheap, targeted fix for exactly the
+  near-limb band where our artifacts live.
+
+**Viladrich, RCE 2024** (2024 eclipse, 585 frames) is worth knowing for one
+structural choice: **star-based registration with ephemeris drift correction**,
+rather than registering on the corona or the limb at all. It sidesteps the
+lunar drift problem entirely. He also reports a much simpler enhancement that
+works — divide the HDR image by a Gaussian blur with radially varying σ plus a
+constant — and uses FNRGF via `sunkit-image`, which is a second independent
+implementation we could diff against ours.
+
+---
+
+## 6. Hill's linear fit — more general than ours in space, LESS general in colour
+
+**This section previously claimed our merge was "strictly more general" than
+Hill's. That was wrong, and the error was on the colour axis.** It was written
+from a second-hand summary rather than from the talk itself. Corrected here
+after watching the talk in full.
+
+Source: Jonathan Hill, "Advanced Solar Eclipse Photography" (conference talk,
+on YouTube). Described below in our own words; nothing from it is reproduced
+here.
+
+Hill's combine is PixInsight `LinearFit` of each exposure against its
+neighbour, plus a trapezoid weight. Three things about it that the earlier
+summary missed:
+
+- The fit returns a **slope and an offset**, not a slope alone.
+- PixInsight's `LinearFit` is **per channel**. Three slopes, three offsets.
+- The reference is the **longest** exposure, and he chains 2→1, 3→2, 4→3 rather
+  than fitting everything to the reference, accepting the risk of propagating an
+  error down the chain because adjacent frames overlap best.
+
+Against that, ours:
+
+| | Hill | EFHDR |
+|---|---|---|
+| slope | per channel, per pair | one scalar `cal[s]` per tier, fitted on luminance |
+| offset | per channel, per pair | one `pedestal`, shared by every tier **and** every channel |
+| spatial | global | LDIC `k_i(φ), q_i(φ)`, 60 segments, per tier — **more general** |
+| colour | 3 channels | 1 — **less general** |
+
+So: more general in space, strictly less general in colour. Every photometric
+correction in this pipeline is fitted on luminance and applied identically to R,
+G and B. If the tier-to-tier variation a bracket carries has any colour in it —
+thin cloud, changing airmass, the sky brightening through totality — we cannot
+express it; it is absorbed into the luminance fit as an average and comes back
+out as a colour error that varies with radius.
+
+Why this matters beyond bookkeeping. Hill names the consequence of skipping the
+fit directly in the talk: HDR techniques that omit this step show ringing, which
+he calls isophote ringing. A member of the audience reports the same artifact
+from 2024 and attributes it to high thin cloud. Thin cloud is a per-frame
+gain-and-offset change
+with colour in it — the exact thing a luminance-only chain cannot absorb, and
+the exact motivation Druckmullerová gives for LDIC. **The ring artifact and the
+corona colour cast may therefore be one missing correction, not two.** That is a
+hypothesis, not a result.
+
+MEASURED, THEN IMPLEMENTED ANYWAY — and that order matters.
+
+`_per_channel_photometry` refits all three corrections per channel on every run
+and stores the sampled pixel pairs, so the question can be re-asked without a
+re-stack. On the 600 mm bracket (14 tiers, 49 frames) it found: the colour
+freedom buys nothing resolvable — three independent estimators on the same
+pixels disagree with each other by 1-2%, which is the size of the effect — and
+the per-pair offset helps most on the long tiers, which build the outer corona
+rather than the near-limb band where the rings sit. An earlier reading of a
+"3.3% systematic colour drift" was accumulated noise: a +-1% per-link error
+chained over 13 links is a +-3.6% random walk, and the pattern dissolves when
+the links are read individually. Full result in TODO item 0c.
+
+**None of that is a reason not to implement his method, and 0.22.43 does.**
+`_hill_chain` fits slope and offset per channel between neighbouring exposures
+with outlier rejection and chains from the longest, as described. It is
+selectable, not default. The reasoning is deliberate and worth keeping:
+
+- the measurement is one bracket, and the estimator behind it has already been
+  wrong twice in this file's own history (the black level, and this section);
+- a size argument is not a correctness argument, and Hill states the ringing
+  consequence directly;
+- "we implemented the published method and it changed little here" is a
+  defensible position to hold in front of other astrophotographers.
+  "We measured it ourselves and decided to skip it" is not.
+
+Known property of the chained form: pairwise fits equalise every tier onto the
+reference and cannot see an offset the reference itself carries, so a black
+level common to the whole bracket survives where the shared pedestal removed
+it. Verified on a synthetic (+9/+4/-3 ADU injected; recovered on every tier but
+the reference, which is 0 by construction).
+
+One detail of his that we already get right, worth recording because it is easy
+to get wrong: the weights must be determined from the images BEFORE the linear
+fit, because the fit can push values above one and the weighting would then
+reject most of the picture.
+
+Our `wsat` is computed from raw `cmax` before any photometric transform, and
+0.22.26's azimuthal correction is applied to `rgb` after the weight is already
+fixed. Correct as it stands — do not move that order. (His combine is a weighted
+sum of the fitted exposures over a trapezoid weight: flat over roughly the lower
+two thirds of the range and falling to zero near saturation. Our tanh knee at 0.87·sat with a hard zero at 0.97·sat is
+the same intent and a comparable shape.)
+
+Also from the slides, unrelated to the merge but easy to confuse with it: "Edge
+Ringing" is called out explicitly on his **unsharp mask** slide and addressed
+with partial convolution. That is a filter artifact at the limb, not the HDR
+isophote ringing above. Two different things with the same word.
+
+---
+
+## Ranked, with what each is worth
+
+| # | item | evidence | expected value |
+|---|---|---|---|
+| 1 | Semi-phase correlation | **SHIPPED AS DEFAULT 0.23.2** on `tools/abench.py`: 1.187 px against 1.524, zero-pull 0.041 against 0.200. The 0.22.27 rejection ran on already-aligned exported tiers | done |
+| ~~1b~~ | ~~Relax the alignment high-pass to 0.5 R~~ | **REVERTED 0.22.28**: real residual 1.17 -> 2.67 px; the sweep ran on already-aligned tiers | none |
+| 5 | Tangential-blur high-pass | **SHIPPED AS A SELECTOR 0.23.2**: 12% better than cross, 2% better than semi — inside the spread of 33 samples. The 0.22.27 rejection ran on the same flawed bench as item 1 | keep as a selector |
+| 2 | FNRGF attenuation series, robust fit kept | thesis §6.1.2 with stated optima; +23% inner structure/noise, other shells worse | medium, needs the clean test |
+| 5 | De-trend before convolution, re-trend after | `eclipsetools`; targets the near-limb band | medium, cheap |
+| 3 | Additive noise variance on σ | reference `EstimateAdditiveNoiseRing` | medium |
+| 4 | MGN global weight sweep | paper says 0.7, we use 0.12, no measurement on file | low, one sweep |
+| 6 | Per-channel photometric chain | §6: ours is luminance-only, Hill's is per channel with an offset; he names ringing as the cost of skipping the fit | **unknown — being measured**, see `_per_channel_photometry` |
+
+Item 6 is the first candidate that *is* aimed at the ring artifact. The earlier
+statement that nothing in the literature describes the artifact was too strong:
+Hill names it (as isophote ringing) and attributes it to the missing linear fit,
+and a participant reports it from cloud. What is still true is that no published
+pipeline reports it *after* performing that fit — and we have never performed
+the colour half of it. Until the per-channel numbers come back from real
+datasets this is a hypothesis with a mechanism, which is more than the artifact
+has had so far.

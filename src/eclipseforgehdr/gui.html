@@ -1,0 +1,1403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EclipseForgeHDR — High-Dynamic-Range Solar Eclipse Image Processing</title>
+<style>
+:root{
+  --bg:#0b0d10; --panel:#14171c; --panel2:#191d23; --line:#262b33;
+  --text:#d8dde4; --muted:#8b93a0; --gold:#e8a33d;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,sans-serif}
+body{overflow:hidden}
+.app{display:flex;height:100vh;overflow:hidden}
+.stage{flex:1;display:flex;flex-direction:column;min-width:0;height:100vh}
+.topbar{display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.topbar h1{font-size:16px;font-weight:600;margin:0 12px 0 0;color:var(--gold)}
+.topbar input[type=text]{flex:1;min-width:260px;background:#0e1013;color:var(--text);
+  border:1px solid var(--line);border-radius:4px;padding:7px 10px;font:13px ui-monospace,monospace}
+.topbar .status{color:var(--muted);font:12px ui-monospace,monospace;width:100%}
+.canvaswrap{flex:1;display:flex;align-items:center;justify-content:center;padding:14px;background:#07080a;overflow:hidden}
+canvas{max-width:100%;max-height:calc(100vh - 130px);display:block;box-shadow:0 0 40px rgba(0,0,0,.8);cursor:grab}
+.rail{width:330px;flex:none;background:var(--panel);border-left:1px solid var(--line);height:100vh;overflow-y:auto}
+.railinner{padding:8px 18px 18px}
+.group{padding:12px 0 6px;border-bottom:1px solid var(--line)}
+.group h2{margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--gold)}
+.ctl label{font-size:13px;display:flex;justify-content:space-between;margin-top:6px}
+.ctl label .val{font:12px ui-monospace,monospace;color:var(--muted)}
+input[type=range]{width:100%;appearance:none;height:4px;border-radius:2px;background:#2a303a;outline:none}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--text);border:2px solid var(--gold);cursor:pointer}
+button{font:13px system-ui;font-weight:500;padding:8px 12px;border-radius:4px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer}
+button.primary{background:var(--gold);border-color:var(--gold);color:#151006}
+button:disabled{opacity:.45;cursor:default}
+.log{background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:8px;
+  font:11px ui-monospace,monospace;color:var(--muted);height:110px;overflow-y:auto;white-space:pre-wrap;margin-top:8px}
+.bar{height:5px;background:#2a303a;border-radius:3px;margin-top:8px;overflow:hidden}
+.bar>div{height:100%;background:var(--gold);width:0%;transition:width .4s linear}
+/* While a run is live the bar carries moving stripes. The bar can sit at one
+   width for minutes on a slow step -- the stripes say "still working" without
+   pretending the fraction moved. */
+.bar.run>div{background-image:linear-gradient(115deg,rgba(0,0,0,.28) 25%,transparent 25%,
+  transparent 50%,rgba(0,0,0,.28) 50%,rgba(0,0,0,.28) 75%,transparent 75%);
+  background-size:16px 16px;animation:march 1s linear infinite}
+@keyframes march{from{background-position:0 0}to{background-position:16px 0}}
+.runline{display:flex;gap:8px;align-items:baseline;margin-top:8px;
+  font:12px ui-monospace,monospace;color:var(--muted)}
+.runline .spin{color:var(--gold);width:1ch;display:inline-block}
+.runline .clock{color:var(--text)}
+.runline .stale{color:#d8a13a}
+@media (prefers-reduced-motion:reduce){.bar.run>div{animation:none}}
+.export{display:flex;flex-direction:column;gap:6px}
+.export label.radio{display:flex;gap:8px;align-items:center;font-size:13px}
+.export input[type=text]{background:#0e1013;color:var(--text);border:1px solid var(--line);
+  border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace}
+.hint{color:var(--muted);font-size:12px}
+.brw{padding:7px 9px;font-size:12px}
+.pick{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;
+  align-items:center;justify-content:center;z-index:50}
+.pick.on{display:flex}
+.pickbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  width:min(760px,92vw);max-height:82vh;display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.pickhead{padding:12px 16px;border-bottom:1px solid var(--line)}
+.pickhead h3{margin:0 0 6px;font-size:13px;color:var(--gold);font-weight:600}
+.crumb{font:12px ui-monospace,monospace;color:var(--muted);word-break:break-all}
+.picklist{flex:1;overflow-y:auto;padding:6px 8px;min-height:200px}
+.pickrow{display:flex;gap:10px;align-items:center;
+  padding:7px 9px;border-radius:4px;cursor:pointer;font:12px ui-monospace,monospace}
+/* the name takes the slack, so it sits hard left and the count hard right --
+   with space-between and the icon as a third flex item the name floated to
+   the middle of the row */
+.pickrow>span:first-of-type{flex:1;text-align:left;word-break:break-all}
+.pickrow:hover{background:var(--panel2)}
+.pickrow .tag{color:var(--muted);font-size:11px;flex:none}
+.pickrow.dir::before{content:"\1F4C1";margin-right:8px;flex:none}
+.pickrow.file::before{content:"\1F4C4";margin-right:8px;flex:none}
+.pickrow.up::before{content:"\21B0";margin-right:8px;flex:none}
+.pickfoot{padding:10px 16px;border-top:1px solid var(--line);display:flex;
+  gap:8px;justify-content:flex-end;align-items:center}
+.pickfoot .sp{flex:1;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="pick" id="pick">
+  <div class="pickbox">
+    <div class="pickhead"><h3 id="pickTitle">Choose a folder</h3>
+      <div class="crumb" id="pickCrumb"></div></div>
+    <div class="picklist" id="pickList"></div>
+    <div class="pickfoot">
+      <span class="sp" id="pickNote"></span>
+      <button id="pickCancel">Cancel</button>
+      <button id="pickUse" class="primary">Use this folder</button>
+    </div>
+  </div>
+</div>
+<div class="app">
+  <div class="stage">
+    <div class="topbar">
+      <h1 title="High-Dynamic-Range Solar Eclipse Image Processing">EclipseForgeHDR</h1>
+      <input type="text" id="folder" placeholder="/path/to/folder/with/RAWs" spellcheck="false">
+      <button id="brwFolder" class="brw" title="Pick the folder of raw frames">Browse…</button>
+      <button id="load">Load folder</button>
+      <input type="text" id="flatDir" spellcheck="false" style="width:190px"
+        placeholder="flats: auto"
+        title="Folder of flat-field frames. Left empty, a subfolder of the raw folder called flats/ is used if there is one, and no flat correction is applied if there is not. Type a path to use flats from somewhere else, or 'off' to ignore them. A master flat divides out lens vignetting, dust shadows and per-photosite sensitivity; it is smoothed only as much as its own measured noise requires, and the numbers are printed in the log.">
+      <button id="brwFlat" class="brw" title="Pick the folder of flat frames">Browse…</button>
+      <input type="text" id="importPath" spellcheck="false" style="width:210px"
+        placeholder="or import one HDR"
+        title="Skip stacking entirely and run the enhancement layers on one finished HDR image you already have - from Siril, PixInsight, Photoshop, or this app's own aligned tier TIFFs. 16-bit TIFF or FITS. The tone curve is read from the file's embedded colour profile, so an sRGB export is linearised correctly; a file with no profile must say 'linear' in its name. What you give up: the inner-corona layer is no longer an independent source, the prominence gate is weaker, and there is no alignment or photometry section in the report.">
+      <button id="brwImport" class="brw" title="Pick one finished HDR image">Browse…</button>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="THE FALLBACK. Align the frames, average each exposure group, measure the exposure ratios from the pixels themselves, and merge. Nothing else: no dark, no flat, no hot-pixel repair, no photometric ladder, no LDIC, no feather. Every stage that can fail on an awkward bracket is simply absent, so a set the normal path cannot handle still gives a clean stack. It also subtracts each frame's own corner level per channel, which removes the sky as well as the black level - the thing the normal merge has no model for. The result opens in the preview with all the usual enhancement layers. Its limit: one number per frame cannot follow a sky that varies across the frame, so on a wide field expect colour blotches in the far outer corona. Judge it by eye.">
+        <input type="checkbox" id="simpleStack"> Simple stack
+      </label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
+        Denoise
+        <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="off">Off</option>
+          <option value="fine" selected>Fine</option>
+          <option value="medium">Fine + medium</option>
+          <option value="strong">Strong</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How the merge weight behaves at each tier&#39;s clipping boundary, which is a trade with no right answer. Blended edge blurs the weight across that boundary: the tiers join without a seam and a ring artifact just outside the limb is suppressed, but weight leaks from clipped pixels into unclipped ones and the corona reads low there - on some brackets a little, on others enough to show as a coloured rim. Exact edge keeps the weight exact at the boundary: radiometrically correct, rings visible. The log prints what the trade would cost on YOUR data, measured, so you can decide.">
+        Merge weight
+        <select id="feather" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="plain" selected>Blended edge</option>
+          <option value="taper">Exact edge</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Which white balance is applied to the raw channels before the camera matrix. Camera (as shot) uses the multipliers your own setting produced. Daylight uses LibRaw's daylight value, which for a body it has no table entry for is DERIVED from the colour matrix rather than measured - on the Panasonic S1R II that is 39% less blue than the camera's own Fine Weather preset, which renders the corona too orange. None leaves the sensor channels alone. Changing this re-stacks.">
+        White balance
+        <select id="wb" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="camera" selected>Camera (as shot)</option>
+          <option value="daylight">Daylight</option>
+          <option value="none">None (1:1:1)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How each exposure is put on a common brightness scale. Per-channel fits a slope and an offset between neighbouring exposures separately in R, G and B, after PixInsight's LinearFit as used in Jonathan Hill's HDR eclipse workflow - it can correct a colour difference between tiers that one number cannot. Single scale factor is one number per tier fitted on luminance, which is what the app did before 0.22.86. Changing this re-stacks.">
+        Photometry
+        <select id="photometry" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="linfit" selected>Per-channel (linear fit)</option>
+          <option value="scalar">Single scale factor</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How the per-tier brightness factors are combined once each neighbouring pair has been measured. Chain walks out from the middle tier adding one measured link at a time, so a link that is off by 3% moves every tier beyond it by 3% and the errors compound down the ladder. Network also measures each tier against the one two steps away and solves all the links together by least squares, so a single bad link is outvoted instead of propagated. Where no two-step link is measurable the two are the same computation and the app says so. Chain is the default because it is what every released build has done; Network has to earn it on real brackets. Changing this re-stacks.">
+        Photometric solve
+        <select id="photoSolve" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="chain" selected>Chain (from the middle tier)</option>
+          <option value="network">Network (least squares)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="What counts as one exposure tier. By shutter speed groups every frame that claims the same shutter speed and averages them, which is a free sqrt(N) gain in signal-to-noise and is right whenever the metadata is right. Per frame groups nothing: each frame is calibrated on its own and enters the merge on its own, as in Druckmuller, Rusin and Minarovjech (2006). Choose that when the exposure times cannot be trusted - typed in by hand, recovered from video, or rewritten by a converter - because grouping is the one step that believes the header instead of measuring. It costs run time roughly in proportion to the frame count, and the azimuthal fit gets less data per fit. Changing this re-stacks.">
+        Tiers
+        <select id="tierMode" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="exposure" selected>By shutter speed</option>
+          <option value="frame">Per frame (ignore grouping)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How the shift between two exposures is found. Cross-correlation is what every build up to 0.23.1 used: it keeps each frequency's amplitude, so bright structure dominates. Semi-phase correlation divides by the amplitude spectra plus a small constant (Druckmullerova, master's thesis Def. 3.25), which flattens the spectrum so faint structure counts too, while the constant stops it lifting frequencies that carry only noise. Full whitening is the same with that constant removed - it gives a nearly signal-free short tier the same weight as a well exposed one, which is why it is not the default. On tiers built from a real bracket, semi cut the error on a known shift by 22% and cut the pull toward zero shift - the sensor's own dust and fixed pattern dragging the answer - by 80%. Changing this re-stacks.">
+        Correlation
+        <select id="alignCorr" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="semi" selected>Semi-phase (amplitude floor)</option>
+          <option value="cross">Cross-correlation</option>
+          <option value="phase">Full phase (whitened)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="What the frames are filtered with before they are correlated. Isotropic high-pass keeps structure of a given size in every direction. Tangential keeps only structure that varies AROUND the Sun and removes everything that runs radially - which is what the lunar edge and the edge of the saturated region both are, and the second of those moves with exposure time, so it is a different feature in every tier. That is Druckmullerova's T-sigma filter (thesis eq. 4.14), and it is the reason her pipeline can whiten without locking onto the Moon. Worth 12% on the shift error with plain cross-correlation and about 2% once semi-phase is on, so it is here for datasets where those edges dominate rather than as a default. Slower. Changing this re-stacks.">
+        Align filter
+        <select id="alignFilter" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="isotropic" selected>Isotropic high-pass</option>
+          <option value="tangential">Tangential (radial removed)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How the frames inside one tier are combined. Mean is what every build up to 0.23.1 did: every frame that passes the sharpness check is averaged, with no per-pixel rejection at all, so a cosmic ray or an uncaught hot pixel in one frame of six survives at a sixth of its strength and can then be amplified by the detail filters. Clipped mean rejects pixels more than three standard deviations from the median of the frames and averages the rest. Note it is not a median: a median would leave the quantisation steps in place, and those show as contour rings on short tiers. Needs every frame of a tier in memory at once, so it uses more of it. Changing this re-stacks.">
+        Tier combine
+        <select id="stackCombine" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="mean" selected>Mean (no rejection)</option>
+          <option value="clip">Clipped mean (kappa-sigma)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="How hard the FNRGF detail layer follows structure around the Sun. EFHDR fits six harmonics per ring with a hard cutoff above that. Published is Druckmullerova's own recommended setting - thirty harmonics, each one attenuated a little more than the last - which she describes as the setting that always works without producing artifacts. Higher order follows finer detail around the limb and treats more of it as background; lower order leaves more of it in the picture. Neither is more correct, and this only changes the FNRGF layer, so it re-runs the detail stage but does not re-stack.">
+        FNRGF
+        <select id="fnrgfPreset" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="ours" selected>EFHDR (order 6, hard cutoff)</option>
+          <option value="published">Published (order 30, attenuated)</option>
+        </select></label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Off by default: earthshine needs long tiers with real headroom over the scattered glare, which most totality brackets do not have.">
+        <input type="checkbox" id="earthshine"> Earthshine</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Map hot/dead photosites on the shortest tier and repair them in every frame.">
+        <input type="checkbox" id="despeckle" checked> Fix hot pixels</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Also write each aligned exposure tier as a 16-bit TIFF into eclipseforge_output/aligned_tiers/, for blending or HDR combining in PixInsight, Photoshop or Affinity. Aligned and demosaiced but not merged or tone mapped; each tier sits at its own real signal level, so the exposure relationship between tiers is preserved. An ICC profile is embedded so no host has to guess.">
+        <input type="checkbox" id="exportTiers"> Export aligned tier TIFFs</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Write the tier TIFFs scene-linear (gamma 1.0) with a linear ICC profile instead of sRGB-encoded. Choose this for PixInsight or for your own HDR combine; leave it off for Photoshop and Affinity, where sRGB-encoded files open looking correct.">
+        <input type="checkbox" id="tierLinear"> &nbsp;&#8627; scene-linear</label>
+
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Averaging all frames of a tier gains sqrt(N) in signal-to-noise; using only the sharpest keeps maximum detail. Check the sharpness spread printed per tier: near 1.0 means the frames are equally sharp and averaging is nearly free.">
+        Frames
+        <select id="frames" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="all" selected>All (best SNR)</option>
+          <option value="best50">Best half</option>
+          <option value="best">Best only (max detail)</option>
+        </select></label>
+      <button class="primary" id="start" disabled>Start</button>
+      <button id="clearcache" disabled
+        title="Delete everything the app has computed for this folder (its .eclipseforgehdr subfolder) so the next Start redoes the whole pipeline from the raw files. Your raws, flats and exports are not touched. Needed after changing something the cache key does not cover, or when a run ended badly.">Clear cache</button>
+      <span class="status" id="status">choose a folder containing the bracketed raw files · scroll = zoom · drag = pan · double-click = reset</span>
+      <span id="views" style="display:none;gap:6px">
+        <button data-view="composite" class="vbtn primary">Composite</button>
+        <button data-view="mgn" class="vbtn">MGN</button>
+        <button data-view="fnrgf" class="vbtn">FNRGF</button>
+        <button data-view="nafe" class="vbtn">NAFE</button>
+        <button data-view="inner" class="vbtn">Inner</button>
+        <button data-view="tangential" class="vbtn"
+                title="The tangential (rotational) unsharp layer on its own — blurred only around the disc centre, so it shows structure that runs radially and suppresses everything that runs with the limb.">Tangential</button>
+        <button data-view="prom" class="vbtn">Prom gate</button>
+        <button data-view="partialconv" class="vbtn" id="pconvBtn" style="display:none"
+                title="The partial-convolution result on its own: monochrome, driven by the Partial convolution sliders, and exportable as a 16-bit TIFF.">Partial conv</button>
+        <button data-view="flat" class="vbtn" id="flatBtn" style="display:none"
+          title="The master flat itself, cut to the same frame as the other layers and stretched to its own 0.5-99.5 percentile so the falloff and any dust are visible. This is a quality check on your flats, not a layer that goes into the composite.">Flat</button>
+      </span>
+    </div>
+    <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas></div>
+    <div id="credit" style="position:fixed;right:346px;bottom:8px;color:#8b93a0;
+      font:11px ui-monospace,monospace;opacity:.8;pointer-events:none"></div>
+  </div>
+  <aside class="rail"><div class="railinner">
+    <div class="group"><h2>Pipeline</h2>
+      <div class="bar" id="pbarwrap"><div id="pbar"></div></div>
+      <div class="runline" id="runline" style="display:none">
+        <span class="spin" id="spin">&#9696;</span>
+        <span class="clock" id="clock">0:00</span>
+        <span id="stepnote"></span>
+      </div>
+      <div class="log" id="log">idle</div>
+    </div>
+    <div class="group"><h2>Structure</h2><div id="g-structure"></div></div>
+    <div class="group" id="grp-hill"><h2>Partial convolution</h2>
+      <div class="hint" style="margin-bottom:6px">Unsharp masks of the log-stretched image at
+        2 to 32 px, ADDED back with their own weights. The blur behind each mask is partial
+        &mdash; it is taken in polar coordinates, so it averages along a streamer and not across
+        it, and the Moon and the prominences are left out of it entirely rather than smeared
+        into the corona. Additive and linear, where MGN and NAFE are multiplicative and
+        locally normalised: faint structure stays faint instead of being lifted to the same
+        texture everywhere. Weights 1 / 0.6 / 0.2 / 0.1 are the published starting point.
+        After Jonathan Hill, &ldquo;Advanced Solar Eclipse Photography&rdquo;.</div>
+      <div class="hint" id="hillNote" style="display:none;color:var(--gold)">
+        The masks are not in this work directory &mdash; press Clear cache and Start to
+        build them (adds a few minutes to the stack).</div>
+      <div class="hint" id="hillScales"></div>
+      <div id="g-hill"></div></div>
+    <div class="group"><h2>Inner corona</h2><div id="g-inner"></div></div>
+    <div class="group"><h2>Prominences</h2><div id="g-prom"></div></div>
+    <div class="group"><h2>Color</h2><div id="g-color"></div></div>
+    <div class="group"><h2>Tone</h2><div id="g-tone"></div></div>
+    <div class="group"><h2>Diamond ring</h2>
+      <input type="text" id="ringpath" placeholder="/path/to/contact_frame.RW2" spellcheck="false"
+        style="width:100%;background:#0e1013;color:var(--text);border:1px solid var(--line);
+        border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace">
+      <button id="brwRing" class="brw" style="margin-top:6px">Browse…</button>
+      <button id="ringload" style="margin-top:6px" disabled>Load contact frame</button>
+      <div id="g-ring"></div>
+    </div>
+    <div class="group"><h2>Export</h2>
+      <div class="export">
+        <label class="radio"><input type="radio" name="fmt" value="tif16" checked> TIFF · 16-bit (recommended)</label>
+        <label class="radio"><input type="radio" name="fmt" value="tif8"> TIFF · 8-bit</label>
+        <label class="radio"><input type="radio" name="fmt" value="png"> PNG · 16-bit</label>
+        <label class="radio"><input type="radio" name="fmt" value="jpg"> JPG (lossy)</label>
+        <label class="radio"><input type="checkbox" id="exphalf"> Export at 50 % size (2×2 binned, cleaner)</label>
+        <label class="radio" title="Turn the finished picture. Applied last, to the view and to the export, so it costs no re-run and changes nothing in the report — a corona is the same corona whichever way up it is. FITS has no orientation keyword at all (ROWORDER describes row order, not which way the camera was held), so a portrait-shot FITS bracket arrives on its side and nothing in the data can tell you so.">
+          Orientation
+          <select id="orient" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+            border-radius:5px;padding:3px 6px;font-size:13px;margin-left:6px">
+            <option value="">as captured</option>
+            <option value="flipv">flip vertical</option>
+            <option value="fliph">flip horizontal</option>
+            <option value="180">rotate 180&deg;</option>
+            <option value="cw">rotate 90&deg; CW</option>
+            <option value="ccw">rotate 90&deg; CCW</option>
+          </select></label>
+        <input type="text" id="expname" value="eclipseforge_render" spellcheck="false">
+        <button class="primary" id="export" disabled>Export full resolution</button>
+        <span class="hint">Exports the current view (composite, or the selected detail layer as grayscale).
+        Saved into <code>eclipseforge_output/</code> inside the raw folder, with a .params.json sidecar.</span>
+      </div>
+    </div>
+
+    <div class="group"><h2>Settings</h2>
+      <div class="export">
+        <span class="hint" style="margin-bottom:6px">Carry a look to another bracket, or send one to
+        somebody else. Settings that describe THIS image rather than the look &mdash; the disc radius and
+        margin, the black point, the diamond ring &mdash; are written to the file but only applied when it
+        is loaded back into the folder it came from.</span>
+        <input type="text" id="setname" value="my_settings" spellcheck="false"
+          title="Saved as this name plus .efsettings.json, in eclipseforge_output/ inside the raw folder.">
+        <button id="setsave" disabled>Save settings</button>
+        <input type="text" id="settingsPath" spellcheck="false" style="display:none">
+        <button id="setload">Load settings&hellip;</button>
+        <span class="hint" id="sethint"></span>
+      </div>
+    </div>
+    <div class="group"><h2>Processing recipe</h2>
+      <div class="export">
+        <span class="hint" style="margin-bottom:6px">The settings that decide how the data is
+        STACKED &mdash; correlation, align filter, tier combine, FNRGF, photometric solve, tiers,
+        merge weight, white balance, photometry, frames, denoise. Kept apart from the look on
+        purpose: a look can be dropped on any bracket and seen at once, while these only mean
+        anything at the next Start. Saved from what the run actually used, not from where the
+        controls happen to be sitting.</span>
+        <input type="text" id="procname" value="my_recipe" spellcheck="false"
+          title="Saved as this name plus .efprocess.json, in eclipseforge_output/ inside the raw folder.">
+        <button id="procsave">Save recipe</button>
+        <input type="text" id="processingPath" spellcheck="false" style="display:none">
+        <button id="procload">Load recipe&hellip;</button>
+        <span class="hint" id="prochint"></span>
+      </div>
+    </div>
+  </div></aside>
+</div>
+<script>
+const DEFS = [
+ ["radialFlatten","Radial flatten",0,0.9,0.01,"structure"],
+ ["fnMix","FNRGF share (outer)",0,1,0.01,"structure"],
+ ["mgnContrast","MGN contrast (0 = off)",0,2,0.01,"structure"],
+ ["detailScale","Detail balance (fine \u2192)",0,1,0.01,"structure"],
+ ["fnCompress","FNRGF strength (0 = off)",0,2.5,0.01,"structure"],
+ ["nafeMix","NAFE mix (0 = off)",0,1,0.01,"structure"],
+ ["clarity","Clarity",0,1,0.01,"structure"],
+ ["smoothing","Grain smoothing",0,1,0.01,"structure"],
+ ["pelGain","Tangential (radial features only)",0,1.2,0.01,"structure"],
+ ["detailGain","Detail gain",0.3,2,0.01,"structure"],
+ ["baseLift","Base lift",0,0.5,0.005,"structure"],
+ ["envGamma","Envelope gamma",0.6,1.8,0.01,"structure"],
+ ["logK","Log stretch",0,7,0.1,"structure"],
+ ["hillMix","Blend into image (0 = off)",0,1,0.01,"hill"],
+ ["hillLogK","Base stretch",1,7,0.05,"hill"],
+ ["hillGain","Amplification",0,1.2,0.005,"hill"],
+ ["hillDenoise","Noise threshold (0 = off)",0,6,0.05,"hill"],
+ ["hill0","  2 px",0,2,0.01,"hill"],
+ ["hill1","  4 px",0,2,0.01,"hill"],
+ ["hill2","  8 px",0,2,0.01,"hill"],
+ ["hill3"," 16 px",0,2,0.01,"hill"],
+ ["hill4"," 32 px",0,2,0.01,"hill"],
+ ["innerMix","Short-exposure detail",0,1,0.01,"inner"],
+ ["innerDenoise","Detail denoise",0,1,0.01,"inner"],
+ ["innerDim","Glare dim",0,0.7,0.01,"inner"],
+ ["promGain","Prominence contrast",0,2,0.01,"prom"],
+ ["promDetail","Prominence detail",0,1,0.01,"prom"],
+ ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
+ ["temp","Warmth (R/B)",0.8,1.3,0.005,"color"],
+ ["tint","Tint (green/magenta)",0.8,1.3,0.005,"color"],
+ ["coronaNeutral","Neutralise corona",0,1,0.01,"color"],
+ ["radialNeutral","Neutralise radial",0,1,0.01,"color"],
+ ["bgNeutral","Neutralise sky cast",0,1.2,0.01,"color"],
+ ["satur","Saturation",0.5,2,0.01,"color"],
+ ["hlCompress","Highlight compression",0,1,0.01,"color"],
+ ["hlDesat","Highlight desaturation",0,0.8,0.01,"color"],
+ ["outGamma","Output gamma",0.8,1.8,0.01,"tone"],
+ ["bgBlack","Black point",0,0.12,0.001,"tone"],
+ ["discLevel","Moon disc level",0,0.2,0.002,"tone"],
+ ["discTrim","Disc mask trim (px)",-40,40,0.5,"tone"],
+ ["earthShine","Earthshine",0,1.5,0.01,"tone"],
+ ["ringBlend","Ring blend (screen)",0,1,0.01,"ring"],
+ ["ringScale","Ring disc size",0.80,1.25,0.001,"ring"],
+ ["ringDX","Ring offset X (px)",-200,200,0.5,"ring"],
+ ["ringDY","Ring offset Y (px)",-200,200,0.5,"ring"],
+];
+let VIEW = "composite";
+let P = {}, GEO = null, L = {}, ready = false;
+const $ = id => document.getElementById(id);
+
+// Controls that only work when an optional cached layer is present. Without
+// this a slider whose layer was never built just sits there doing nothing --
+// which is what happened with Detail balance on a workdir stacked before 0.22,
+// and is the same failure as a blank preview: the app knew and did not say.
+const NEEDS_LAYER = {detailScale: ["has_mgn_fine", "re-stack needed"],
+                     nafeMix:     ["has_nafe",     "re-stack needed"]};
+
+function buildSliders(defaults){
+  for (const [k,label,min,max,step,grp] of DEFS){
+    P[k] = defaults[k];
+    const need = NEEDS_LAYER[k];
+    const off = need && GEO && !GEO[need[0]];
+    if (off) P[k] = 0;                     // never render with a weight we cannot honour
+    const div = document.createElement("div"); div.className = "ctl";
+    div.innerHTML = `<label${off?' style="opacity:.45"':''}>${label}${off?' \u2014 '+need[1]:''}<span class="val" id="v_${k}">${off?"n/a":defaults[k]}</span></label>
+      <input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}" value="${off?0:defaults[k]}"${off?' disabled':''}>`;
+    // A slider naming a group that does not exist used to throw here, and the
+    // throw happened during init -- so ONE bad group id in the table above left
+    // the app with no sliders, no preview and no error the user could see, while
+    // the server log still said "ready". 0.21.0 shipped exactly that mistake
+    // ("detail" is not a group). Warn and skip the control instead.
+    const _grp = $("g-"+grp);
+    if (!_grp){ console.warn("no slider group g-"+grp+" for "+k+" -- skipped"); continue; }
+    _grp.appendChild(div);
+    const el = div.querySelector("input");
+    el.addEventListener("input", () => {
+      P[k] = parseFloat(el.value); $("v_"+k).textContent = el.value;
+      scheduleRender();
+    });
+  }
+}
+
+async function loadFolder(){
+  const r = await fetch("/api/folder", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({path: $("folder").value})});
+  const j = await r.json();
+  if(!j.ok){ $("status").textContent = j.error; return; }
+  $("flatDir").placeholder = j.flat_dir
+    ? `flats: auto (${j.flat_count})` : "flats: none found";
+  if (j.tiffs && j.tiffs.length && !$("importPath").value)
+    $("importPath").placeholder = `or import: ${j.tiffs[0]}`;
+  $("status").textContent = `${j.folder} — ${j.raw_count} raw files` +
+    (j.flat_dir ? ` · ${j.flat_count} flats in ${j.flat_dir.split("/").pop()}/`
+                : " · no flats folder") +
+    // bias/ and darks/ are applied automatically when they are there, so the
+    // scan line has to name them: silence here is indistinguishable from the
+    // correction not happening.
+    (j.bias_dir ? ` · ${j.bias_count} bias in ${j.bias_dir.split("/").pop()}/`
+                : "") +
+    (j.dark_dir ? ` · ${j.dark_count} darks in ${j.dark_dir.split("/").pop()}/`
+                : "") +
+    (j.cached ? " · cached pipeline products found (Start reuses them)" : "");
+  $("start").disabled = false;
+  $("clearcache").disabled = false;
+  ready = false; $("export").disabled = true;
+}
+
+/* ---- clear cache -----------------------------------------------------
+   Two clicks, not a confirm() dialog: this deletes tens of gigabytes of
+   computed products and a modal in a local page is easy to dismiss by
+   reflex. The second click has to land within 4s, and the label says so. */
+let ccArmed = 0;
+$("clearcache").addEventListener("click", async () => {
+  const b = $("clearcache");
+  if (Date.now() > ccArmed){
+    ccArmed = Date.now() + 4000;
+    b.textContent = "Click again to confirm";
+    setTimeout(() => { if (Date.now() > ccArmed){ b.textContent = "Clear cache"; } }, 4200);
+    return;
+  }
+  ccArmed = 0; b.textContent = "Clear cache"; b.disabled = true;
+  const r = await fetch("/api/clearcache", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({importPath: $("importPath").value})});
+  const j = await r.json();
+  b.disabled = false;
+  if (!j.ok){ $("status").textContent = j.error; return; }
+  ready = false; $("export").disabled = true; $("views").style.display = "none";
+  $("status").textContent = j.files
+    ? `cache cleared — ${j.files} files, ${(j.bytes/1073741824).toFixed(2)} GB · `
+      + "Start now redoes the full pipeline"
+    : "nothing was cached for this folder";
+});
+
+// Importing one finished HDR needs no raw folder -- the products go beside the
+// image. Start was enabled only by a successful loadFolder(), so a tester who
+// pasted a TIFF and nothing else found the button greyed out forever.
+function syncStart(){
+  if ($("importPath").value.trim()){
+    $("start").disabled = false;
+    $("clearcache").disabled = false;
+  }
+}
+$("importPath").addEventListener("input", syncStart);
+$("simpleStack").addEventListener("change", () => {
+  // Ticking it mid-session must not silently reuse the normal path's layers;
+  // the server compares opts.json["mode"], and this only keeps the two paths'
+  // controls from looking usable at the same time.
+  if ($("simpleStack").checked && $("importPath").value.trim())
+    $("importPath").value = "";
+});
+
+async function startRun(){
+  $("start").disabled = true;
+  $("clearcache").disabled = true;
+  // READ THE REPLY (0.22.76). This used to await the fetch and throw the JSON
+  // away, so a rejected Start -- an empty or mistyped import path, most often
+  // from pressing Enter in that field -- left the page polling a run that was
+  // never created: /api/progress reports done:false forever, the spinner runs,
+  // Start and Clear cache stay disabled, and the error is never shown. Worse,
+  // with an earlier run in memory it re-polled THAT one and reported "done",
+  // so a typo looked like a successful import under the new path.
+  const _r = await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({force:false, denoise: $("denoise").value,
+      feather: $("feather").value,
+                          wb: $("wb").value,
+                          photometry: $("photometry").value,
+                          photoSolve: $("photoSolve").value,
+                          tierMode: $("tierMode").value,
+                          alignCorr: $("alignCorr").value,
+                          alignFilter: $("alignFilter").value,
+                          stackCombine: $("stackCombine").value,
+                          fnrgfPreset: $("fnrgfPreset").value,
+                          earthshine: $("earthshine").checked,
+                          despeckle: $("despeckle").checked,
+                          exportTiers: $("exportTiers").checked,
+                          tierLinear: $("tierLinear").checked,
+                          flatDir: $("flatDir").value,
+                          importPath: $("importPath").value,
+                          simple: $("simpleStack").checked,
+                          frames: $("frames").value})});
+  let _j = null;
+  try { _j = await _r.json(); } catch (e) { _j = null; }
+  if (!_r.ok || (_j && _j.ok === false)){
+    const msg = (_j && _j.error) || ("the run could not be started (HTTP " + _r.status + ")");
+    $("status").textContent = msg;
+    $("log").textContent += "\n" + msg;
+    syncStart(); $("clearcache").disabled = false;
+    return;
+  }
+  runStart();
+  pollProgress();
+}
+
+/* ---- run clock -------------------------------------------------------
+   The progress bar is a poor liveness signal: the merge and the detail
+   layers each sit at one fraction for minutes on a large set, and a bar
+   that is nearly full and not moving looks identical to a hung process.
+   So show three things instead. The spinner ticks locally (the run is
+   being polled), the clock counts real elapsed seconds from the server's
+   own start time, and once a step has run long the line says which step
+   it is and for how long -- so a long wait is legible rather than scary.
+   Everything is extrapolated from the last poll so it stays smooth
+   between the 800ms polls without lying about where it came from.      */
+const SPIN = ["◜", "◝", "◞", "◟"];
+let RUNTICK = null, RUN_BASE = null, SPIN_I = 0;
+
+function fmtDur(s){
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s/3600), m = Math.floor(s/60)%60, q = s%60;
+  const p = n => String(n).padStart(2,"0");
+  return h ? `${h}:${p(m)}:${p(q)}` : `${m}:${p(q)}`;
+}
+function runStart(){
+  RUN_BASE = {e:0, s:0, at:Date.now()/1000, step:""};
+  $("runline").style.display = "";
+  $("pbarwrap").classList.add("run");
+  if (RUNTICK) clearInterval(RUNTICK);
+  RUNTICK = setInterval(runTick, 250);
+  runTick();
+}
+function runSync(j){
+  if (!RUN_BASE) return;
+  RUN_BASE = {e: j.elapsed || 0, s: j.since || 0, at: Date.now()/1000,
+              step: (j.step || "").trim().slice(0, 64)};
+}
+function runTick(){
+  SPIN_I = (SPIN_I + 1) % SPIN.length;
+  $("spin").textContent = SPIN[SPIN_I];
+  if (!RUN_BASE) return;
+  const d = Date.now()/1000 - RUN_BASE.at;
+  $("clock").textContent = fmtDur(RUN_BASE.e + d);
+  const since = RUN_BASE.s + d, note = $("stepnote");
+  if (since > 45 && RUN_BASE.step){
+    note.className = "stale";
+    note.textContent = `· ${RUN_BASE.step} — ${fmtDur(since)} on this step`;
+  } else {
+    note.className = "";
+    note.textContent = RUN_BASE.step ? "· " + RUN_BASE.step : "";
+  }
+}
+function runStop(mark, note){
+  if (RUNTICK) clearInterval(RUNTICK);
+  RUNTICK = null;
+  $("pbarwrap").classList.remove("run");
+  const total = RUN_BASE ? fmtDur(RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at)) : "";
+  $("spin").textContent = mark;
+  $("clock").textContent = total;
+  $("stepnote").className = "";
+  $("stepnote").textContent = note ? "· " + note : "";
+  RUN_BASE = null;
+}
+
+/* ONE DROPPED POLL USED TO HANG THE INTERFACE FOR GOOD.
+   Every one of these loops reschedules itself on the LAST line of an async
+   body with no catch, so anything that throws -- a fetch the browser rejects,
+   a JSON parse on a truncated reply, a null element -- ends the chain silently.
+   The button stays disabled, the status keeps its last message, and the app
+   looks stuck while the work behind it has finished.
+   It bites hardest on export: this is Flask's single-threaded development
+   server, and writing a 200 MB TIFF blocks it long enough for a poll to be
+   refused. a tester hit exactly that -- "stuck in exporting tif16 ... saved" --
+   with the file, its params and its report all complete on disk.
+   pollAgain() is the whole fix: retry rather than die, and say so once the
+   silence is long enough to be worth mentioning. */
+let POLL_FAILS = 0;
+function pollAgain(fn, ms, err){
+  if (err === undefined){ POLL_FAILS = 0; }
+  else {
+    POLL_FAILS++;
+    if (POLL_FAILS === 8){          // ~6 s of silence, not one hiccup
+      $("status").textContent = "waiting for the app to answer — the work is "
+        + "probably still running; the window will catch up on its own";
+    }
+    ms = Math.min(ms * (1 + POLL_FAILS / 4), 4000);   // back off, keep trying
+  }
+  setTimeout(fn, ms);
+}
+
+async function pollProgress(){
+  let j;
+  try {
+    const r = await fetch("/api/progress"); j = await r.json();
+    $("log").textContent = j.lines.join("\n") || "…";
+    $("log").scrollTop = 1e9;
+    $("pbar").style.width = (j.frac*100).toFixed(1)+"%";
+    runSync(j);
+  } catch (e){ return pollAgain(pollProgress, 800, e); }
+  POLL_FAILS = 0;
+  if (j.error){ $("status").textContent = "error — see log"; $("log").textContent += "\n"+j.error;
+    runStop("✕", "failed"); $("start").disabled = false;
+    $("clearcache").disabled = false; return; }
+  if (j.done && j.ready){ runStop("✓", "done");
+    await loadLayers(); $("start").disabled = false;
+    $("clearcache").disabled = false; return; }
+  pollAgain(pollProgress, 800);
+}
+
+// ---- build identity -------------------------------------------------------
+// The lab build runs on its own port, its own work directory and its own
+// output folder (see brand.py). None of that is visible on screen, and two
+// browser tabs showing the same layout is exactly how a test result gets
+// reported against the wrong build. So the lab build says so, loudly, once.
+const BRAND = { app: "EclipseForgeHDR", lab: false };
+function applyBrand(j){
+  if (!j || BRAND.applied) return;
+  if (j.app) BRAND.app = j.app;
+  BRAND.lab = !!j.lab;
+  if (!BRAND.lab) { BRAND.applied = true; return; }
+  BRAND.applied = true;
+  document.title = BRAND.app + " \u2014 TEST BUILD";
+  const h = document.querySelector("h1");
+  if (h){
+    h.textContent = BRAND.app;
+    h.style.color = "#ffb454";
+  }
+  const bar = document.createElement("div");
+  bar.textContent = "TEST BUILD \u00b7 separate cache, port and output folder "
+                  + "\u00b7 results are not comparable with the release build";
+  bar.style.cssText = "background:#7a4a00;color:#ffe0a3;font:12px system-ui;"
+                    + "padding:4px 10px;letter-spacing:.02em";
+  document.body.insertBefore(bar, document.body.firstChild);
+}
+
+function fetchLayer(name){
+  return new Promise(res => {
+    const im = new Image();
+    // A LAYER THAT DOES NOT ARRIVE MUST NOT HANG THE PAGE (0.22.76). There was
+    // no error handler, and /api/layer answers 404 whenever the server has no
+    // layers loaded -- which happens if the folder is changed while a fetch is
+    // in flight. Promise.all then never settled, so pollProgress never returned
+    // and Start stayed disabled until a reload.
+    im.onerror = () => res();
+    im.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = GEO.W; c.height = GEO.H;
+      const x = c.getContext("2d"); x.drawImage(im, 0, 0);
+      L[name] = x.getImageData(0, 0, GEO.W, GEO.H).data; res();
+    };
+    im.src = "/api/layer/" + name + "?t=" + Date.now();
+  });
+}
+
+// These weights have to be the SAME functions render.py uses, or the sliders
+// are tuned against one image and applied to another on export. Module scope:
+// used both when building L.wf below and in renderNow.
+const _ss = x => { x = x<0?0:x>1?1:x; return x*x*(3-2*x); };
+// Hill level match: the ratio of the two paths' mean over the 1.15-3 R annulus.
+// Accumulated inside the pixel loop that is already running and used on the
+// NEXT render -- neither sum depends on it, so there is no feedback and it
+// settles in one frame. renderNow schedules that frame itself when it moves.
+let HSCL = 1;
+
+async function loadLayers(){
+  GEO = await (await fetch("/api/geometry")).json();
+  // START FROM NOTHING (0.22.76). `L` used to accumulate: loadLayers only ever
+  // ADDED, and the optional layers -- promdet, contact, mgn_fine, the
+  // partial-convolution masks -- are fetched only when the geometry says this
+  // work directory has them. Switch from a set that has one to a set that does
+  // not and the pixel loop kept reading the PREVIOUS set's array; at a
+  // different frame size the index is out of range, the term goes NaN and the
+  // pixels go black. The export reads its own `src` and never did this, so the
+  // preview and the file disagreed. Going 250mm -> 360mm -> 600mm in one
+  // session is exactly the sequence that hits it.
+  L = {};
+  HSCL = 1;                       // the level match belongs to the old stack
+  if (VIEW !== "composite" && !GEO.hasHill && VIEW === "partialconv")
+    VIEW = "composite";           // its button is about to be hidden
+  if (Object.keys(P).length === 0) buildSliders(GEO.defaults);
+  // the Hill group only exists for a workdir that actually has the masks
+  { const g = $("grp-hill");
+    if (g){ g.style.display = "";
+      const n = $("hillNote");
+      if (n) n.style.display = GEO.hasHill ? "none" : "";
+      for (const k of ["hillMix","hillGain","hill0","hill1","hill2","hill3","hill4"]){
+        const el = $("s_"+k); if (el) el.disabled = !GEO.hasHill;
+      }
+      // the noise threshold needs the per-pixel sigma map, which masks built
+      // before 0.22.74 do not have -- and when report.json carries no hill
+      // entry the per-scale response is missing too. Without both the slider
+      // moved and did exactly nothing, silently.
+      { const el = $("s_hillDenoise");
+        if (el){
+          const ok = !!(GEO.hasHill && GEO.hasHillSigma);
+          el.disabled = !ok;
+          const lab = el.closest(".row") || el.parentElement;
+          if (lab) lab.title = ok ? ""
+            : "needs the per-pixel noise map — press Clear cache and Start to build it";
+        } }
+      if (!GEO.hasHill) P.hillMix = 0;
+      const sc = $("hillScales");
+      if (sc && GEO.hillScales && GEO.hillScales.length)
+        sc.textContent = "scales in this stack: " + GEO.hillScales.join(", ") + " px";
+    } }
+  cv.width = GEO.W; cv.height = GEO.H;
+  oc.width = GEO.W; oc.height = GEO.H;
+  out = octx.createImageData(GEO.W, GEO.H);
+  applyBrand(GEO);
+  $("credit").textContent = `${BRAND.app} ${GEO.version || ""} · \u00a9 2026 N. Augustin with ClaudeAI`;
+  const names = ["bg","rprof","mgn","fnrgf","mgn_lo","mgn_sm","fnrgf_lo","fnrgf_sm",
+                 "pel","inner","inner0","earth","prom","ratio","cconf"];
+  // optional: a workdir built before 0.18, or a run whose gate found nothing,
+  // has no prominence detail layer. The blend below then simply never fires.
+  // a workdir built before NAFE existed has no such layer; fetching it would
+  // draw a flat 0.5 and dilute the detail -- see render.py
+  if (GEO.has_nafe !== false) names.push("nafe","nafe_lo","nafe_sm");
+  if (GEO.has_promdet) names.push("promdet");
+  if (GEO.hasHill){ names.push("hilllog");
+    if (GEO.hasHillSigma) names.push("hillsigma");
+    for (let i=0;i<GEO.nHill;i++) names.push("hill"+i); }
+  { const hb = $("pconvBtn"); if (hb) hb.style.display = GEO.hasHill ? "" : "none"; }
+  if (GEO.has_mgn_fine) names.push("mgn_fine","mgn_fine_lo","mgn_fine_sm");
+  if (GEO.has_contact) names.push("contact");
+  if (GEO.has_flat){
+    names.push("flat");
+    const fb = $("flatBtn");
+    if (fb){
+      fb.style.display = "";
+      const fr = GEO.flat_range || [];
+      if (fr.length === 4)
+        fb.title = `The master flat itself, cut to the same frame as the other `
+          + `layers and stretched to its own 0.5-99.5 percentile so the falloff `
+          + `and any dust are visible. Actual values: min ${fr[0].toFixed(3)}, `
+          + `max ${fr[1].toFixed(3)}; the stretch spans ${fr[2].toFixed(3)} to `
+          + `${fr[3].toFixed(3)}. This is a quality check on your flats, not a `
+          + `layer that goes into the composite.`;
+    }
+  } else {
+    const fb = $("flatBtn"); if (fb) fb.style.display = "none";
+    // A missing button used to be the only symptom of a broken flat preview,
+    // which is how it shipped unnoticed. Say why it is missing.
+    if (GEO.flat_error)
+      $("log").textContent += "\nmaster-flat preview unavailable: " + GEO.flat_error;
+  }
+  // hide the Earthshine slider unless the layer was actually built
+  const esc = $("s_earthShine");
+  if (esc){
+    const row = esc.closest(".ctl");
+    if (row) row.style.display = GEO.has_earth ? "" : "none";
+    if (!GEO.has_earth){ P.earthShine = 0; esc.value = 0; $("v_earthShine").textContent = "0"; }
+  }
+  await Promise.all(names.map(fetchLayer));
+  // median of the NAFE layer, so its mix is centred like the other two
+  if (L.nafe){
+    let h = new Int32Array(256);
+    for (let i=0;i<L.nafe.length;i+=28) h[L.nafe[i]]++;   // 28 = 7 whole RGBA pixels
+    let tot=0; for (let i=0;i<256;i++) tot+=h[i];
+    let acc=0, mv=128;
+    for (let i=0;i<256;i++){ acc+=h[i]; if (acc>=tot/2){ mv=i; break; } }
+    nafeMed = mv/255;
+  }
+  $("ringload").disabled = false;
+  const N = GEO.W*GEO.H;
+  L.r = new Float32Array(N); L.wf = new Float32Array(N);
+  const LP = GEO.limbProf, LM = GEO.limbMargin || 0;
+  L.rmask = new Float32Array(N);
+  for (let y=0,i=0; y<GEO.H; y++) for (let x=0; x<GEO.W; x++,i++){
+    const r = Math.hypot(y-GEO.cy, x-GEO.cx);
+    L.r[i] = r;
+    if (LP){
+      let t = Math.atan2(y-GEO.cy, x-GEO.cx); if (t<0) t += 2*Math.PI;
+      const f = t/(2*Math.PI)*LP.length, k = Math.floor(f), g = f-k;
+      L.rmask[i] = (LP[k%LP.length]*(1-g) + LP[(k+1)%LP.length]*g) + LM;
+    } else L.rmask[i] = GEO.Rmask ?? (GEO.R + LM);
+    L.wf[i] = _ss((r - 1.02*GEO.R)/(0.55*GEO.R));
+  }
+  ready = true; $("export").disabled = false;
+  $("setsave").disabled = false;
+  $("views").style.display = "inline-flex";
+  $("status").textContent = "ready — adjust and export";
+  renderNow();
+}
+
+const cv = $("cv"), ctx = cv.getContext("2d");
+const oc = document.createElement("canvas"), octx = oc.getContext("2d");
+let out = null, vz = 1, vtx = 0, vty = 0;
+
+function clampView(){
+  vz = Math.min(10, Math.max(1, vz));
+  vtx = Math.min(0, Math.max(GEO ? GEO.W*(1-vz) : 0, vtx));
+  vty = Math.min(0, Math.max(GEO ? GEO.H*(1-vz) : 0, vty));
+}
+// Orientation is applied HERE and nowhere else: the composite above is built
+// in the layers' own coordinate frame against GEO.cy/cx/R, so turning it any
+// earlier would move the disc out from under every radial weight. As the last
+// blit it costs nothing and changes no number in the report. Rotations swap
+// the canvas dimensions; flips do not.
+function orientDims(){
+  const rot = ORIENT === "cw" || ORIENT === "ccw";
+  return rot ? [GEO.H, GEO.W] : [GEO.W, GEO.H];
+}
+function draw(){
+  if (!GEO) return;
+  const [CW, CH] = orientDims();
+  if (cv.width !== CW || cv.height !== CH){ cv.width = CW; cv.height = CH; }
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,CW,CH);
+  ctx.imageSmoothingEnabled = vz < 3;
+  ctx.setTransform(vz,0,0,vz,vtx,vty);
+  ctx.save();
+  if (ORIENT === "flipv"){ ctx.translate(0, GEO.H); ctx.scale(1,-1); }
+  else if (ORIENT === "fliph"){ ctx.translate(GEO.W, 0); ctx.scale(-1,1); }
+  else if (ORIENT === "180"){ ctx.translate(GEO.W, GEO.H); ctx.scale(-1,-1); }
+  else if (ORIENT === "cw"){ ctx.translate(GEO.H, 0); ctx.rotate(Math.PI/2); }
+  else if (ORIENT === "ccw"){ ctx.translate(0, GEO.W); ctx.rotate(-Math.PI/2); }
+  ctx.drawImage(oc, 0, 0);
+  ctx.restore();
+}
+let ORIENT = "";
+function setOrient(v){
+  ORIENT = v || "";
+  const [CW, CH] = orientDims();
+  cv.width = CW; cv.height = CH;
+  vz = 1; vtx = 0; vty = 0;
+  draw();
+}
+let nafeMed = 0.5;
+function detailAt(j){
+  const {mgnContrast,fnCompress,innerDenoise,clarity,smoothing,nafeMix} = P;
+  // Detail balance -- blend all-scale MGN with the fine-only layer. Mirrors
+  // _detail_layers in render.py, variants included, or clarity would subtract
+  // the blur of a layer that is no longer the one being sharpened.
+  const ds = (L.mgn_fine && P.detailScale>0) ? P.detailScale : 0;
+  const _mgs = (a,b) => ds>0 ? (1-ds)*(a[j]/255) + ds*(b[j]/255) : a[j]/255;
+  let mgr = _mgs(L.mgn, L.mgn_fine);
+  if (clarity>0) mgr += clarity*(mgr - _mgs(L.mgn_lo, L.mgn_fine_lo));
+  if (smoothing>0) mgr = (1-smoothing)*mgr + smoothing*_mgs(L.mgn_sm, L.mgn_fine_sm);
+  let mg = 0.5 + (mgr - 0.5)*mgnContrast; mg = mg<0?0:mg>1?1:mg;
+  let fnr = L.fnrgf[j]/255;
+  if (clarity>0) fnr += clarity*(fnr - L.fnrgf_lo[j]/255);
+  if (smoothing>0) fnr = (1-smoothing)*fnr + smoothing*(L.fnrgf_sm[j]/255);
+  const D = (fnr - 0.5)*8;
+  const sHi = 2.5/Math.max(fnCompress,1e-4);
+  let fn = (D>=0 ? Math.tanh(D/sHi) : Math.tanh(D/(1.5*sHi)))*0.5 + 0.5;
+  if (nafeMix>0 && L.nafe){
+    let nf = L.nafe[j]/255;
+    if (clarity>0) nf += clarity*(nf - L.nafe_lo[j]/255);
+    if (smoothing>0) nf = (1-smoothing)*nf + smoothing*(L.nafe_sm[j]/255);
+    nf = 0.5 + (nf - nafeMed);
+    nf = nf<0?0:nf>1?1:nf;
+    mg = (1-nafeMix)*mg + nafeMix*nf;
+    fn = (1-nafeMix)*fn + nafeMix*nf;
+  }
+  const inEff = (1-innerDenoise)*(L.inner0[j]/255) + innerDenoise*(L.inner[j]/255);
+  return [mg, fn, inEff];
+}
+function renderNow(){
+  if (!ready) return;
+  const {fnMix,detailGain,baseLift,envGamma,radialFlatten,innerMix,innerDim,promGain,
+         temp,satur,hlCompress,hlDesat,outGamma,bgBlack,discLevel,discTrim,earthShine} = P;
+  const knee = 0.9 - 0.35*hlCompress;
+  const bg=L.bg, rp=L.rprof, ear=L.earth, pr=L.prom, ch=L.ratio,
+        wf=L.wf, rr_=L.r, d=out.data;
+  const ig=1/outGamma, ib=1/(1-bgBlack);
+  const DEC = GEO.decim || 4;
+  // matches render.py's np.clip(ratio, 0.2, 3.0); hoisted out of the pixel loop
+  const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
+  const bc = GEO.bgChroma || [1,1,1], bn = P.bgNeutral || 0;
+  // the inner corona as a white reference, applied FLAT -- see render.py
+  const cg = GEO.coronaGain || [1,1,1], CN = P.coronaNeutral || 0;
+  const CG = [Math.pow(cg[0],CN), Math.pow(cg[1],CN), Math.pow(cg[2],CN)];
+  const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
+  const lvl = 1-0.5*radialFlatten;
+  // Hill's log stretch, log(1 + k*I) with k = 10^logK. 0 keeps the cube root.
+  const LOGK = P.logK || 0, KK = Math.pow(10, LOGK), LKN = Math.log1p(KK);
+  // the radial profile, evaluated from its own numbers and INTERPOLATED -- as
+  // a full-res 8-bit layer it was a staircase and printed rings
+  const RPROF = GEO.rprofile || null;
+  // Hill's chain: gains, transport spans and the master scale. HK divides by
+  // the rms of the FINEST mask -- one number for the whole set, so the ratios
+  // between scales stay exactly Hill's. Mirrors render.py.
+  const HMIX = (GEO.hasHill ? (P.hillMix||0) : 0), HN = GEO.nHill||0;
+  const HSPAN = GEO.hillSpan || [], HRMS = GEO.hillRms || [];
+  // the ladder is NORMALISED -- balance on the five, strength on the master;
+  // see render.py
+  const HDEF = [1,0.6,0.2,0.1,0.05];
+  const HG = [], HL = [];
+  for (let k=0;k<HN;k++){ HG.push(P["hill"+k]||0); HL.push(L["hill"+k]||null); }
+  { let sg=0, sd=0;
+    for (let k=0;k<HN;k++){ sg += HG[k]; sd += (HDEF[k]||0); }
+    const nz = sg > 1e-6 ? sd/sg : 0;
+    for (let k=0;k<HN;k++) HG[k] *= nz; }
+  // The BASE STRETCH is live, and the masks follow it by a scalar -- see the
+  // long note in render.py. The re-map is done once into a 65536-entry table
+  // rather than per pixel: the layer arrives 16-bit, so the table IS exact.
+  const HKB = GEO.hillLogKBuild || 6, HKR = (P.hillLogK == null ? HKB : P.hillLogK);
+  let HLUT = null, HMS = 1;
+  // built for the Hill VIEW too, not just the mix -- the view is where the
+  // base stretch gets tuned, and without the table it would ignore the slider
+  if ((HMIX > 0 || VIEW === "partialconv") && Math.abs(HKR-HKB) > 1e-6){
+    const Kb = Math.pow(10,HKB), Kr = Math.pow(10,HKR);
+    const lb = Math.log1p(Kb), lr = Math.log1p(Kr);
+    HMS = lb/lr;
+    HLUT = new Float32Array(65536);
+    for (let u=0;u<65536;u++){
+      const xn = Math.expm1((u/65535)*lb)/Kb;
+      HLUT[u] = Math.log1p(Kr*Math.max(xn,0))/lr;
+    }
+  }
+  const HK = (P.hillGain||0) * HMS / Math.max(HRMS[0]||1e-9, 1e-9);
+  // soft threshold against each pixel's own expected noise -- see render.py.
+  // 0 is exactly the old behaviour.
+  const HTH = (GEO.hasHillSigma && L.hillsigma) ? (P.hillDenoise||0) : 0;
+  const HRSP = GEO.hillResp || [], HSGS = GEO.hillSigmaScale || 1;
+  // the page draws the AREA-AVERAGED masks, whose fine scales carry only a
+  // fraction of their full-res amplitude, against a sigma map the same average
+  // leaves alone. Without this the threshold cuts ~3.5x too hard at 2 px here
+  // and correctly in the export -- see the note beside hill_prev_att.
+  const HATT = GEO.hillPrevAtt || [];
+  let hsA = 0, hsB = 0, hsN = 0;
+  // Hill's im_enhanced at one pixel. Factored out because the Hill VIEW and
+  // the composite must be the same number -- the view is what gets tuned and
+  // exported, so a second copy of this arithmetic would be a second image.
+  function hillYh(j){
+    const ui = L.hilllog[j]*256 + L.hilllog[j+1];
+    const hl = HLUT ? HLUT[ui] : ui/65535;
+    let E = 0;
+    for (let k=0;k<HN;k++){
+      if (!HG[k] || !HL[k]) continue;
+      const u = (HL[k][j]*256 + HL[k][j+1])/65535;   // 0..1, zero at 0.5
+      let mv = (u*2-1)*HSPAN[k];
+      if (HTH > 0 && HRSP[k]){
+        const sg = (L.hillsigma[j]*256 + L.hillsigma[j+1])/65535*HSGS;
+        const t = HTH*HRSP[k]*(HATT[k]==null?1:HATT[k])*sg;
+        mv = mv > t ? mv - t : (mv < -t ? mv + t : 0);
+      }
+      E += HG[k]*mv;
+    }
+    return hl + HK*E;
+  }
+  // Single-layer views. This used to be a ternary chain ending in a bare
+  // `: pr[j]/255`, so ANY view not spelled out in it drew the prominence gate
+  // instead -- which is what the Flat button did on its first outing: the
+  // button worked, the server sent the right layer, and the preview drew a
+  // different one. Views that read a fetched layer name it here; a view whose
+  // layer is missing falls back to the composite rather than to whichever
+  // layer happened to be last in the chain.
+  const VSRC = {nafe:"nafe", tangential:"pel", prom:"prom", flat:"flat"};
+  const vHill = VIEW==="partialconv" && !!L.hilllog;
+  const vComputed = VIEW==="mgn" || VIEW==="fnrgf" || VIEW==="inner" || vHill;
+  const vArr = VSRC[VIEW] ? L[VSRC[VIEW]] : null;
+  const solo = VIEW !== "composite" && (vComputed || vArr);
+  if (VIEW !== "composite" && !solo)
+    console.warn("view '"+VIEW+"' has no layer — drawing the composite");
+  for (let i=0,j=0; i<wf.length; i++,j+=4){
+    const [mg, fn, inEff] = detailAt(j);
+    if (solo){
+      const v = VIEW==="mgn" ? mg : VIEW==="fnrgf" ? fn : VIEW==="inner" ? inEff
+                : vHill ? hillYh(j) : vArr[j]/255;
+      const b = Math.max(0, Math.min(255, v*255));
+      d[j]=b; d[j+1]=b; d[j+2]=b; d[j+3]=255;
+      continue;
+    }
+    const r = rr_[i];
+    const Re = L.rmask[i] + discTrim/DEC;   // discTrim is full-res px
+    const eg = Math.min(1, Math.max(0, (r-(Re-10/DEC))/(12/DEC)));
+    const wI = eg*_ss((1.45*GEO.R - r)/(0.40*GEO.R));
+    const wG = eg*Math.exp(-Math.max(0, r-Re)/(0.60*GEO.R));
+    // `bg` arrives 16-bit packed (R = high byte, G = low) so the log envelope
+    // can cube it without banding the far field -- see server.py.
+    const bgv = (bg[j]*256 + bg[j+1])/65535;
+    const env = LOGK > 0 ? Math.log1p(KK*bgv*bgv*bgv)/LKN : bgv;
+    let B = Math.pow(env, envGamma)*(1-innerDim*wG);
+    let _rp;
+    if (RPROF){
+      const rf = r*DEC, k = Math.floor(rf), g2 = rf-k;
+      const p0 = RPROF[Math.min(k, RPROF.length-1)];
+      const p1 = RPROF[Math.min(k+1, RPROF.length-1)];
+      _rp = p0*(1-g2) + p1*g2;
+    } else _rp = rp[j]/255;
+    B = B/Math.pow(Math.max(_rp, 0.12), radialFlatten)*lvl;
+    let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
+    det = det + P.pelGain*(L.pel[j]/255 - 0.5);
+    det = det*(1-innerMix*wI) + innerMix*wI*inEff;
+    // prominence detail, inside the gate only -- mirrors render.py exactly
+    if (P.promDetail > 0 && L.promdet){
+      const pw = P.promDetail*(pr[j]/255);
+      det = det*(1-pw) + pw*(L.promdet[j]/255);
+    }
+    let Y = B*(baseLift+detailGain*det);
+    // Hill's chain -- MUST match render.py's block of the same name, or the
+    // sliders are tuned on one image and applied to another on export
+    if (HMIX > 0 && L.hilllog){
+      // matched in level first -- HSCL is measured in the pre-pass below, so
+      // the slider compares STRUCTURE and not brightness (see render.py)
+      const yh = hillYh(j);
+      if (r > 1.15*GEO.R && r < 3.0*GEO.R){ hsA += Y; hsB += yh; hsN++; }
+      Y = (1-HMIX)*Y + HMIX*HSCL*yh;
+    }
+    // driven by the prominence layer when the workdir has one -- see the
+    // measurement in render.py beside the same line
+    const pdrv = L.promdet ? L.promdet[j]/255 : inEff;
+    Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(pdrv-0.5)));
+    const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
+    Y = Y*eg + Yd*(1-eg);
+    // the sky-cast correction is weighted by the chroma confidence, exactly as
+    // render.py does it -- see the note beside _cconf there
+    const cf = L.cconf ? L.cconf[j]/255 : 1;
+    let a0 = Math.pow(_cl(ch[j]),   satur)/(1 + cf*(BC[0]-1));
+    let a1 = Math.pow(_cl(ch[j+1]), satur)/(1 + cf*(BC[1]-1));
+    let a2 = Math.pow(_cl(ch[j+2]), satur)/(1 + cf*(BC[2]-1));
+    if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
+    a0 *= temp; a2 /= temp; a1 *= P.tint;
+    const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
+    a0 /= alum; a1 /= alum; a2 /= alum;
+    a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
+    // prominence structure in green/blue -- red is already pinned at 255 in
+    // there, so this is the only channel pair with room. See render.py.
+    if (P.promChroma !== 0 && L.promdet){
+      const cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
+      a1 *= cfac; a2 *= cfac;
+    }
+    let r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
+    const m = Math.max(r0,r1,r2);
+    const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));
+    const sc = m>1e-6 ? ms/m : 1;
+    const tt = Math.min(1, Math.max(0,(ms-0.9)/0.1))*hlDesat;
+    const rr = [r0*sc, r1*sc, r2*sc];
+    const ring = P.ringBlend>0 && L.contact;
+    let jr = j;
+    if (ring && (P.ringScale!==1 || P.ringDX!==0 || P.ringDY!==0)){
+      const dec = GEO.decim || 4;
+      const y = (i/GEO.W)|0, x = i - y*GEO.W;
+      const sy = Math.round(GEO.cy + (y - GEO.cy - P.ringDY/dec)/P.ringScale);
+      const sx = Math.round(GEO.cx + (x - GEO.cx - P.ringDX/dec)/P.ringScale);
+      jr = (sy>=0 && sy<GEO.H && sx>=0 && sx<GEO.W) ? (sy*GEO.W+sx)*4 : -1;
+    }
+    for (let c=0; c<3; c++){
+      let v = rr[c]*(1-tt)+ms*tt; v = v<0?0:v>1?1:v;
+      v = Math.pow(v, ig);
+      v = (v-bgBlack)*ib; v = v<0?0:v>1?1:v;
+      if (ring && jr>=0) v = 1-(1-v)*(1-P.ringBlend*(L.contact[jr+c]/255));
+      d[j+c] = v*255;
+    }
+    d[j+3] = 255;
+  }
+  octx.putImageData(out, 0, 0);
+  draw();
+  // settle the Hill level match; see the note beside HSCL
+  if (HMIX > 0 && hsN > 100 && hsB > 1e-9){
+    const ns = (hsA/hsN) / (hsB/hsN);
+    if (isFinite(ns) && ns > 0 && Math.abs(ns/HSCL - 1) > 0.01){
+      HSCL = ns; scheduleRender();
+    }
+  }
+}
+document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () => {
+  VIEW = b.dataset.view;
+  document.querySelectorAll(".vbtn").forEach(x => x.classList.toggle("primary", x===b));
+  renderNow();
+}));
+let raf = null;
+function scheduleRender(){ if(!raf) raf = requestAnimationFrame(()=>{raf=null; renderNow();}); }
+
+cv.addEventListener("wheel", e => {
+  if (!GEO) return;
+  e.preventDefault();
+  const rc = cv.getBoundingClientRect();
+  const mx = (e.clientX-rc.left)*GEO.W/rc.width, my = (e.clientY-rc.top)*GEO.H/rc.height;
+  const f = Math.exp(-e.deltaY*0.0015), z0 = vz;
+  vz *= f; clampView();
+  vtx = mx-(mx-vtx)*vz/z0; vty = my-(my-vty)*vz/z0; clampView();
+  draw();
+}, {passive:false});
+let drag = null;
+cv.addEventListener("pointerdown", e => {drag=[e.clientX,e.clientY,vtx,vty]; cv.setPointerCapture(e.pointerId);});
+cv.addEventListener("pointermove", e => {
+  if (!drag || !GEO) return;
+  const rc = cv.getBoundingClientRect(), s = GEO.W/rc.width;
+  vtx = drag[2]+(e.clientX-drag[0])*s; vty = drag[3]+(e.clientY-drag[1])*s;
+  clampView(); draw();
+});
+cv.addEventListener("pointerup", () => drag=null);
+cv.addEventListener("dblclick", () => {vz=1; vtx=vty=0; draw();});
+
+$("ringload").addEventListener("click", async () => {
+  $("ringload").disabled = true;
+  const r = await fetch("/api/contact", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({path: $("ringpath").value})});
+  const j = await r.json();
+  if (!j.ok){ $("status").textContent = j.error; $("ringload").disabled = false; return; }
+  runStart();
+  const poll = async () => {
+    let p;
+    try {
+      p = await (await fetch("/api/progress")).json();
+      $("log").textContent = p.lines.join("\n"); $("log").scrollTop = 1e9;
+      runSync(p);
+    } catch (e){ return pollAgain(poll, 600, e); }   // see pollAgain
+    POLL_FAILS = 0;
+    if (p.error){ $("status").textContent = "contact frame failed — see log";
+      runStop("✕", "failed"); $("ringload").disabled = false; return; }
+    if (p.done){ runStop("✓", "contact frame loaded");
+      await fetchLayer("contact"); $("ringload").disabled = false;
+      $("status").textContent = "contact frame loaded — raise Ring blend"; renderNow(); return; }
+    pollAgain(poll, 600);
+  };
+  poll();
+});
+fetch("/api/version").then(r => r.json()).then(j => {
+  applyBrand(j);
+  $("credit").textContent = `${BRAND.app} ${j.version} · \u00a9 2026 N. Augustin with ClaudeAI`;
+}).catch(() => {});
+
+/* ---- file / folder picker -----------------------------------------------
+   A browser cannot hand a local web app a real filesystem path -- <input
+   type="file"> gives content, never a location -- and the pipeline needs the
+   path, not 250 uploaded raw files. So the server lists directories and this
+   draws them. Same behaviour on every platform, which matters more here than
+   looking native.                                                          */
+let PICK = null;   // {kind, target, onPick}
+
+async function pickOpen(kind, targetId, title, note){
+  PICK = {kind, target: targetId};
+  $("pickTitle").textContent = title;
+  $("pickNote").textContent = note || "";
+  $("pickUse").style.display = (kind === "dir") ? "" : "none";
+  $("pick").classList.add("on");
+  const start = $(targetId).value.trim();
+  await pickGo(start || "");
+}
+
+async function pickGo(path){
+  let j;
+  try {
+    const r = await fetch("/api/browse?kind=" + encodeURIComponent(PICK.kind)
+                          + "&path=" + encodeURIComponent(path));
+    j = await r.json();
+  } catch (e) { j = {ok:false, error:String(e)}; }
+  if (!j.ok){ $("pickCrumb").textContent = j.error || "cannot read that folder"; return; }
+  PICK.path = j.path; PICK.sep = j.sep;
+  $("pickCrumb").textContent = j.path;
+  const L = $("pickList");
+  L.textContent = "";
+  const row = (cls, label, tag, fn) => {
+    const d = document.createElement("div");
+    d.className = "pickrow " + cls;
+    const a = document.createElement("span"); a.textContent = label;
+    const b = document.createElement("span"); b.className = "tag"; b.textContent = tag || "";
+    d.appendChild(a); d.appendChild(b);
+    d.addEventListener("click", fn);
+    L.appendChild(d);
+  };
+  if (j.parent) row("up", "..", "", () => pickGo(j.parent));
+  for (const d of (j.drives || []))
+    if (d !== j.path) row("dir", d, "drive", () => pickGo(d));
+  for (const d of j.dirs){
+    const n = j.counts ? j.counts[d] : undefined;
+    row("dir", d, (n ? n + (n === 1 ? " frame" : " frames") : ""),
+        () => pickGo(j.path + j.sep + d));
+  }
+  for (const f of j.files)
+    row("file", f, "", () => { pickChoose(j.path + j.sep + f); });
+  if (!j.dirs.length && !j.files.length)
+    $("pickNote").textContent = "nothing here";
+  else if (PICK.kind === "dir")
+    $("pickNote").textContent = j.here_raws
+      ? `this folder holds ${j.here_raws} frame` + (j.here_raws === 1 ? "" : "s")
+      : "no frames in this folder";
+}
+
+function pickChoose(p){
+  const t = $(PICK.target);
+  t.value = p;
+  t.dispatchEvent(new Event("input", {bubbles:true}));
+  const k = PICK.target;
+  $("pick").classList.remove("on");
+  PICK = null;
+  if (k === "folder") loadFolder();
+  else if (k === "flatDir" && $("folder").value.trim()) loadFolder();
+  else if (k === "settingsPath") settingsLoad(p);
+  else if (k === "processingPath") processingLoad(p);
+}
+
+$("pickCancel").addEventListener("click", () => {
+  $("pick").classList.remove("on"); PICK = null;
+});
+$("pickUse").addEventListener("click", () => { if (PICK) pickChoose(PICK.path); });
+$("pick").addEventListener("click", e => {
+  if (e.target === $("pick")){ $("pick").classList.remove("on"); PICK = null; }
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && PICK){ $("pick").classList.remove("on"); PICK = null; }
+});
+$("brwFolder").addEventListener("click", () =>
+  pickOpen("dir", "folder", "Choose the folder holding your raw frames"));
+$("brwFlat").addEventListener("click", () =>
+  pickOpen("dir", "flatDir", "Choose the folder holding your flat frames"));
+$("brwImport").addEventListener("click", () =>
+  pickOpen("image", "importPath", "Choose one finished HDR image",
+           "16-bit TIFF or FITS"));
+$("brwRing").addEventListener("click", () =>
+  pickOpen("raw", "ringpath", "Choose the diamond-ring / contact frame",
+           "a single raw, TIFF or FITS frame"));
+
+$("load").addEventListener("click", loadFolder);
+$("folder").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
+$("flatDir").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder();});
+$("importPath").addEventListener("keydown", e => {if (e.key==="Enter") startRun();});
+// Enter here too. The folder field right above it loads on Enter, so pasting
+// a path and pressing Enter is the obvious move -- and it did nothing, which
+// is what both testers reported as "the diamond ring will not load".
+$("ringpath").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !$("ringload").disabled) $("ringload").click();
+});
+
+// ---------- settings files ----------
+//
+// APPLYING A LOADED SET IS NOT THE SAME AS MOVING A SLIDER. Every slider on the
+// page owns one key of P and writes it on input, so setting P alone leaves the
+// controls showing the old numbers and the next drag of any one of them puts
+// its stale value straight back. So both are set, from the server's dict, for
+// every key -- including the ones the file did not mention, which the server
+// has already filled with the default rather than leaving them as they were.
+function applyParams(np){
+  for (const [k,,,,,] of DEFS){
+    if (!(k in np)) continue;
+    P[k] = np[k];
+    const el = $("s_"+k);
+    if (el && !el.disabled){ el.value = np[k]; }
+    const v = $("v_"+k);
+    if (v && el && !el.disabled) v.textContent = el.value;
+  }
+  scheduleRender();
+}
+
+$("procsave").addEventListener("click", async () => {
+  const h = $("prochint");
+  h.textContent = "saving...";
+  try {
+    const r = await fetch("/api/processing/save", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({name: $("procname").value,
+                            processing: currentProcessing()})});
+    const j = await r.json();
+    h.textContent = j.ok
+      ? ("saved " + j.path + " — " + j.n + " setting(s), recorded from " + j.from)
+      : ("could not save: " + j.error);
+  } catch (e){ h.textContent = "could not save: " + e; }
+});
+
+$("procload").addEventListener("click", () =>
+  pickOpen("processing", "processingPath", "Choose a processing recipe",
+           "An .efprocess.json written by Save recipe."));
+
+async function processingLoad(path){
+  const h = $("prochint");
+  h.textContent = "loading...";
+  try {
+    const r = await fetch("/api/processing/load", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({path})});
+    const j = await r.json();
+    if (!j.ok){ h.textContent = "could not load: " + j.error; return; }
+    // SET the controls; do not run. These decide how the data is stacked, so
+    // they mean nothing until the next Start, and saying that is the point --
+    // a control that moved while the picture did not is what gets noticed
+    // three runs later.
+    const ids = j.ids || {};
+    for (const k in (j.processing || {})){
+      const el = $(ids[k]); if (el) el.value = j.processing[k];
+    }
+    const ch = j.changed || [];
+    let msg = j.file + " — " + j.n + " setting(s) set"
+            + (j.from ? " (recorded from " + j.from + ")" : "");
+    msg += !j.stacked
+         ? ". This folder has not been stacked yet — press Start"
+         : (ch.length
+            ? ". " + ch.length + " differ from this folder's last run ("
+              + ch.join(", ") + ") — press Start to re-stack"
+            : ". They match this folder's last run, so nothing to re-run");
+    if (j.note) msg += ". “" + j.note + "”";
+    if (j.notes && j.notes.length) msg += ". " + j.notes.join(". ");
+    h.textContent = msg;
+  } catch (e){ h.textContent = "could not load: " + e; }
+}
+
+function currentProcessing(){
+  // Only used when the folder has not been stacked yet; otherwise the server
+  // records what the run actually used, which is the more honest thing to save.
+  const ids = {align_corr:"alignCorr", align_filter:"alignFilter",
+               stack_combine:"stackCombine", fnrgf_preset:"fnrgfPreset",
+               photo_solve:"photoSolve", tier_mode:"tierMode",
+               feather:"feather", wb_source:"wb", photometry:"photometry",
+               frames:"frames", denoise:"denoise"};
+  const o = {};
+  for (const k in ids){ const e = $(ids[k]); if (e) o[k] = e.value; }
+  return o;
+}
+
+$("setsave").addEventListener("click", async () => {
+  const h = $("sethint");
+  h.textContent = "saving...";
+  try {
+    const r = await fetch("/api/settings/save", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({params: P, name: $("setname").value})});
+    const j = await r.json();
+    h.textContent = j.ok
+      ? ("saved " + j.path + " — " + j.n_portable + " portable, "
+         + j.n_local + " tied to this image")
+      : ("could not save: " + j.error);
+  } catch (e){ h.textContent = "could not save: " + e; }
+});
+
+$("setload").addEventListener("click", () =>
+  pickOpen("settings", "settingsPath", "Choose a settings file",
+           "An .efsettings.json, or the .params.json sidecar written beside any export."));
+
+async function settingsLoad(path){
+  const h = $("sethint");
+  h.textContent = "loading...";
+  try {
+    const r = await fetch("/api/settings/load", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({path})});
+    const j = await r.json();
+    if (!j.ok){ h.textContent = "could not load: " + j.error; return; }
+    applyParams(j.params);
+    let msg = j.file + " — " + j.n + " setting(s) applied"
+            + (j.same_stack ? ", including this image's own" : "");
+    if (j.note) msg += ". “" + j.note + "”";
+    if (j.notes && j.notes.length) msg += ". " + j.notes.join(". ");
+    h.textContent = msg;
+  } catch (e){ h.textContent = "could not load: " + e; }
+}
+
+$("start").addEventListener("click", startRun);
+// Registered here, at load. It used to sit INSIDE the export handler below,
+// so the orientation control did nothing until the first export and then
+// gained one more listener on every export after that.
+$("orient").addEventListener("change", e => setOrient(e.target.value));
+$("export").addEventListener("click", async () => {
+  const fmt = document.querySelector("input[name=fmt]:checked").value;
+  $("export").disabled = true;
+  const r = await fetch("/api/export", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({format: fmt, params: P, name: $("expname").value, view: VIEW, orient: ORIENT, size: $("exphalf").checked ? "half" : "full"})});
+  const j = await r.json();
+  if (j.ok){ $("status").textContent = "exporting → " + j.path; runStart(); pollExport(); }
+  else { $("status").textContent = j.error; $("export").disabled = false; }
+});
+async function pollExport(){
+  let j;
+  try {
+    j = await (await fetch("/api/progress")).json();
+    runSync(j);
+  } catch (e){ return pollAgain(pollExport, 700, e); }   // see pollAgain
+  POLL_FAILS = 0;
+  if (j.done){
+    $("export").disabled = false;
+    runStop(j.error ? "✕" : "✓", j.error ? "export failed" : "export done");
+    $("status").textContent = j.error ? ("export failed: "+j.error) :
+      (j.lines[j.lines.length-1] || "export done");
+    return;
+  }
+  pollAgain(pollExport, 700);
+}
+</script>
+</body>
+</html>
