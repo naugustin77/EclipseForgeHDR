@@ -1,4 +1,4 @@
-__version__ = "0.23.3"
+__version__ = "0.23.4"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit

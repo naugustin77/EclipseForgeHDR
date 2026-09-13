@@ -592,6 +592,17 @@ def build(stats):
           "projection.")
         A("             : The selectors marked [bypassed] below were NOT "
           "consulted.")
+        # Printed ALWAYS, both ways round, because a control that is silent when
+        # it is off cannot be told apart from a control that never ran -- which
+        # is exactly how a keep-sky comparison came back as "no difference".
+        if stats.get("simple_keep_sky"):
+            A("             : sky LEFT IN (the default) — only the black level "
+              "was subtracted,")
+            A("             : measured on the shortest tier")
+        else:
+            A("             : SKY REMOVED — each frame's own corner median per "
+              "channel, which is")
+            A("             : the black level AND the sky together")
         A("")
     A(f"denoise      : {o.get('denoise', '?')}")
     A(f"earthshine   : {'on' if o.get('earthshine') else 'off'}")

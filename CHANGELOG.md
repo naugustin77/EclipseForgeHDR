@@ -5,6 +5,34 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.23.4
+
+**The simple stack no longer removes the sky by default.** It subtracts each
+frame's black level and leaves the sky in; a new **Remove sky** checkbox brings
+the old behaviour back.
+
+Compared both ways on a 251-frame FITS set. Subtracting each frame's own corner
+median flattens the corona's colour with radius -- B/R swing 1.67x against 2.75x
+-- and is the photometrically better answer. It lost anyway, twice, to the same
+observer: a grainier outer field and an olive cast where the control is warm and
+smooth.
+
+The reason is not taste. A per-frame corner median is one independently
+estimated constant per frame, each carrying its own error, and each error lands
+on a whole frame. Absolute scatter in the outer field measured 4.5 against 3.3
+for a single well-measured constant. So the step removes the sky AND injects
+noise, and on that set the noise cost more than the colour correction gained.
+The sky being blue also means subtracting it pulls the residual yellow-green,
+which is the olive.
+
+It is also what this path is for: the simple stack does the least a program can
+do, and estimating a sky per frame is not the least.
+
+STILL OPEN: the version that would win both is a sky measured ONCE for the whole
+set and subtracted as `black + sky x exposure`, which removes the sky without the
+per-frame noise. It needs a second pass, since the exposure ladder is not known
+until after stacking.
+
 ## 0.23.3
 
 **Simple stack — the fallback.** A checkbox in the toolbar. Align the frames,

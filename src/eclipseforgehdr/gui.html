@@ -115,6 +115,10 @@ button:disabled{opacity:.45;cursor:default}
         title="THE FALLBACK. Align the frames, average each exposure group, measure the exposure ratios from the pixels themselves, and merge. Nothing else: no dark, no flat, no hot-pixel repair, no photometric ladder, no LDIC, no feather. Every stage that can fail on an awkward bracket is simply absent, so a set the normal path cannot handle still gives a clean stack. It also subtracts each frame's own corner level per channel, which removes the sky as well as the black level - the thing the normal merge has no model for. The result opens in the preview with all the usual enhancement layers. Its limit: one number per frame cannot follow a sky that varies across the frame, so on a wide field expect colour blotches in the far outer corona. Judge it by eye.">
         <input type="checkbox" id="simpleStack"> Simple stack
       </label>
+      <label id="lblRemoveSky" style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Simple stack only. OFF by default: each frame has its own black level subtracted and the SKY IS LEFT IN. Tick this and each frame's own corner median is subtracted per channel instead, which removes the black level AND the sky. That flattens the corona's colour with radius - measured on a 251-frame set, a B/R swing of 1.67x against 2.75x - and it is the photometrically better answer. It also costs noise: a corner median per frame is one independently estimated constant per frame, each with its own error landing on a whole frame, and the outer field measured noisier for it. On the set it was compared on, the version with the sky left in looked better. Tick this if your corona's colour drifts strongly from the limb outwards.">
+        <input type="checkbox" id="simpleRemoveSky"> Remove sky
+      </label>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
         Denoise
         <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -484,6 +488,18 @@ function syncStart(){
   }
 }
 $("importPath").addEventListener("input", syncStart);
+// Remove sky belongs to the simple stack and does nothing on the normal path:
+// its step (a corner median per frame) exists only there. Leaving it live would
+// promise a control that is silently ignored, so it is disabled and dimmed
+// unless Simple stack is on.
+function syncSimpleSky(){
+  const on = $("simpleStack").checked;
+  $("simpleRemoveSky").disabled = !on;
+  const L = $("lblRemoveSky");
+  if (L){ L.style.opacity = on ? "1" : "0.4"; L.style.cursor = on ? "" : "not-allowed"; }
+}
+$("simpleStack").addEventListener("change", syncSimpleSky);
+syncSimpleSky();
 $("simpleStack").addEventListener("change", () => {
   // Ticking it mid-session must not silently reuse the normal path's layers;
   // the server compares opts.json["mode"], and this only keeps the two paths'
@@ -520,6 +536,8 @@ async function startRun(){
                           flatDir: $("flatDir").value,
                           importPath: $("importPath").value,
                           simple: $("simpleStack").checked,
+                          simpleRemoveSky: $("simpleStack").checked
+                                            && $("simpleRemoveSky").checked,
                           frames: $("frames").value})});
   let _j = null;
   try { _j = await _r.json(); } catch (e) { _j = null; }

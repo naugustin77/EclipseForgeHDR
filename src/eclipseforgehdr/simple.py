@@ -226,7 +226,7 @@ def _weight(v, sat):
 # -------------------------------------------------------------------- run ---
 
 def run(folder, progress, denoise="fine", demosaic_method="mhc",
-        fnrgf_preset="ours"):
+        fnrgf_preset="ours", remove_sky=False):
     """Stack `folder` the simple way and build every layer the renderer needs."""
     from .raw import list_raws, read_exif
     from . import importhdr
@@ -266,11 +266,34 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
                  "LDIC, no feather — this path is the fallback and does the "
                  "least a program can do and still merge a bracket", None)
 
-    keep_sky = os.environ.get("ECLIPSEFORGE_SIMPLE_KEEPSKY") == "1"
+    # DEFAULT SINCE 0.23.4: black level only, sky left in.
+    #
+    # It was the other way round, and the comparison that changed it was run on
+    # a 251-frame FITS set both ways. Subtracting each frame's OWN corner median
+    # flattens the corona's colour with radius -- B/R swing 1.67x against 2.75x,
+    # measured -- and that is the photometrically better answer. It also loses,
+    # on the picture, twice, to the same observer: grainier outer field and an
+    # olive cast where the control is warm and smooth.
+    #
+    # The reason is not taste. A per-frame corner median is 251 independently
+    # estimated constants, each carrying its own error, and each error lands on
+    # a whole frame. Absolute scatter in the outer field measured 4.5 against
+    # 3.3 for the single well-measured constant. So this step removes the sky
+    # AND injects noise, and on that set the noise costs more than the colour
+    # correction gains. The sky being blue also means subtracting it pulls the
+    # residual yellow-green, which is the olive.
+    #
+    # It is also what this path is FOR. The simple stack does the least a
+    # program can do; estimating a sky per frame is not the least. Removing it
+    # stays available for data that shows the colour cast the sky causes.
+    keep_sky = not remove_sky
     if keep_sky:
-        progress.log("ECLIPSEFORGE_SIMPLE_KEEPSKY=1 — subtracting the black "
-                     "level only and LEAVING THE SKY IN. This is the control "
-                     "for whether the sky step is what changes the picture.",
+        progress.log("black level only — the sky is LEFT IN. Tick 'Remove sky' "
+                     "if the corona's colour drifts with radius; it flattens "
+                     "the colour but costs noise in the outer field.", None)
+    else:
+        progress.log("REMOVING THE SKY: each frame's own corner median per "
+                     "channel, which is the black level and the sky together.",
                      None)
     black = None
 

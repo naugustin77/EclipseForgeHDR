@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.3
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.4
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
 
@@ -409,6 +409,12 @@ SKY as well as the black level — something the normal merge has no model for.
 *Use it when* the normal path gives you something obviously wrong and you want a
 picture rather than a diagnosis, or as a control to find out whether a problem
 is in the merge or in the data.
+
+**Remove sky** (off by default) makes it subtract each frame's own corner
+median instead, which takes the black level and the sky together. That flattens
+the corona's colour with radius and costs noise in the outer field; on the set it
+was compared on, leaving the sky in looked better. Tick it if your corona's
+colour drifts strongly from the limb outwards.
 
 *Its limit:* one number per frame cannot follow a sky that varies across the
 frame. On a narrow field it works; on a wide one expect colour blotches in the

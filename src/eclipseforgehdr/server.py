@@ -359,6 +359,10 @@ def start_run():
     # so that a bracket the normal path cannot handle still produces a clean
     # stack instead of nothing. See simple.py for what it leaves out.
     simple = bool(request.json.get("simple", False)) if request.is_json else False
+    # Off by default: see the note at the top of simple.run for the comparison
+    # that settled it.
+    simple_remove_sky = (bool(request.json.get("simpleRemoveSky", False))
+                         if request.is_json else False)
     if import_path and not os.path.isfile(import_path):
         return jsonify({"ok": False,
                         "error": f"not a file: {import_path}"}), 400
@@ -394,8 +398,7 @@ def start_run():
                         # the KEEPSKY control is an env var, not a toolbar
                         # setting, so it would otherwise flip without the cache
                         # noticing and serve the previous run's layers
-                        and bool(o.get("keep_sky")) ==
-                            (os.environ.get("ECLIPSEFORGE_SIMPLE_KEEPSKY") == "1")
+                        and bool(o.get("keep_sky")) == (not simple_remove_sky)
                         and _cache_ok(o.get("build")))
                 have = all(os.path.exists(os.path.join(wd, f))
                            for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))
@@ -407,7 +410,8 @@ def start_run():
                             pass
                     _simple.run(folder, prog, denoise=denoise,
                                 demosaic_method=demosaic_method,
-                                fnrgf_preset=fnrgf_preset)
+                                fnrgf_preset=fnrgf_preset,
+                                remove_sky=simple_remove_sky)
                 else:
                     prog.log("using cached layers for this simple stack", 0.9)
                 prog.log("loading layers for preview...", None)
