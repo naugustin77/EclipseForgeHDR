@@ -391,6 +391,11 @@ def start_run():
                 same = (o.get("mode") == "simple"
                         and o.get("denoise") == denoise
                         and o.get("fnrgf_preset") == fnrgf_preset
+                        # the KEEPSKY control is an env var, not a toolbar
+                        # setting, so it would otherwise flip without the cache
+                        # noticing and serve the previous run's layers
+                        and bool(o.get("keep_sky")) ==
+                            (os.environ.get("ECLIPSEFORGE_SIMPLE_KEEPSKY") == "1")
                         and _cache_ok(o.get("build")))
                 have = all(os.path.exists(os.path.join(wd, f))
                            for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))

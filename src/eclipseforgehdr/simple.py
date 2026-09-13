@@ -28,6 +28,22 @@ corona and so survives the merge as a constant added to every pixel. On Val
 Italo's set that constant is 2.4x the corona in red and 6.8x in blue at 2.85 R,
 with the opposite colour. Removing it is most of why this path looks clean.
 
+
+    ECLIPSEFORGE_SIMPLE_KEEPSKY=1 subtracts only the BLACK LEVEL and leaves the
+    sky in, as a control. The default subtracts each frame's own corner median,
+    which is black level AND sky together, and it is not obvious from the
+    pictures alone which of the two is doing the work -- the simple path changes
+    many things at once, and attributing the result to the sky step was an
+    inference, not a measurement. This switch isolates it.
+
+    The black level is taken from the FIRST frame of the SHORTEST tier, because
+    a black level does not depend on the shutter speed while sky does, so the
+    shortest exposure is where the corner median is least contaminated by sky.
+    It is then used for every frame. On a bracket whose shortest tier is already
+    long, that estimate still carries some sky and the control is weaker; the
+    log prints the number so it can be judged.
+
+
 ITS LIMIT, stated because a fallback that hides its own failure is worse than no
 fallback. One number per frame per channel cannot follow a sky that varies
 ACROSS the frame. On a small field it works. On the 600 mm reference set the sky varies
@@ -250,6 +266,14 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
                  "LDIC, no feather — this path is the fallback and does the "
                  "least a program can do and still merge a bracket", None)
 
+    keep_sky = os.environ.get("ECLIPSEFORGE_SIMPLE_KEEPSKY") == "1"
+    if keep_sky:
+        progress.log("ECLIPSEFORGE_SIMPLE_KEEPSKY=1 — subtracting the black "
+                     "level only and LEAVING THE SKY IN. This is the control "
+                     "for whether the sky step is what changes the picture.",
+                     None)
+    black = None
+
     ref_feat = None
     num = den = None
     prev_g = None
@@ -265,7 +289,16 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
             f, sl = _load(p, demosaic_method)
             if sat is None:
                 sat = sl
-            f -= _pedestal(f)[:, None, None]
+            _ped = _pedestal(f)
+            if keep_sky:
+                if black is None:
+                    black = _ped.copy()
+                    progress.log("  black level from the shortest tier's first "
+                                 "frame: R %.1f  G %.1f  B %.1f"
+                                 % tuple(black), None)
+                f -= black[:, None, None]
+            else:
+                f -= _ped[:, None, None]
             ft = _feature(f[1])
             if ref_feat is None:
                 ref_feat = ft
@@ -352,11 +385,13 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
         folder, rgb, progress, denoise=denoise, short_lum=short,
         fnrgf_preset=fnrgf_preset,
         stats={"n_files": n_used, "mode": "simple stack",
+               "simple_keep_sky": keep_sky,
                "simple_ladder": ladder,
                "simple_ladder_span": {"header": secs[-1] / secs[0],
                                       "measured": rel},
                "tiers": [{"sec": s, "n": len(tiers[s])} for s in secs]},
         opts={"mode": "simple", "denoise": denoise,
+              "keep_sky": keep_sky,
               "fnrgf_preset": fnrgf_preset,
               "demosaic": demosaic_method, "n_files": n_used,
               "secs": list(secs)})
