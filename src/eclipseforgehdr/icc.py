@@ -48,7 +48,7 @@ def _text_tag(s):
 def _desc_tag(s):
     b = s.encode("ascii", "replace") + b"\0"
     return (b"desc" + b"\0" * 4 + struct.pack(">I", len(b)) + b
-            + b"\0" * 8            # ua testerde language code + count
+            + b"\0" * 8            # unicode language code + count
             + b"\0" * 3            # scriptcode code (u16) + count (u8)
             + b"\0" * 67)          # scriptcode description
 
