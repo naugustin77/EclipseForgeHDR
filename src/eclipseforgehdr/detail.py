@@ -137,7 +137,7 @@ NAFE_GRID = 8
 # does not faithfully represent; the kernel correction does not. One change,
 # and the sweep is worth repeating on real data.
 # FNRGF: three published behaviours that were implemented and unreachable until
-# 0.23.2. Each was then MEASURED on the 600 mm reference bracket, and the measurements
+# 0.23.2. Each was then MEASURED on the reference set's 600 mm bracket, and the measurements
 # disagree with the literature on one of them. Defaults follow the measurement.
 #
 # THE RING ARTIFACT the first two address is described by the filter's own
@@ -484,31 +484,63 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
 # ---------------------------------------------------------------------------
 
 HILL_SCALES = (2.0, 4.0, 8.0, 16.0, 32.0)
+HILL_LIMB_PAD = 5.0     # px beyond the render's disc mask that the masks treat as Moon
 # Hill's own example is 100 / 60 / 20 / 10 at 2 / 4 / 8 / 16 px. Scaled to 1.0
 # at the finest and extended by one octave for frames larger than his.
 HILL_GAINS = (1.0, 0.6, 0.2, 0.1, 0.05)
 
 
-def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None):
+def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
+                       w_ref=None, order=1):
     """Hill's im_blur: blur f in heliocentric polar coordinates, with the
     convolution PARTIAL so the masked pixels (w = 0) contribute nothing.
 
-    f    log-mapped image
-    w    weight image -- 0 on the Moon, prominences and anything else excluded
-    sigmas  one blur per scale, in pixels of RADIUS
+    f      log-mapped image
+    w      weight image -- 0 on the Moon, prominences and anything else excluded
+    sigmas one blur per scale, in pixels of RADIUS and of ARC
+    w_ref  optional second weight; the returned coverage is then the coverage
+           under `w` divided by the coverage under `w_ref`, so a caller can ask
+           "how much did the PROMINENCE mask alone take away" (see build_hill)
+    order  0: weighted mean (Druckmullerova thesis eq. 5.2). 1: weighted
+           linear fit along the radius, evaluated at the pixel (Knutsson &
+           Westin 1993 sec. 3.5) -- see THE LIMB below.
 
-    Returns one blurred image per sigma, in the same order.
+    Returns one blurred image per sigma, in the same order, plus coverages.
 
     Only the blurred component makes the polar round trip. The unsharp mask is
     taken in Cartesian space as f - blur, so the interpolation of the warp can
     soften the blur -- which is already smooth -- but can never touch the detail
     the mask is there to carry.
 
-    Worked in radial bands with a 4-sigma overlap, so the peak footprint is one
-    band of the polar grid rather than the whole of it. The polar grid is
-    sampled at one pixel of RADIUS and one pixel of ARC AT r_max, which is the
-    natural choice: it is Nyquist-matched to the picture at the outer edge and
-    oversampled everywhere inside it.
+    THE TANGENTIAL SIGMA IS IN ARC LENGTH (0.23.6). The polar grid is sampled
+    at one pixel of arc at r_max, and this used to blur with the SAME sigma in
+    both grid axes -- so at radius r the tangential sigma was sigma * r/r_max:
+    on the 600 mm reference set, 0.25 px for the 2 px mask at the limb and 4 px
+    for the 32 px one. Every mask was a radial-only high-pass near the Sun and
+    passed tangential grain at every scale; measured, the sub-3 px tangential
+    content at 1.1-1.5 R was 2-3x the photon sigma in all five masks, which is
+    demosaic/denoise texture the noise threshold cannot reach. Druckmullerova's
+    kernel (thesis eq. 5.1) is a Gaussian in radius times a Gaussian in ARC
+    LENGTH r*(phi - phi0), "so that the size of the structures that are
+    enhanced with one value of sigma is constant through the whole image". So
+    here the tangential sigma in grid samples is sigma * nth / (2 pi r), per
+    radial band, and the bands grow geometrically outward so that r varies by
+    at most 25% inside one.
+
+    THE LIMB (0.23.6). A weighted mean whose kernel is one-sided -- every valid
+    sample outside the Moon, none inside -- is biased on a slope: the mean sits
+    below the centre pixel on a falling corona, the residual is positive, and
+    that printed as rings in the first 60 px outside the disc mask at every
+    scale, as big as the whole structure signal. Normalized convolution with a
+    basis of {1, rho} instead of {1} is a local weighted least-squares LINE fit
+    along the radius, evaluated at the pixel, and is unbiased on a linear
+    gradient however one-sided the kernel (Knutsson & Westin 1993, eq. 9). Far
+    from any mask the two are identical: under a symmetric kernel the linear
+    term is orthogonal to the constant, so the fitted value at the centre IS the
+    weighted mean. It costs three more Gaussian blurs per scale and a 2x2 solve
+    per pixel, all inside the band loop. Where the fit is ill-conditioned --
+    coverage near zero, or every sample at one radius -- it falls back to the
+    mean.
     """
     H, W = f.shape
     yy = np.arange(H, dtype=np.float32)[:, None] - cy
@@ -523,17 +555,20 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None):
     del tc
     fw = (f * w).astype(np.float32)
     outs = [np.empty((H, W), np.float32) for _ in sigmas]
-    # COVERAGE: how much real data each output pixel's kernel actually saw.
-    # Needed because a pixel the mask excluded, or one ringed by excluded
-    # pixels, gets a blur estimated from almost nothing -- see build_hill.
     covs = [np.zeros((H, W), np.float32) for _ in sigmas]
     pad = int(np.ceil(4.0 * max(sigmas))) + 2
     th = (np.arange(nth, dtype=np.float32) * dth)
     cth, sth = np.cos(th), np.sin(th)
     del th
-    nb = (nr + band - 1) // band
-    for bi, r0 in enumerate(range(0, nr, band)):
-        r1 = min(nr, r0 + band)
+    # geometric bands: r changes by <= 25% inside one, so one tangential sigma
+    # per band is within 12% of the arc-length value everywhere in it
+    edges = [0]
+    while edges[-1] < nr:
+        edges.append(min(nr, max(edges[-1] + 96, int(edges[-1] * 1.25)),
+                         edges[-1] + 512))
+    nb = len(edges) - 1
+    for bi in range(nb):
+        r0, r1 = edges[bi], edges[bi + 1]
         a0, a1 = max(0, r0 - pad), min(nr, r1 + pad)
         ra = np.arange(a0, a1, dtype=np.float32)
         sy = (cy + ra[:, None] * sth[None, :])
@@ -542,30 +577,79 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None):
         del sy, sx
         FW = ndimage.map_coordinates(fw, crd, order=1, mode="nearest")
         WW = ndimage.map_coordinates(w, crd, order=1, mode="nearest")
+        WR = (ndimage.map_coordinates(w_ref, crd, order=1, mode="nearest")
+              if w_ref is not None else None)
         del crd
         sel = (rc >= r0) & (rc < r1)
-        if not sel.any():
-            del FW, WW
+        if not sel.any() or not (w[sel] > 0).any():
+            # nothing to blur here (a band entirely inside the Moon): the
+            # masks are zeroed there anyway, and the widest tangential
+            # kernels live at the smallest radii
+            for k in range(len(sigmas)):
+                outs[k][sel] = 0.0
+            del FW, WW, WR
             continue
         rr = (rc[sel] - a0).astype(np.float32)
         tt = tcol[sel]
         dst = np.stack([rr, tt])
+        # the radial coordinate of every polar sample, centred on the band so
+        # rho^2 stays small in float32
+        rmid = 0.5 * (r0 + r1)
         for k, sg in enumerate(sigmas):
-            # 'wrap' in angle: the polar image is periodic, and treating its two
-            # edges as a boundary puts a seam along one radius of the picture
-            num = ndimage.gaussian_filter(FW, sg, mode=["nearest", "wrap"])
-            den = ndimage.gaussian_filter(WW, sg, mode=["nearest", "wrap"])
-            B = num / np.maximum(den, 1e-4)
-            del num
-            outs[k][sel] = ndimage.map_coordinates(B, dst, order=1,
-                                                   mode="nearest")
-            covs[k][sel] = ndimage.map_coordinates(den, dst, order=1,
-                                                   mode="nearest")
-            del B, den
-        del FW, WW, dst, rr, tt, sel
+            st = max(float(sg) * nth / (2.0 * np.pi * max(rmid, 1.0)), 0.3)
+            G = lambda a: ndimage.gaussian_filter(a, (sg, st), mode=["nearest", "wrap"])
+            # MOMENTS ABOUT THE PIXEL, NOT ABOUT THE BAND CENTRE (build 9).
+            # The basis {1, rho, rho^2} used to be measured from the band's
+            # middle radius, so a 2 px kernel 300 px from it was fitting a
+            # parabola through three nearly parallel columns: condition
+            # number ~ (rho/sigma)^4, moments in float32, and at the radii
+            # where the cancellation went worst the solve returned noise --
+            # full rings of it, 10x the mask rms, at r = 1175, 1459, ... on
+            # the reference set. Reproduced on white noise; the row list
+            # matched. With the kernel-weighted basis g(x) x^k / sigma^k the
+            # normal matrix is O(1) everywhere and the fitted value at the
+            # pixel is just the constant term.
+            L = int(np.ceil(4.0 * sg)) + 1
+            xk = np.arange(-L, L + 1, dtype=np.float64)
+            gk = np.exp(-0.5 * (xk / sg) ** 2)
+            gk /= gk.sum()
+
+            def C(a, kk):
+                ker = (gk * (xk / sg) ** kk).astype(np.float32)
+                t = ndimage.correlate1d(a, ker, axis=0, mode="nearest")
+                return ndimage.gaussian_filter1d(t, st, axis=1, mode="wrap")
+            n0 = C(WW, 0)
+            d0 = C(FW, 0)
+            B = d0 / np.maximum(n0, 1e-4)
+            if order >= 1:
+                no = min(int(order), 2)
+                ms = [n0] + [C(WW, kk) for kk in range(1, 2 * no + 1)]
+                ds = [d0] + [C(FW, kk) for kk in range(1, no + 1)]
+                nn = no + 1
+                for c0 in range(0, n0.shape[0], 64):
+                    c1 = min(n0.shape[0], c0 + 64)
+                    N = np.empty(n0[c0:c1].shape + (nn, nn), np.float64)
+                    for i_ in range(nn):
+                        for j_ in range(nn):
+                            N[..., i_, j_] = ms[i_ + j_][c0:c1]
+                        N[..., i_, i_] += 1e-9
+                    D = np.stack([d_[c0:c1] for d_ in ds], -1).astype(np.float64)
+                    try:
+                        u = np.linalg.solve(N, D[..., None])[..., 0, 0]
+                    except np.linalg.LinAlgError:
+                        continue
+                    fin = (n0[c0:c1] > 1e-3) & np.isfinite(u)
+                    B[c0:c1] = np.where(fin, u, B[c0:c1]).astype(np.float32)
+                del ms, ds
+            outs[k][sel] = ndimage.map_coordinates(B, dst, order=1, mode="nearest")
+            cv = n0 if WR is None else n0 / np.maximum(G(WR), 1e-4)
+            covs[k][sel] = ndimage.map_coordinates(cv, dst, order=1, mode="nearest")
+            del B, n0, d0, cv
+        del FW, WW, WR, dst, rr, tt, sel
         if progress is not None:
             progress.log(f"  partial convolution: radial band {bi + 1}/{nb}", None)
     return outs, covs
+
 
 
 # ---------------------------------------------------------------------------
@@ -1075,7 +1159,44 @@ def _soft_norm(x, mask, p_lo=0.5, p_hi=99.7, gain=1.6):
     return 0.5 + 0.5 * np.tanh(gain * ((x - lo) / max(hi - lo, 1e-6) - 0.5))
 
 
-HILL_BUILD = 6      # bump to force a rebuild of cached masks; see _deradial
+HILL_BUILD = 12     # bump to force a rebuild of cached masks; 8 = arc-length
+                    # tangential sigma + second-order NC at the limb (0.23.6);
+                    # 9 = pixel-centred fit basis; 10 = raw base + radial
+                    # smoothing of the masks (0.23.7); 11 = long-window gate;
+                    # 12 = prominence patches filled
+# RADIAL SMOOTHING OF EACH MASK, in units of its own scale (0 = off). Coronal
+# structure is radially coherent over many times the mask scale; photon noise
+# is not. A Gaussian along the radius, sigma = HILL_RADIAL x scale, cuts the
+# noise in the 2 px mask to about 0.2x and leaves a radial thread whole.
+# Measured on the reference set's far field (3.4-4.1 R): 2 px mask noise 0.19x,
+# 4 px 0.14x, structure in the mid corona (1.5-2.5 R) after the 3-sigma
+# threshold UP from 0.016 to 0.020 display units because less of it now falls
+# under the threshold. The cost is the known artefact of every radially
+# elongated kernel -- noise that survives is drawn out into faint radial hair
+# -- which is why the factor is small and overridable:
+# ECLIPSEFORGE_HILL_RADIAL=<factor>, 0 to switch it off for an A/B.
+# OFF BY DEFAULT since the test that settled 0.23.7: with the raw base, no
+# threshold and the 2 px mask off, Hill's chain on the reference set looks like
+# his slide at half size, and the smoothing's radial texture was the thing
+# that did not. Kept as an opt-in for full-resolution exports.
+HILL_RADIAL = 0.0
+# THE LONG-WINDOW GATE (build 11). Coronal structure is coherent along the
+# radius for hundreds of pixels; the noise that survives the threshold after
+# the 2x smoothing is coherent for about one smoothing length, and drawn out
+# by it into faint radial hair -- the "small stripes" in the far field at a
+# threshold of 1.85. Detection and display are therefore separated: each mask
+# is ALSO smoothed with a much longer radial window (HILL_GATE_LEN x scale),
+# where noise falls a further 2x and a thread does not, and the displayed mask
+# is multiplied by a soft gate on that long-window z:
+#     g = clip((|z_long| - HILL_GATE) / HILL_GATE, 0, 1)
+# Measured on the reference set's build-10 masks (masks-only view, display
+# units, gain 0.1): threshold 1.85 alone gives inner/mid/far 0.083/0.041/0.035
+# with the far field all hair; threshold 3 gives 0.071/0.032/0.006 and loses
+# the mid corona; threshold 1.85 with the gate gives 0.076/0.035/0.004 --
+# the mid corona of the first and the far field of the second.
+# ECLIPSEFORGE_HILL_GATE=<z> (0 = off), ECLIPSEFORGE_HILL_GATE_LEN=<factor>.
+HILL_GATE = 2.5
+HILL_GATE_LEN = 8.0
 
 
 def _radial_median(a, r, valid, nb, smooth=5):
@@ -1086,13 +1207,21 @@ def _radial_median(a, r, valid, nb, smooth=5):
     o = np.argsort(v, kind="stable")
     v, av = v[o], av[o]
     e = np.searchsorted(v, np.arange(nb + 1))
-    prof = np.zeros(nb, np.float32)
-    last = 0.0
+    prof = np.full(nb, np.nan, np.float32)
     for i in range(nb):
         s = av[e[i]:e[i + 1]]
         if s.size:
-            last = float(np.median(s))
-        prof[i] = last
+            prof[i] = float(np.median(s))
+    # Empty bins -- inside the Moon, and the odd gap -- take the NEAREST valid
+    # value. They used to take zero (or whatever the previous bin held), and
+    # the 5-bin smoothing below then dragged that zero into the first two or
+    # three valid bins outside the disc mask, so exactly the radii where the
+    # collar is largest were the ones it under-subtracted.
+    ok = np.isfinite(prof)
+    if ok.any():
+        prof = np.interp(np.arange(nb), np.flatnonzero(ok), prof[ok]).astype(np.float32)
+    else:
+        prof[:] = 0.0
     return ndimage.uniform_filter1d(prof, smooth, mode="nearest")
 
 
@@ -1157,6 +1286,68 @@ def _deradial(m, r, valid):
                         ).astype(np.float32))
 
 
+def polar_radial_smooth(masks, w, cy, cx, sig_r, band=384, progress=None):
+    """Gaussian-smooth each mask ALONG THE RADIUS, partial under `w`.
+
+    masks  list of float32 images (the unsharp masks)
+    w      1 on the corona, 0 on the Moon / prominences / outside
+    sig_r  one radial sigma per mask, in pixels
+
+    Same polar grid and band scheme as polar_partial_blur; each band is warped
+    once, filtered along its radial axis with mode "nearest", and warped back.
+    The normalisation by the smoothed weight keeps the Moon's edge from leaking
+    into the first pixels outside it, exactly as in the partial blur. The
+    tangential axis is untouched: this is the one direction in which coronal
+    structure and noise differ, and it is the only one that is smoothed.
+    """
+    H, W = masks[0].shape
+    yy = np.arange(H, dtype=np.float32)[:, None] - cy
+    xx = np.arange(W, dtype=np.float32)[None, :] - cx
+    rc = np.sqrt(yy * yy + xx * xx)
+    tc = np.arctan2(yy, xx)
+    rmax = float(rc.max()) + 1.0
+    nr = int(np.ceil(rmax))
+    nth = int(np.ceil(2.0 * np.pi * rmax))
+    dth = 2.0 * np.pi / nth
+    tcol = (np.mod(tc, 2.0 * np.pi) / dth).astype(np.float32)
+    del tc, yy, xx
+    outs = [np.zeros((H, W), np.float32) for _ in masks]
+    pad = int(np.ceil(4.0 * max(sig_r))) + 2
+    th = (np.arange(nth, dtype=np.float32) * dth)
+    cth, sth = np.cos(th), np.sin(th)
+    del th
+    edges = [0]
+    while edges[-1] < nr:
+        edges.append(min(nr, max(edges[-1] + 96, int(edges[-1] * 1.25)),
+                         edges[-1] + 512))
+    nb = len(edges) - 1
+    for bi in range(nb):
+        r0, r1 = edges[bi], edges[bi + 1]
+        a0, a1 = max(0, r0 - pad), min(nr, r1 + pad)
+        ra = np.arange(a0, a1, dtype=np.float32)
+        crd = np.stack([cy + ra[:, None] * sth[None, :],
+                        cx + ra[:, None] * cth[None, :]])
+        sel = (rc >= r0) & (rc < r1)
+        if not sel.any() or not (w[sel] > 0).any():
+            del crd
+            continue
+        WW = ndimage.map_coordinates(w, crd, order=1, mode="nearest")
+        dst = np.stack([(rc[sel] - a0).astype(np.float32), tcol[sel]])
+        for k, (m, sg) in enumerate(zip(masks, sig_r)):
+            MW = ndimage.map_coordinates(m * w, crd, order=1, mode="nearest")
+            num = ndimage.gaussian_filter1d(MW, sg, axis=0, mode="nearest")
+            den = ndimage.gaussian_filter1d(WW, sg, axis=0, mode="nearest")
+            S = num / np.maximum(den, 1e-4)
+            outs[k][sel] = ndimage.map_coordinates(S, dst, order=1, mode="nearest")
+            del MW, num, den, S
+        del crd, WW, dst, sel
+        if progress is not None:
+            progress.log(f"  radial smoothing: band {bi + 1}/{nb}", None)
+    for k in range(len(outs)):
+        outs[k][w <= 0] = 0.0
+    return outs
+
+
 def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
                cy=None, cx=None, frac=None, denoise="fine"):
     """Hill's unsharp-mask set, written to hill.npy / hill_log.npy.
@@ -1197,12 +1388,23 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         # Not made the default, because "fine" denoise is also what keeps the
         # far field from tearing itself apart, and which way is better is a
         # picture judgement on a real bracket, not a number. One run each.
-        _raw_base = os.environ.get("ECLIPSEFORGE_HILL_NODENOISE") == "1"
+        # RAW IS THE DEFAULT SINCE 0.23.7 (build 10). Measured on the reference
+        # set beyond 3 R: the merged luminance has clean Gaussian noise (0.30%
+        # of pixels above 3 sigma, the textbook 0.27%), but the 2 px mask built
+        # on the DENOISED master had 2.0% above 3 sigma and 0.45% above 5 sigma
+        # -- 35,000 isolated single pixels of both signs in one far-field crop.
+        # Those are the starlet denoise's sparse survivors: stronger than any
+        # structure, so no threshold can take them without taking the corona.
+        # On the raw merge the sigma model is right and the threshold does what
+        # it says. ECLIPSEFORGE_HILL_DENOISED=1 restores the old base for an A/B.
+        _raw_base = (os.environ.get("ECLIPSEFORGE_HILL_DENOISED") != "1"
+                     or os.environ.get("ECLIPSEFORGE_HILL_NODENOISE") == "1")
         if _raw_base:
             lum_dn = None       # force the reload below, ignoring what we were
-            progress.log("  partial convolution: building on the RAW merged "
-                         "luminance (ECLIPSEFORGE_HILL_NODENOISE=1) — the "
-                         "denoise is skipped for the masks only", None)
+            progress.log("  partial convolution: building on the raw merged "
+                         "luminance (the masks carry their own noise "
+                         "threshold; ECLIPSEFORGE_HILL_DENOISED=1 for the "
+                         "denoised master)", None)
         if lum_dn is None:
             lum = np.load(os.path.join(wd, "hdr_lum.npy"))
             ks = DENOISE_PROFILES.get(denoise, DENOISE_PROFILES["fine"])
@@ -1225,13 +1427,21 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
             yy = np.arange(H, dtype=np.float32)[:, None] - cy
             xx = np.arange(W, dtype=np.float32)[None, :] - cx
             rr = np.sqrt(yy * yy + xx * xx)
-        if disc is None:
-            margin = float(geo.get("limb_margin",
-                                   geo.get("Rmask", R + 4.0) - R))
-            prof = geo.get("limb_prof")
-            Rmap = (limb_radius_map(prof, (H, W), cy, cx, margin)
-                    if prof else np.float32(R + margin))
-            disc = rr < Rmap
+        # THE MASKS' OWN DISC IS 5 PX WIDER THAN THE RENDER'S (0.23.6). The
+        # disc mask sits mid-way down the limb ramp (margin 9 px against a
+        # 20-80% transition of 8-10 px on the reference set), so the first few
+        # pixels outside it are part Moon. Every mask reads them as a dark
+        # line: measured, the 2 px mask's mean there was -2.4 to -3.6 times
+        # the whole structure signal, and no fit can repair data that really
+        # is dark. Excluding them from the fit AND from the mask costs nothing
+        # the renderer shows -- the composite's own edge blend covers that
+        # band -- and takes the line out.
+        margin = float(geo.get("limb_margin",
+                               geo.get("Rmask", R + 4.0) - R)) + HILL_LIMB_PAD
+        prof = geo.get("limb_prof")
+        Rmap = (limb_radius_map(prof, (H, W), cy, cx, margin)
+                if prof else np.float32(R + margin))
+        disc = rr < Rmap
         if prom is None:
             prom = prominence_mask(wd, geo, (H, W), rr, R, progress=progress)
         progress.log(f"partial-convolution unsharp masks at "
@@ -1258,16 +1468,86 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         sig_log = (_sl * _d).astype(np.float32)
         del xn, _sl, _d
         w = (~disc).astype(np.float32)
+        w_disc = w.copy()
         if prom is not None:
             w[prom] = 0.0
+        # coverage relative to the disc-only weight: 1 wherever only the Moon
+        # reduced it, < 1 around a prominence patch. The first-order fit takes
+        # care of the Moon; the taper below is for the patches only.
         blurs, covs = polar_partial_blur(imlog, w, cy, cx, HILL_SCALES,
-                                         progress=progress)
+                                         progress=progress, w_ref=w_disc,
+                                         order=2)
+        del w_disc
         good = ~disc if prom is None else (~disc & ~prom)
-        Ms, bias = [], []
+        Ms, bias, Mraw = [], [], []
         for b, cv in zip(blurs, covs):
             m = (imlog - b).astype(np.float32)
             bias.append(_mask_bias(m, rr, good, R))
-            m = _deradial(m, rr, good)
+            # With the first-order fit at the limb the collar this removed is
+            # measured rather than assumed: the limb-bias numbers in the log
+            # say what is left, and ECLIPSEFORGE_HILL_NODERADIAL=1 skips it for
+            # an A/B on the same workdir.
+            if os.environ.get("ECLIPSEFORGE_HILL_NODERADIAL") != "1":
+                m = _deradial(m, rr, good)
+            Mraw.append(m)
+            del m
+        del blurs
+        _radial = float(os.environ.get("ECLIPSEFORGE_HILL_RADIAL", HILL_RADIAL))
+        if _radial > 0:
+            progress.log(f"  partial convolution: smoothing each mask along the "
+                         f"radius, sigma {_radial:g} x scale", None)
+            Mraw = polar_radial_smooth(Mraw, good.astype(np.float32), cy, cx,
+                                       [_radial * float(s_) for s_ in HILL_SCALES],
+                                       progress=progress)
+        # The per-scale response of the polar high-pass to UNIT white noise,
+        # measured on a probe rather than assumed, so the threshold is in real
+        # sigma units. Same trick denoise_loglum uses for its starlet levels.
+        # 1024 px, so the 32 px mask and its 64 px radial smoothing have room;
+        # measured on the annulus 100-400 px from the probe's centre.
+        _pr = np.random.default_rng(4242).standard_normal((1024, 1024)).astype(np.float32)
+        _pw = np.ones_like(_pr)
+        _pb, _ = polar_partial_blur(_pr, _pw, 512.0, 512.0, HILL_SCALES, band=512,
+                                    order=2)
+        _pm = [(_pr - b).astype(np.float32) for b in _pb]
+        del _pb
+        if _radial > 0:
+            _pm = polar_radial_smooth(_pm, _pw, 512.0, 512.0,
+                                      [_radial * float(s_) for s_ in HILL_SCALES])
+        _py, _px = np.mgrid[0:1024, 0:1024]
+        _pa = np.hypot(_py - 512.0, _px - 512.0)
+        _pa = (_pa > 100) & (_pa < 400)
+        resp = [float(np.std(m_[_pa])) for m_ in _pm]
+        # ... and the long window's further gain on that, for the gate
+        _gate_noise = list(resp)
+        if float(os.environ.get("ECLIPSEFORGE_HILL_GATE", HILL_GATE)) > 0 and _radial > 0:
+            _gl = float(os.environ.get("ECLIPSEFORGE_HILL_GATE_LEN", HILL_GATE_LEN))
+            _pl = polar_radial_smooth(_pm, _pw, 512.0, 512.0,
+                                      [_gl * float(s_) for s_ in HILL_SCALES])
+            _gate_noise = [float(np.std(m_[_pa])) for m_ in _pl]
+            del _pl
+        del _pr, _pw, _pm, _py, _px, _pa
+        # The stats the renderer normalises against are taken BEFORE the gate:
+        # `resp` is the noise response of blur + smoothing, and the threshold
+        # slider must keep meaning "k sigma" after the gate has emptied the far
+        # field. rms / rms_struct likewise, so the gain does not jump.
+        _gate = float(os.environ.get("ECLIPSEFORGE_HILL_GATE", HILL_GATE))
+        _glen = float(os.environ.get("ECLIPSEFORGE_HILL_GATE_LEN", HILL_GATE_LEN))
+        _rms_pre = [float(np.std(m_[good])) for m_ in Mraw]
+        if _gate > 0 and _radial > 0:
+            progress.log(f"  partial convolution: long-window gate at {_gate:g} "
+                         f"sigma, window {_glen:g} x scale", None)
+        for _i, (m, cv) in enumerate(zip(Mraw, covs)):
+            sg_ = HILL_SCALES[_i]
+            if _gate > 0 and _radial > 0:
+                # one mask at a time: the long windows are 4x the pad of the
+                # display smoothing and five at once would not fit
+                _ml = polar_radial_smooth([m], good.astype(np.float32), cy, cx,
+                                          [_glen * float(HILL_SCALES[_i])])[0]
+                _zl = np.abs(_ml) / np.maximum(
+                    np.float32(_gate) * _gate_noise[_i] * sig_log, 1e-12)
+                del _ml
+                m = m * np.clip(_zl - 1.0, 0.0, 1.0).astype(np.float32)
+                del _zl
             # HILL'S STEP 4: "replace any pixels restricted by the mask with
             # zero". Leaving it out is what put a row of dark blobs in an arc
             # below the Moon on the 250 mm test set.
@@ -1288,28 +1568,42 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
             # RIM of every patch, where coverage is low but not zero and the
             # division amplifies whatever little it saw. Fading from 0.35 to
             # 0.7 coverage takes the rim with it.
+            # `cv` is coverage RELATIVE to the disc-only weight (see the call),
+            # so this fades the rim of a prominence patch and leaves the limb
+            # alone: the dead band the old taper drew around the Moon -- one
+            # sigma wide per scale, nothing in it -- is gone.
             _t = np.clip((np.asarray(cv, np.float32) - 0.35) / 0.35, 0.0, 1.0)
             m *= (_t * _t)
             m[~good] = 0.0
+            # THE PROMINENCE PATCHES ARE FILLED, NOT LEFT FLAT (build 12).
+            # Zero inside the patch was Hill's step 4, and it is right for
+            # the data: the mask there is the prominence against a blur that
+            # never saw it, 10-170x the corona signal. But a zeroed patch is
+            # a flat cut-out with the dilated mask's blobby outline, and it
+            # showed. Inside the patch (and only there -- the disc stays
+            # zero) the mask is now the partial Gaussian continuation of its
+            # own surroundings, sigma 2x the scale with an 8 px floor: no
+            # real detail, there is none the mask can carry, but no edge.
+            if prom is not None:
+                _pp = prom & ~disc
+                if _pp.any():
+                    _sg = max(8.0, 2.0 * float(sg_))
+                    _g = good.astype(np.float32)
+                    _num = ndimage.gaussian_filter(m * _g, _sg)
+                    _den = ndimage.gaussian_filter(_g, _sg)
+                    m[_pp] = (_num[_pp] / np.maximum(_den[_pp], 1e-3)).astype(np.float32)
+                    del _num, _den, _g
+                del _pp
             Ms.append(m.astype(np.float16))
             del _t, m
         M = np.stack(Ms)
-        del blurs, covs, Ms
+        del covs, Ms, Mraw
         bias2 = [_mask_bias(np.asarray(M[i], np.float32), rr, good, R)
                  for i in range(len(HILL_SCALES))]
-        # The per-scale response of the polar high-pass to UNIT white noise,
-        # measured on a probe rather than assumed, so the threshold is in real
-        # sigma units. Same trick denoise_loglum uses for its starlet levels.
-        _pr = np.random.default_rng(4242).standard_normal((256, 256)).astype(np.float32)
-        _pw = np.ones_like(_pr)
-        _pb, _ = polar_partial_blur(_pr, _pw, 128.0, 128.0, HILL_SCALES, band=512)
-        resp = [float(np.std((_pr - b)[32:-32, 32:-32])) for b in _pb]
-        del _pr, _pw, _pb
         np.save(os.path.join(wd, "hill.npy"), M)
         np.save(os.path.join(wd, "hill_log.npy"), imlog.astype(np.float32))
         np.save(os.path.join(wd, "hill_sigma.npy"), sig_log.astype(np.float32))
-        _rms = [float(np.std(np.asarray(M[i], np.float32)[good]))
-                for i in range(len(HILL_SCALES))]
+        _rms = _rms_pre
         # THE STRUCTURE PART OF EACH MASK'S SPREAD, separated from the noise
         # part, because the renderer divides the Amplification slider by it.
         #
@@ -1343,6 +1637,8 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
               "build": HILL_BUILD,
               "resp": resp,
               "base": "raw" if _raw_base else "denoised",
+              "radial": _radial,
+              "gate": _gate if _radial > 0 else 0.0, "gate_len": _glen,
               "sigma_rms": _sg,
               "limb_bias_before": bias, "limb_bias_after": bias2,
               "rms": _rms, "rms_struct": _rms_s}

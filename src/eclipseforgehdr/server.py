@@ -359,10 +359,6 @@ def start_run():
     # so that a bracket the normal path cannot handle still produces a clean
     # stack instead of nothing. See simple.py for what it leaves out.
     simple = bool(request.json.get("simple", False)) if request.is_json else False
-    # Off by default: see the note at the top of simple.run for the comparison
-    # that settled it.
-    simple_remove_sky = (bool(request.json.get("simpleRemoveSky", False))
-                         if request.is_json else False)
     if import_path and not os.path.isfile(import_path):
         return jsonify({"ok": False,
                         "error": f"not a file: {import_path}"}), 400
@@ -392,13 +388,15 @@ def start_run():
                         o = json.load(open(opts_path))
                     except Exception:
                         o = {}
+                _fd = resolve_flat_dir(folder, flat_dir)
                 same = (o.get("mode") == "simple"
                         and o.get("denoise") == denoise
                         and o.get("fnrgf_preset") == fnrgf_preset
-                        # the KEEPSKY control is an env var, not a toolbar
-                        # setting, so it would otherwise flip without the cache
-                        # noticing and serve the previous run's layers
-                        and bool(o.get("keep_sky")) == (not simple_remove_sky)
+                        # calibration frames change the stacked data, and
+                        # nothing the page sends would announce a new flats
+                        # folder: compare what was actually applied
+                        and o.get("flat_dir", "") == (_fd or "")
+                        and o.get("flat_inputs") == _flat_fp(_fd)
                         and _cache_ok(o.get("build")))
                 have = all(os.path.exists(os.path.join(wd, f))
                            for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))
@@ -411,7 +409,13 @@ def start_run():
                     _simple.run(folder, prog, denoise=denoise,
                                 demosaic_method=demosaic_method,
                                 fnrgf_preset=fnrgf_preset,
-                                remove_sky=simple_remove_sky)
+                                flat_dir=flat_dir)
+                    try:
+                        _o2 = json.load(open(opts_path))
+                        _o2["flat_inputs"] = _flat_fp(_fd)
+                        json.dump(_o2, open(opts_path, "w"), indent=1)
+                    except Exception:
+                        pass
                 else:
                     prog.log("using cached layers for this simple stack", 0.9)
                 prog.log("loading layers for preview...", None)
@@ -568,14 +572,36 @@ def start_run():
                     # between the raw and the denoised master, and without this
                     # the second run of an A/B silently reuses the first run's
                     # masks and reports itself as a test.
-                    _want = ("raw" if os.environ.get(
-                        "ECLIPSEFORGE_HILL_NODENOISE") == "1" else "denoised")
+                    _want = ("denoised" if (
+                        os.environ.get("ECLIPSEFORGE_HILL_DENOISED") == "1"
+                        and os.environ.get("ECLIPSEFORGE_HILL_NODENOISE") != "1")
+                        else "raw")
                     if not _hstale and _hj.get("base", "denoised") != _want:
                         _hstale = True
                         prog.log("the cached partial-convolution masks were "
                                  "built on the %s master and this run asks for "
                                  "the %s one — rebuilding them"
                                  % (_hj.get("base", "denoised"), _want), None)
+                    # ... and when the radial smoothing factor changed
+                    from .detail import HILL_RADIAL as _HR
+                    _wr = float(os.environ.get("ECLIPSEFORGE_HILL_RADIAL", _HR))
+                    if not _hstale and abs(float(_hj.get("radial", 0.0)) - _wr) > 1e-6:
+                        _hstale = True
+                        prog.log("the cached partial-convolution masks were "
+                                 "built with radial smoothing %g and this run "
+                                 "asks for %g — rebuilding them"
+                                 % (float(_hj.get("radial", 0.0)), _wr), None)
+                    from .detail import HILL_GATE as _HG, HILL_GATE_LEN as _HGL
+                    _wg = (float(os.environ.get("ECLIPSEFORGE_HILL_GATE", _HG)),
+                           float(os.environ.get("ECLIPSEFORGE_HILL_GATE_LEN", _HGL)))
+                    _hg = (float(_hj.get("gate", 0.0)), float(_hj.get("gate_len", 0.0)))
+                    if not _hstale and _wr > 0 and (abs(_hg[0] - _wg[0]) > 1e-6 or (
+                            _wg[0] > 0 and abs(_hg[1] - _wg[1]) > 1e-6)):
+                        _hstale = True
+                        prog.log("the cached partial-convolution masks were "
+                                 "built with gate %g/%g and this run asks for "
+                                 "%g/%g — rebuilding them"
+                                 % (_hg[0], _hg[1], _wg[0], _wg[1]), None)
                 except Exception:
                     _hstale = True
                 if _hstale:
@@ -650,6 +676,12 @@ def get_geometry():
                     "nHill": int(getattr(ly, "n_hill", 0)),
                     "hillScales": [float(x) for x in getattr(ly, "hill_scales", [])],
                     "hillRms": [float(x) for x in getattr(ly, "hill_rms", [])],
+                    # the STRUCTURE rms, which is what render.py normalises the
+                    # gain to since 0.22.84. The page used hillRms (total) until
+                    # 0.23.7: equal on a denoised set, 4x apart on a raw one,
+                    # so the export came out 4x stronger than the preview.
+                    "hillRmsStruct": [float(x) for x
+                                      in getattr(ly, "hill_rms_struct", [])],
                     "hillLogKBuild": float(getattr(ly, "hill_logk", 6.0)),
                     "hillResp": [float(x) for x in getattr(ly, "hill_resp", [])],
                     # the page renders at preview scale, so it needs the same
@@ -814,6 +846,10 @@ _PROCESSING_KEYS = {
     "photometry":    ("linfit",    "photometry"),
     "frames":        ("all",       "frames"),
     "denoise":       ("fine",      "denoise"),
+    # THE SIMPLE STACK FLAG. Without it a saved recipe could not turn the
+    # fallback back on: the recipe is built from what the run reported, and the
+    # simple path reported only denoise and fnrgf_preset.
+    "simple":        ("False",     "simpleStack"),
 }
 
 
@@ -1086,7 +1122,8 @@ def do_export():
 
     def work():
         try:
-            export(ly, params, fmt, path, view=view, size=size)
+            _notes = []
+            export(ly, params, fmt, path, view=view, size=size, notes=_notes)
             json.dump(params, open(path + ".params.json", "w"), indent=1)
             try:
                 from . import report as _report
@@ -1095,11 +1132,21 @@ def do_export():
                 st["params"] = params
                 st["export"] = {"file": os.path.basename(path), "format": fmt,
                                 "view": view, "size": size}
+                # what Neutralise sky cast divides by: the far field's colour,
+                # normalised to unit luminance, as the Layers measured it
+                try:
+                    st["bg_chroma"] = [round(float(x), 3) for x in ly.bg_chroma]
+                except Exception:
+                    pass
                 open(os.path.splitext(path)[0] + "_report.txt", "w").write(
                     _report.build(st) + "\n")
             except Exception:
                 pass
             prog.log(f"saved {path}", 1.0)
+            # Logged AFTER the save line so it is the one the page shows: a
+            # warning nobody reads is the same as no warning.
+            for _n in _notes:
+                prog.log(_n, 1.0)
             prog.done = True
         except Exception as e:
             prog.error = str(e)

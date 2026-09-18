@@ -691,7 +691,7 @@ def _moon_track(tier_moon, tier_time, progress):
                  f"{np.std(rx):.0f} px", None)
     # SCATTER THAT DWARFS THE TRACK MEANS THERE IS NO TRACK.
     #
-    # a second tester's 560mm run: "0.63 px/s, 6 px across the bracket; scatter
+    # a tester's 560mm run: "0.63 px/s, 6 px across the bracket; scatter
     # about the line 26/39 px". The Moon moved six pixels and the per-tier
     # measurements are forty pixels off a straight line -- the fit is describing
     # the alignment error, not the Moon. Printed, and nothing said so.
@@ -1104,7 +1104,7 @@ FEATHER_NAMES = {"plain": "Blended edge", "taper": "Exact edge",
 # 0.22.16 replaced the plain blur with a leak-free weight and fixed the radial
 # profile exactly. It also made a ring artifact visible that the plain blur had
 # been hiding, on every dataset, in MGN, FNRGF and NAFE alike. Fifteen weight
-# forms were then rebuilt from the reference set's aligned tiers and scored (tools/):
+# forms were then rebuilt from the reference set's own aligned tiers and scored (tools/):
 #
 #   variant                              1.02R    ring power
 #   none (no feather at all)             1.000       0.94
@@ -1157,7 +1157,7 @@ _PEDESTAL_UNKNOWN_MAX = 0.02
 # the median signal the link was fitted on. This term models a black-level
 # residual, which is a few ADU; anything approaching the signal itself is the
 # fit trading slope against offset on data that cannot constrain both. On
-# the 560 mm 2024 test set every well-constrained link needed 0.5-3% and the
+# the tester's 2024 560 mm set every well-constrained link needed 0.5-3% and the
 # one that ran away needed 60%; on the 600 mm reference set the largest is 4%. 0.20
 # sits an order of magnitude above the honest ones and well below the failure.
 _OFFSET_MAX_FRAC = 0.20
@@ -1268,9 +1268,9 @@ def _fit_pedestal(prof, scale, pmax):
     between tiers over 1.5-3.5 R once each is put back on the same scene scale:
 
         set                tiers   no offset   one global offset   fitted P
-        360 mm test set        12      39.20%          2.87%        +2.87 ADU14
-        560 mm 2024 test set   14      36.43%          5.17%        +5.49 ADU14
-        250 mm test set         9       2.42%          1.72%        -1.97 ADU14
+        the tester 360mm        12      39.20%          2.87%        +2.87 ADU14
+        the tester 2024 560mm   14      36.43%          5.17%        +5.49 ADU14
+        the tester 250mm         9       2.42%          1.72%        -1.97 ADU14
 
     Thirteen-fold and sevenfold reductions from ONE number. On the 360 mm set
     the 1/1000 s tier reads 2.76x the scene at 2.9 R before the correction and
@@ -1407,7 +1407,7 @@ def _fit_channel_floors(pmed, secs, iters=200, exposures=None):
     with `s_i` ONE effective exposure per tier, SHARED by the three channels.
     A shutter that did not honour the requested time, a wrong EXPTIME, a gain
     compounding along the ladder -- all of these are achromatic, so they land
-    in `s_i` and cannot reach `b_c`. On Val's set the fitted ladder comes out
+    in `s_i` and cannot reach `b_c`. On a third tester's set the fitted ladder comes out
     -15.5% at 1/20 s and -10.4% at 1/13 s against the stated EXPTIME, which is
     the same shape found independently from corner-patch rates; the floors come
     out regardless.
@@ -1943,8 +1943,8 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
     """Hill's photometric combine: a per-channel LINEAR FIT between neighbours.
 
     THE PUBLISHED METHOD, implemented as described rather than as re-derived.
-    Described in Jonathan Hill's talk "Advanced Solar Eclipse Photography"
-    (on YouTube), summarised here in our own words:
+    From the Advanced Solar Eclipse Photography talk (~52:36-55:22, ~58:10-59:23,
+    ~1:00:27-1:01:06) and its slides:
 
       - each exposure is fitted to its NEIGHBOUR, not to a distant reference,
         because adjacent frames overlap best;
@@ -1954,7 +1954,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
         tier instead, for a reason measured on a 14-tier bracket and set out
         at the chaining step below;
       - the fit is PixInsight `LinearFit`: a slope AND an offset, PER COLOUR
-        CHANNEL;
+        CHANNEL (the slide shows Y = 3.05x + -0.01);
 
     WHAT LinearFit ACTUALLY IS, from its own documentation rather than from an
     assumption about it. The PCL class reference calls it "robust straight line
@@ -2190,7 +2190,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
     # A failed link leaves k=1, q=0, so the composition below hands the tier its
     # neighbour's ACCUMULATED K and Q unchanged -- including the per-channel
     # part, which was measured on the neighbour's data and says nothing about
-    # this tier. Found on the 560 mm 2024 test set, where the 1s->2s and
+    # this tier. Found on the tester's 2024 560 mm set, where the 1s->2s and
     # 2s->4s links had literally zero pixels carrying signal in both exposures:
     # the 1s tier's fit (red 9.7% above green, plus its offset) was inherited
     # verbatim by 2s and 4s, which are the tiers that carry the OUTER corona.
@@ -2822,7 +2822,7 @@ def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
 
     0.22.25 put the plain feather back because it hides the ring artifact.
     That was right for the 600 mm reference set, where the leak it trades for costs
-    25% of the true brightness at 1.02 R, and wrong for the 360 mm test set,
+    25% of the true brightness at 1.02 R, and wrong for the tester's 360 mm set,
     where the same leak costs a factor of EIGHT and prints as a pink rim
     around the limb -- which is exactly what he reported on 0.22.26.
 
@@ -3085,7 +3085,7 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     ECLIPSEFORGE_NO_SKYGRAD=1 skips the whole step. It exists because this is a
     PER-CHANNEL division extrapolated over the entire frame from an annulus
     beyond the corona, so any error in it lands as a colour cast on the inner
-    corona, where nothing constrains the fit. On the 560 mm 2024 test set the
+    corona, where nothing constrains the fit. On the tester's 2024 560 mm set the
     fitted spans are R 1.141x G 1.104x B 1.054x -- RED steepest, the opposite of
     the Rayleigh ordering the paragraph above offers as the evidence that what
     is being fitted is atmosphere. The switch turns the question into one run.
@@ -3314,122 +3314,6 @@ def neutralise_corona_colour(wd, cy, cx, R, stats, progress):
                  f"files, so the inner corona (1.05-1.6 R) is used as the white "
                  f"reference — R/GB was {rgb_before:.2f}, gains R {g[0]:.3f} "
                  f"G {g[1]:.3f} B {g[2]:.3f}", None)
-
-
-def measure_radial_colour(wd, cy, cx, R, stats, progress,
-                          r0=1.02, r1=6.0, nbin=96, smooth=5):
-    """The corona's colour as a function of radius, stored for the renderer.
-
-    WHY ONE SET OF GAINS IS NOT ENOUGH. `neutralise_corona_colour` above takes
-    the K-corona as a white reference, which is sound physics -- Thomson
-    scattering is wavelength-independent, so the inner corona carries the Sun's
-    own spectrum. It then applies that one measurement everywhere. That is only
-    right if the colour of the frame is constant with radius, and on a
-    low-altitude eclipse it is not. Measured on a third tester's set, per-channel
-    floors removed, on two tiers twelve times apart in exposure:
-
-        radius        R/G     B/G          R/G     B/G
-                      (1/4 s tier)         (2.96 s tier)
-        1.2-1.5 R    1.301   0.592            clipped
-        1.5-2.0 R    1.196   0.710         1.204   0.702
-        2.0-2.5 R    1.038   0.893         1.035   0.883
-        2.5-3.0 R    0.923   1.009         0.924   0.994
-        3.0-3.5 R    0.861   1.071         0.864   1.059
-        3.5-4.2 R    0.803   1.130         0.812   1.113
-        4.2-5.0 R    0.763   1.164         0.773   1.152
-
-    The two tiers agree to 1% at every radius, so this is the scene as
-    recorded -- not a tier, not the ladder, not a black level. R/B swings by 2x
-    across the frame: a reddened corona near the limb giving way to a bluer sky
-    further out. Neutralising on the inner annulus alone leaves the outer field
-    blue, which is the orange-centre-to-grey-edge split these brackets show.
-
-    WHAT THIS IS AND IS NOT. It is a CHOICE, in the same way the existing
-    control is: the corona at 7 degrees altitude really is reddened, and
-    removing that says you would rather see the K-corona's intrinsic white than
-    what the atmosphere did to it. The physically-modelled answer is to fit the
-    sky as a separate additive term with its own colour and subtract it; this
-    is the cheaper one that flattens the symptom. It is deliberately measured
-    and stored rather than applied, so the renderer can dial it live and the
-    picture decides.
-
-    Robustness: a MEDIAN per annulus, so a prominence or a bright streamer
-    occupying part of one azimuth does not move it. Bins whose luminance falls
-    into the noise are not measured, and the last good value is held outward
-    rather than extrapolated.
-    """
-    hp = os.path.join(wd, "hdr_rgb.npy")
-    if not os.path.exists(hp):
-        return
-    try:
-        a = load_big(hp)
-        H, W, _ = a.shape
-        d = int(np.clip(round(R / 50.0), 1, 8))
-        S = np.array(a[::d, ::d], dtype=np.float32, copy=True)
-        del a
-        h, w, _ = S.shape
-        yy = np.arange(h, dtype=np.float32)[:, None] - cy / d
-        xx = np.arange(w, dtype=np.float32)[None, :] - cx / d
-        rr = np.hypot(yy, xx) / max(R / d, 1e-6)
-        edges = np.linspace(r0, r1, nbin + 1)
-        rg = np.full(nbin, np.nan)
-        bg = np.full(nbin, np.nan)
-        lv = np.full(nbin, np.nan)
-        for i in range(nbin):
-            m = (rr >= edges[i]) & (rr < edges[i + 1])
-            n = int(m.sum())
-            if n < 400:
-                continue
-            v = np.median(S[m].reshape(-1, 3), axis=0).astype(np.float64)
-            if not np.isfinite(v).all() or v[1] <= 0:
-                continue
-            rg[i], bg[i], lv[i] = v[0] / v[1], v[2] / v[1], v[1]
-        del S
-        ok = np.isfinite(rg) & np.isfinite(bg)
-        # drop the faint tail: once the annulus median stops falling with
-        # radius it is sky noise, not corona, and its colour is meaningless
-        if ok.sum() >= 8:
-            _l = np.where(ok, lv, np.nan)
-            _pk = np.nanmax(_l)
-            ok &= np.isfinite(_l) & (_l > 1e-4 * _pk)
-        if ok.sum() < 8:
-            progress.log("radial colour: too few usable annuli to measure", None)
-            return
-        idx = np.flatnonzero(ok)
-        # hold the ends, then smooth: a ratio profile should be smooth in r,
-        # and any wiggle left in it would be imprinted on the picture as rings
-        rgf = np.interp(np.arange(nbin), idx, rg[idx])
-        bgf = np.interp(np.arange(nbin), idx, bg[idx])
-        if smooth > 1:
-            k = np.ones(int(smooth)) / float(int(smooth))
-            pad = int(smooth)
-            rgf = np.convolve(np.r_[[rgf[0]] * pad, rgf, [rgf[-1]] * pad],
-                              k, "same")[pad:-pad]
-            bgf = np.convolve(np.r_[[bgf[0]] * pad, bgf, [bgf[-1]] * pad],
-                              k, "same")[pad:-pad]
-        centres = 0.5 * (edges[:-1] + edges[1:])
-        np.save(os.path.join(wd, "colour_radial.npy"),
-                np.vstack([centres, rgf, bgf]).astype(np.float32))
-        _sw = float(np.nanmax(rgf / np.maximum(bgf, 1e-6))
-                    / max(np.nanmin(rgf / np.maximum(bgf, 1e-6)), 1e-6))
-        stats["radial_colour"] = {
-            "r_from": float(centres[idx[0]]), "r_to": float(centres[idx[-1]]),
-            "rb_swing": round(_sw, 2),
-            "rg_inner": round(float(rgf[idx[0]]), 3),
-            "rg_outer": round(float(rgf[idx[-1]]), 3),
-            "bg_inner": round(float(bgf[idx[0]]), 3),
-            "bg_outer": round(float(bgf[idx[-1]]), 3)}
-        progress.log(
-            f"radial colour measured {centres[idx[0]]:.2f}-{centres[idx[-1]]:.2f} R: "
-            f"R/G {rgf[idx[0]]:.3f} -> {rgf[idx[-1]]:.3f}, "
-            f"B/G {bgf[idx[0]]:.3f} -> {bgf[idx[-1]]:.3f}, so red over blue "
-            f"swings {_sw:.2f}x across the field. One set of white-balance "
-            f"gains cannot flatten that; the Neutralise radial slider can. "
-            f"This is a CHOICE, not a correction: a corona low in the sky "
-            f"really is reddened, and flattening it says you would rather see "
-            f"the K-corona's own white.", None)
-    except Exception as _e:
-        progress.log(f"radial colour not measured ({_e})", None)
 
 
 def shift_bayer_even(a, dy, dx):
@@ -4407,7 +4291,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # names as the hard one. A large but finite high-pass keeps almost all
         # of the gain without that exposure.
         #
-        # REVERTED IN 0.22.28. On the 600 mm reference run the network residual
+        # REVERTED IN 0.22.28. On the reference set's real 600 mm run the network residual
         # went 1.17 -> 2.67 px (half-res), per-tier limb spread 8 -> 12 px,
         # track scatter 1/2 -> 2/4 px, and the step took 1m25s instead of 13s.
         # The table above is real but it was measured on the wrong thing:
@@ -4661,7 +4545,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
 
     # A RESIDUAL THIS LARGE IS A FAILED ALIGNMENT, NOT A STATISTIC.
     #
-    # a second tester's 560 mm set (0.20.1) reported
+    # a tester's 560 mm set (0.20.1) reported
     #
     #     alignment network residual max 512.09px (half-res)
     #
@@ -5058,7 +4942,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # where the filters normalise against a local mean and amplify it.
     #
     # This is measured rather than assumed because a rough version of it, run
-    # outside the pipeline on four of the reference raws (one raw per tier, my own
+    # outside the pipeline on four of the reference set's raws (one raw per tier, my own
     # centre, the stacked tier's shift applied to a single frame), showed two
     # adjacent tiers disagreeing with the other two by -22% and +64% inside
     # 1.25 R while agreeing to a few percent outside it. That rig was too crude
@@ -5497,7 +5381,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         progress.log(f"per-tier lunar limb spread: {span:.0f}px (R_moon {Rmoon:.0f}px)",
                      0.54)
         # 226 px of spread on a 525 px Moon (the test set's 560mm run) is 43%: the
-        # tiers are not looking at the same place. the 600 mm reference set sits at
+        # tiers are not looking at the same place. the reference set's 600mm set sits at
         # 1.3%, the test set's own 250mm at 1.0% and his 360mm at 3.3%, so 8% is
         # comfortably clear of anything a working run produces.
         if Rmoon and span > 0.08 * Rmoon:
@@ -5921,7 +5805,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # is what lets the exponent buy the limb without paying out there; one
         # global exponent cannot separate the two.
         #
-        # MEASURED by rebuilding the merge from the reference set's exported tiers (all
+        # MEASURED by rebuilding the merge from the reference set's own exported tiers (all
         # 14) and looking at azimuthal scatter about a smooth profile, which in
         # a shell that should be smooth is noise:
         #
@@ -6224,7 +6108,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # only a soft warning.
     # A FLAT 15% IS THE WRONG TEST, and a real run showed why.
     #
-    # a second tester's 360 mm set (0.15.1): the tiers agreed on R = 456 px with a
+    # a tester's 360 mm set (0.15.1): the tiers agreed on R = 456 px with a
     # SPREAD OF 2 px, and the merged fit came out 470.2 px -- 3.1%, so this said
     # nothing. But against a 2 px spread, 14 px is seven sigma. The merged limb
     # ramp was 25 px where his other set's was 10, the alignment residual 7.9 px
@@ -6243,14 +6127,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     #
     #   set                consensus  spread  merged fit  |diff|  fires?
     #   600 mm ref            617 px    7 px    619.1 px   2.1 px   no
-    #   250 mm test set         298 px    7 px    300.2 px   2.2 px   no
-    #   360 mm test set         456 px    2 px    470.2 px  14.2 px   YES
+    #   the tester 250mm         298 px    7 px    300.2 px   2.2 px   no
+    #   the tester 360mm         456 px    2 px    470.2 px  14.2 px   YES
     #
     _rc = stats.get("R_consensus")
     _rcs = float(stats.get("R_consensus_spread") or 0.0)
     # R_consensus_spread is a p90-p10 RANGE, not a standard deviation, and the
     # test below wants sigma. Treating the range as sigma made the threshold
-    # 2.6x too high, which is how the 560 mm 2024 test set slipped through: 15
+    # 2.6x too high, which is how the tester's 2024 560 mm set slipped through: 15
     # px range, 28 px disagreement -- under two of the real sigma, but the code
     # asked for four of the range and never fired. He reported it as "the moon
     # mask is too large and covers prominences", which is exactly what a limb 28
@@ -6282,9 +6166,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         #
         #   set                 consensus  spread   merged fit   bias   ramp
         #   600 mm ref             617 px    7 px      619.1     +2.1     8
-        #   250 mm test set          298 px    7 px      300.3     +2.3     9
-        #   360 mm test set          456 px    2 px      470.4    +14.4    21
-        #   560 mm 2024 test set     525 px   15 px      553.0    +28.0    28
+        #   the tester 250mm          298 px    7 px      300.3     +2.3     9
+        #   the tester 360mm          456 px    2 px      470.4    +14.4    21
+        #   the tester 2024 560mm     525 px   15 px      553.0    +28.0    28
         #   a second tester 560mm (2024)   525 px  226 px      587.3    +62.3    69
         #
         # The cause is not in dispute: the 50% crossing between disc and
@@ -6409,10 +6293,6 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # AFTER the sky fit, for the same reason that fit runs after the white
     # balance: the renderer applies this to the picture the sky fit produced,
     # so the profile has to describe that picture and not the one before it.
-    try:
-        measure_radial_colour(wd, cyf, cxf, R, stats, progress)
-    except Exception as e:
-        progress.log(f"radial colour skipped ({e})", None)
 
     # --- how well did the tiers actually land on each other? ---
     # Photoshop's 'Variance' stack mode, as a number. Aligned tiers disagree
@@ -6462,7 +6342,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # TIERS THAT DISAGREE IN VALUE AT THE LIMB ARE A SECOND, SEPARATE
             # CAUSE OF RINGING -- and this number is the one that finds it.
             #
-            # a second tester's 250 mm set rings, and none of the alignment guards
+            # a tester's 250 mm set rings, and none of the alignment guards
             # fire on it: network residual 0.66 px, limb spread 3 px, limb-fit
             # rms 0.95 px, track scatter 0/0. Geometrically it is a clean run.
             # What it has is limb variance 0.793 against 0.075, 0.067 and 0.052
@@ -6987,7 +6867,7 @@ def prepare_contact(folder, raw_path, progress):
     # OUTSIDE the lunar limb -- the Moon is what is hiding the rest of it. So if
     # the aligned frame's bright arc lands inside the composite's disc, the
     # registration failed, whatever the fit residuals said. This is cheap, it is
-    # geometry rather than taste, and it is what was missing when the reported ring
+    # geometry rather than taste, and it is what was missing when the reference set's ring
     # came out 327px off centre with nothing in the log to say so.
     try:
         _al = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]

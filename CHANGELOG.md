@@ -5,6 +5,184 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.23.7
+
+Partial convolution, second pass, measured on the 600 mm reference workdir;
+the masks rebuild from the cache on Start (mask build 12), no re-stack. The
+end state: Hill's chain as published, on the raw merge, judged the way he
+shows it. The noise controls added along the way are kept as opt-ins.
+
+- **The masks are built on the raw merge, not the denoised master.** Beyond
+  3 R the merged luminance has clean Gaussian noise (0.30 % of pixels above
+  3 σ; the textbook figure is 0.27 %). The 2 px mask built on the denoised
+  master did not: its bulk was 0.4× the noise model and 2 % of its pixels sat
+  above 3 σ, 0.45 % above 5 σ — 35 000 isolated single pixels of both signs in
+  one far-field crop. Those were the starlet denoise's sparse survivors, which
+  no mask threshold can take without taking the corona, and they were the
+  specks in the far field. On the raw merge the σ model is right and the
+  threshold does what it says. `ECLIPSEFORGE_HILL_DENOISED=1` restores the old
+  base for an A/B.
+- **Each mask is smoothed along the radius, σ = 2× its scale** (thesis eq. 5.1
+  is a Gaussian in radius times a Gaussian in arc; this is the same family
+  with the radial σ longer than the tangential one). Coronal structure is
+  radially coherent over many mask lengths, photon noise is not. Synthetic:
+  a 3 px radial thread keeps 93–95 % of its amplitude, the noise falls 6–10×,
+  the 2 px mask's SNR goes from 0.4 to 2.2. On the reference set the mid
+  corona (1.5–2.5 R), which the 3 σ threshold was zeroing, comes through.
+  The known price of a radially elongated kernel is faint radial "hair" drawn
+  out of noise that survives the threshold, which is why the factor is small.
+  `ECLIPSEFORGE_HILL_RADIAL=<factor>`, 0 = off; the server rebuilds when the
+  factor changes. Partial under the same weight as the blur, so the Moon's
+  edge does not leak. The noise probe for the threshold now runs the full
+  chain (blur + smoothing) on a 1024 px field.
+- **Long-window gate against radial hair** (build 11). The price of the
+  radial smoothing showed at once: at a threshold of 1.85 the far field was
+  faint radial stripes — noise that survived the threshold, drawn out to one
+  smoothing length. A cross-scale coincidence test did not separate them (the
+  smoothing correlates the scales). What does: coronal structure is coherent
+  along the radius for hundreds of pixels, the hair is not. Each mask is also
+  smoothed with a window 8× its scale, where noise falls a further 2× and a
+  thread does not, and the displayed mask is multiplied by a soft gate on that
+  long-window z (0 below 2.5 σ, 1 at 5 σ). Masks-only view, gain 0.1, display
+  rms inner/mid/far: threshold 1.85 alone 0.083/0.041/0.035 (hair);
+  threshold 3 alone 0.071/0.032/0.006 (mid corona lost); 1.85 with the gate
+  0.076/0.035/0.004. `ECLIPSEFORGE_HILL_GATE=<σ>` (0 = off),
+  `ECLIPSEFORGE_HILL_GATE_LEN=<factor>`. The noise response and the
+  structure rms the sliders normalise against are taken before the gate.
+- **Blend into image is an overlay of the masks-only layer, not a
+  crossfade.** The slider used to crossfade the whole log-mapped image into
+  the composite after matching means over 1.15–3 R — two different tone
+  curves, so the inner corona blew out and the outer detail thinned as the
+  slider went up. Now the grey layer the Partial-conv view draws at Base
+  weight 0 (0.5 + 0.75·k·E) is overlaid on the composite at opacity = slider:
+  multiply below mid grey, screen above, bounded, so nothing clips and the
+  added contrast tapers toward white — what a high-pass layer does in
+  Photoshop. The base stretch now affects the view alone.
+- **Defaults reset to what the reference set settled on**, judged the way
+  Hill shows his: masks on mid grey, half size. Radial smoothing and gate
+  OFF (`ECLIPSEFORGE_HILL_RADIAL=2` turns both back on), Noise threshold 0,
+  weights 0 / 1 / 0.6 / 0.2 / 0.1 — the 2 px mask carries noise only on this
+  set, so the ladder starts at 4 px, which at 600 mm is the same sky as his
+  2 px at 300 mm — Amplification 0.025 (slider 0–0.2), Base weight 0.
+- **The preview normalised Amplification to the masks' total rms, the export
+  to their structure rms.** Equal on a denoised set (75–90 % structure), 4×
+  apart on a raw one, so the TIFF came out 4× stronger than the screen. The
+  page now uses the structure rms too. Recipes saved before this carry a
+  value 4× too large for a raw-base workdir. With the raw base and no threshold the
+  view IS his chain; the grain that remains is photon noise and averages out
+  at half size, which is also the export's half-size option.
+- **Prominence patches filled, disc painted to the masks' edge** (build 12).
+  Inside a prominence patch every mask was zero (Hill's step 4, right for
+  the data — the mask there is the prominence against a blur that never saw
+  it), which printed as a flat cut-out with the dilated mask's blobby
+  outline. The patch now carries the partial Gaussian continuation of its
+  surroundings (σ 2× scale, 8 px floor): no detail, no edge. And the
+  Partial-conv view paints the disc out to Rmask + pad, where the masks are
+  zero by construction and the bare log base showed as a bright rim; the
+  composite is untouched.
+- **Base weight slider** in the Partial convolution group: 1 = Hill's
+  im_enhanced (base + masks), 0 = the masks alone on mid grey — his "E"
+  panel, and the honest way to judge mask strength and threshold without the
+  stretch in the way. The masks keep the same amplitude at every setting.
+- **The preview of the Partial-conv view now applies the export's 0.75
+  headroom.** It drew `base + k·E` without it, so the page was brighter than
+  the TIFF it stood for.
+
+## 0.23.6
+
+Partial convolution (the Hill layer), measured on the 600 mm reference workdir
+before and after, no re-stack (the masks rebuild from the cache on Start).
+
+- **The tangential sigma is in arc length.** The polar grid is sampled at one
+  pixel of arc at r_max and was blurred with the same sigma in both grid axes,
+  so at the limb the tangential sigma was σ·R/r_max — 0.25 px for the 2 px mask,
+  4 px for the 32 px one — and every mask was a radial-only high-pass near the
+  Sun. Thesis eq. 5.1 puts the tangential Gaussian in arc length so that one σ
+  enhances one structure size everywhere; so does eclipsetools. Now per radial
+  band, σ_t = σ·nth/(2πr), bands growing geometrically so r varies ≤25% inside
+  one. What this changes: structure is enhanced independent of direction
+  (thesis condition c). What it does NOT change: the grain — see below.
+- **Second-order normalized convolution at the limb** (Knutsson & Westin 1993
+  §3.5, eq. 9, basis {1, ρ, ρ²}): the blur is a weighted quadratic fit along
+  the radius evaluated at the pixel, not a weighted mean, so a one-sided kernel
+  on the curved log profile just outside the Moon is unbiased. Identical to the
+  mean away from any mask. The raw collar of the 8 px mask (before the
+  azimuthal-median step), in units of its far-field rms: mean 4–6 → linear fit
+  1–4 → quadratic ≤0.6; the 32 px mask 12 → 3–5 → 2–4, and after the
+  azimuthal median ≤1.4 at the brightest azimuth against 1.8 with the line.
+- **The fit's basis is measured from the pixel, not from the band centre**
+  (mask build 9). Build 8 measured ρ from the middle of each radial band, so a
+  2 px kernel 300 px from it was fitting a parabola through three nearly
+  parallel columns (condition number ~(ρ/σ)⁴) from float32 moments, and at the
+  radii where the cancellation went worst the solve returned noise: full rings
+  of it, 10× the mask rms, 1–3 px wide, at r = 1175, 1459, 1495, 2410, 2672 …
+  on the reference set. Reproduced on white noise, same rows. Now the moments
+  are taken with kernels g(x)·(x/σ)^k about the pixel; the normal matrix is O(1)
+  everywhere and the blur is the fit's constant term. No rings on the synthetic
+  test, limb bias unchanged.
+- **`_radial_median` fills empty inner bins with the nearest valid value**,
+  not zero; the 5-bin smoothing was dragging that zero into the first bins
+  outside the disc mask.
+- **Noise threshold default 3.0** (was 0). At 0 every mask beyond 2 R is
+  photon noise amplified into grain; at 3 σ those masks are zero and the
+  inner corona keeps its structure.
+- **The masks' own disc is 5 px wider than the render's.** The first pixels
+  outside the disc mask are part Moon (mask margin 9 px, limb ramp 8–10 px) and
+  read as a dark line in every mask (2 px mask: −2.4 to −3.6× the structure
+  signal). No fit repairs data that is dark; they are excluded.
+- **The coverage taper now fades prominence patches only**, not the limb —
+  coverage is measured relative to the disc-only weight — so the dead band
+  ~σ wide per scale around the Moon is gone.
+- `ECLIPSEFORGE_HILL_NODERADIAL=1` skips the azimuthal-median step for an A/B.
+- HILL_BUILD 7; cache family with 0.23.4/0.23.5.
+
+**Not fixed, measured:** the grain. The sub-3 px tangential content of the
+2 px mask at 1.1–1.5 R is 2–3× the photon sigma before and after (it rises
+slightly with the arc-length kernel, as a 2-D high-pass must), correlated over
+1–2 px — demosaic/denoise texture, not photon noise, so the Noise-threshold
+slider cannot reach it. The Amplification slider is normalised to the 2 px
+mask's "structure" rms, which counts that texture as structure. Options are a
+stronger finest-band denoise on the Hill base only, or an empirical (ACF-based)
+noise floor for the normalisation; both need a picture judgement.
+
+## 0.23.5
+
+- **Neutralise radial removed.** Measured at stack time on the full pipeline
+  only, stored in the work directory rather than the settings file (so it could
+  not travel and could not be reproduced by sending someone your settings),
+  never implemented in the browser preview (inert on screen, live on export),
+  and unbounded: a channel median through zero became a gain of a million in
+  one channel. Neutralise corona and Neutralise sky cast are unchanged.
+- **Remove sky removed** from the simple stack. Subtracting each frame's own
+  corner median cost 26–34% more pixel-to-pixel noise beyond 3 R on a 251-frame
+  set and shifted the measured ladder by 15%. One black level from the shortest
+  tier; the sky is left in.
+- **The simple stack (fallback) is calibrated now.** Bias, dark and flat when
+  present through the same cached builders the full pipeline uses; the camera's
+  as-shot white balance and the camera→sRGB matrix per frame; raw-saturated
+  photosites flagged at 2×2 before anything scales them and excluded from the
+  tier mean. A 3-plane FITS is used as written. A black level that a FITS does
+  not report is taken off before the flat divides (a constant through a
+  division becomes a gradient).
+- **The simple stack's exposure ratio is a slope fit**, not a median of ratios;
+  the latter is biased by any additive error common to both tiers. Synthetic
+  5.000× steps: 5.34 / 5.45 / 5.10 before, 4.98 / 4.99 / 5.00 after.
+- **It stays the fallback.** Promoted to the only merge for one lab build, it
+  printed the exposure-group boundaries as concentric isophotes on the 600 mm
+  reference bracket (12 tiers, 1.5–3× steps): the hat weight has hard edges per
+  group and nothing feathers across them. The full pipeline's ladder solve,
+  feather and tier projection exist for exactly that.
+- **Black-point warning** on export when green and blue clip to zero while red
+  stays up (63% of the corona on the export that prompted it; silent on a clean
+  one).
+- **Recipe files** round-trip the Simple stack checkbox (`.value` on a checkbox
+  does nothing) and carry the `simple` key.
+- **FITS without a saturation keyword** no longer assumes 65535: bit depth, as
+  in `fits.py`; float data falls back to its own maximum.
+- `tools/synthetic_bracket_test.py`: regression test for the simple stack.
+  `tools/skyfit.py`: prototype of a post-merge sky measurement, with numbers.
+- Cache family 0.23.4 ↔ 0.23.5: the normal path writes the same data.
+
 ## 0.23.4
 
 **The simple stack no longer removes the sky by default.** It subtracts each

@@ -178,7 +178,7 @@ def self_test():
     # 4. both at once -- the honest hard case
     row("floor 107 AND 3%/step gain",
         _synth(secs, 1662, 107.0, gain_per_step=1.03, noise=0.5), 107.0, False, 3.0)
-    # 5. Val's three channels, as measured
+    # 5. a third tester's three channels, as measured
     for name, rate, floor in (("R", 1164.9, 102.73), ("G", 1462.3, 116.23),
                               ("B", 1661.9, 222.76)):
         row("Val-like %s: rate %.0f, floor %.1f" % (name, rate, floor),
@@ -205,7 +205,7 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 # The estimator that survives contact with a real bracket.
 #
-# fit_floor above refuses Val's set, and it is right to: over 0.05-2.96 s the
+# fit_floor above refuses a third tester's set, and it is right to: over 0.05-2.96 s the
 # three channels bend away from a straight line by 1.9%, 2.3% and 2.8% of the
 # signal. A bend is a gain error compounding along the ladder, and by the
 # argument at the top of this file a fitter that cannot see it will spend it on

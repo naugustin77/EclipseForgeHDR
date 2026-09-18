@@ -70,7 +70,7 @@ def write_cube(path, cube, exptime, when):
 
 
 # Gains, so the three channels are not identical and the fit has something to
-# separate. Roughly Val's measured rates.
+# separate. Roughly a third tester's measured rates.
 _GAIN = (0.70, 0.88, 1.00)
 #: planted floors, ADU. Blue carries an extra 100 on top of the shared 4.
 _FLOOR = (0.0, 0.0, 100.0)

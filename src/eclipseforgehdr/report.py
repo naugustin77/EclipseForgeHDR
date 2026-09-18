@@ -572,6 +572,14 @@ def build(stats):
                 A(f"             : {_vis} px of that outside the disc mask; the "
                   f"rest sits under it and does not reach the picture")
 
+    _bc = stats.get("bg_chroma")
+    if isinstance(_bc, list) and len(_bc) == 3:
+        A("sky colour   : far field R %.3f G %.3f B %.3f (unit luminance) — Neutralise sky "
+          "cast divides the corona's chroma by this, weighted by chroma confidence, so "
+          "the region already faded to grey is not corrected twice" % tuple(_bc))
+        _bn = (stats.get("params") or {}).get("bgNeutral")
+        if _bn is not None:
+            A("             : applied at %.2f (1.0 = the full sky colour divided out)" % float(_bn))
     A("")
     A("PROCESSING")
     A("-" * 60)
@@ -583,85 +591,94 @@ def build(stats):
     # false by omission. One line at the top fixes that for all of them.
     _simple = stats.get("mode") == "simple stack"
     if _simple:
-        A("MODE         : SIMPLE STACK — the fallback path")
-        A("             : align, average each exposure group, measure the "
-          "exposure ratios")
-        A("             : from the pixels, merge. No dark, no flat, no "
-          "hot-pixel repair, no")
-        A("             : ladder solve, no LDIC, no feather, no tier "
-          "projection.")
-        A("             : The selectors marked [bypassed] below were NOT "
-          "consulted.")
-        # Printed ALWAYS, both ways round, because a control that is silent when
-        # it is off cannot be told apart from a control that never ran -- which
-        # is exactly how a keep-sky comparison came back as "no difference".
-        if stats.get("simple_keep_sky"):
-            A("             : sky LEFT IN (the default) — only the black level "
-              "was subtracted,")
-            A("             : measured on the shortest tier")
-        else:
-            A("             : SKY REMOVED — each frame's own corner median per "
-              "channel, which is")
-            A("             : the black level AND the sky together")
+        _cal = stats.get("calibration") or {}
+        A("MODE         : SIMPLE STACK — the fallback path. Per-frame "
+          "calibration, align, average each exposure")
+        A("             : group, measure the exposure ratios from the pixels, "
+          "merge, then the layers.")
+        A("             : No hot-pixel repair, no ladder solve, no LDIC, no "
+          "feather, no tier projection.")
+        A("             : The sky is LEFT IN — one black level for the whole "
+          "set, from the")
+        A("             : shortest tier — so it reaches the render as one "
+          "constant per channel,")
+        A("             : where it can be measured and dealt with once.")
         A("")
-    A(f"denoise      : {o.get('denoise', '?')}")
-    A(f"earthshine   : {'on' if o.get('earthshine') else 'off'}")
-    # EVERY SELECTOR THAT CHANGES THE RESULT, NAMED. Two of these used to be
-    # readable only by inference -- the FNRGF preset from the order it logged,
-    # the merge weight from its own line -- and the other three not at all. A
-    # run whose settings cannot be read off its own report cannot be compared
-    # with another run, which is the whole point of having selectors.
-    _sel = [("correlation  ", "align_corr", "semi",
-             {"cross": "cross-correlation",
-              "semi": "semi-phase (amplitude floor)",
-              "phase": "full phase (whitened)"}),
-            ("align filter ", "align_filter", "isotropic",
-             {"isotropic": "isotropic high-pass",
-              "tangential": "tangential (radial removed)"}),
-            ("tier combine ", "stack_combine", "mean",
-             {"mean": "mean (no per-pixel rejection)",
-              "clip": "clipped mean (kappa-sigma)"}),
-            ("FNRGF        ", "fnrgf_preset", "ours",
-             {"ours": "EFHDR (order 6, hard cutoff)",
-              "published": "published (order 30, attenuated)"}),
-            ("photom solve ", "photo_solve", "chain",
-             {"chain": "chain (from the middle tier)",
-              "network": "network (least squares)"}),
-            ("tiers        ", "tier_mode", "exposure",
-             {"exposure": "by shutter speed",
-              "frame": "per frame (grouping ignored)"})]
-    # Which of these the simple path actually consults. FNRGF does -- it is a
-    # detail-layer setting and the detail layers run normally. The rest are
-    # merge and alignment settings that simple.py does not read at all.
-    _used_by_simple = {"fnrgf_preset"}
-    for _lab, _key, _dflt, _names in _sel:
-        _v = str(o.get(_key, _dflt))
-        _note = "" if _v == _dflt else "   [not the default]"
-        if _simple and _key not in _used_by_simple:
-            _note = "   [bypassed — simple stack]"
-        A(f"{_lab}: {_names.get(_v, _v)}{_note}")
-    # NEITHER OF THESE HAPPENS ON AN IMPORT (0.22.78). An imported HDR has no
-    # raw frames: nothing was despeckled and nothing was selected, but the
-    # report printed "repaired" and "all frames per tier (best SNR)" all the
-    # same -- stating as done two steps the run never reached.
-    if _simple:
-        A("hot pixels   : not repaired — the simple path does no defect "
-          "correction")
-        A("frames used  : every frame of every group, averaged")
-        A("merge weight : n/a — a hat on the pixel value, no feather, not the "
-          "toolbar setting")
-        A("white balance: n/a — the simple path applies none")
-    elif stats.get("mode") == "imported HDR":
-        A("hot pixels   : n/a — an imported image has no raw frames to repair")
-        A("frames used  : n/a — one finished image, imported")
+        A(f"denoise      : {o.get('denoise', '?')}")
+        _fn = {"ours": "EFHDR (order 6, hard cutoff)",
+               "published": "published (order 30, attenuated)"}
+        _v = str(o.get("fnrgf_preset", "ours"))
+        A(f"FNRGF        : {_fn.get(_v, _v)}"
+          + ("" if _v == "ours" else "   [not the default]"))
+        if stats.get("planes_input"):
+            A("calibration  : none — 3-plane FITS, calibrated and colour-managed "
+              "by whatever wrote it")
+            A("white balance: none — the file's own colour, used as written")
+        else:
+            _parts = []
+            if _cal.get("bias_applied"):
+                _parts.append("bias subtracted")
+            elif _cal.get("black_pre_flat") is not None:
+                _parts.append("black level %.1f ADU subtracted (shortest "
+                              "tier's raw corners)" % _cal["black_pre_flat"])
+            if _cal.get("dark_applied"):
+                _parts.append("dark subtracted (scaled by exposure)")
+            if _cal.get("flat_applied"):
+                _parts.append("flat divided")
+            if _parts:
+                A("calibration  : " + ", ".join(_parts) + " — per frame, before "
+                  "demosaic")
+            else:
+                A("calibration  : none found — no bias/, darks/ or flats folder "
+                  "beside the raws")
+            for _k in ("flat_error", "calib_error"):
+                if _cal.get(_k):
+                    A(f"             : {_k.split('_')[0]} skipped: {_cal[_k]}")
+            A("white balance: camera (as shot) multipliers and the camera->sRGB "
+              "matrix, per frame")
+        A("hot pixels   : not repaired")
+        A("frames used  : every frame of every group, averaged; a raw-saturated "
+          "pixel is left out")
+        A("merge weight : a hat on the pixel value — zero at the noise floor, "
+          "zero towards")
+        A("             : saturation, no exposure-time term")
     else:
-        A(f"hot pixels   : "
-          f"{'repaired' if o.get('despeckle', True) else 'left as shot'}")
-        _fm = {"all": "all frames per tier (best SNR)",
-               "best50": "sharpest half per tier",
-               "best": "sharpest frame only (max detail)"}
-        A(f"frames used  : "
-          f"{_fm.get(o.get('frames', 'all'), o.get('frames', 'all'))}")
+        A(f"denoise      : {o.get('denoise', '?')}")
+        A(f"earthshine   : {'on' if o.get('earthshine') else 'off'}")
+        _sel = [("correlation  ", "align_corr", "semi",
+                 {"cross": "cross-correlation",
+                  "semi": "semi-phase (amplitude floor)",
+                  "phase": "full phase (whitened)"}),
+                ("align filter ", "align_filter", "isotropic",
+                 {"isotropic": "isotropic high-pass",
+                  "tangential": "tangential (radial removed)"}),
+                ("tier combine ", "stack_combine", "mean",
+                 {"mean": "mean (no per-pixel rejection)",
+                  "clip": "clipped mean (kappa-sigma)"}),
+                ("FNRGF        ", "fnrgf_preset", "ours",
+                 {"ours": "EFHDR (order 6, hard cutoff)",
+                  "published": "published (order 30, attenuated)"}),
+                ("photom solve ", "photo_solve", "chain",
+                 {"chain": "chain (from the middle tier)",
+                  "network": "network (least squares)"}),
+                ("tiers        ", "tier_mode", "exposure",
+                 {"exposure": "by shutter speed",
+                  "frame": "per frame (grouping ignored)"})]
+        for _lab, _key, _dflt, _names in _sel:
+            _v = str(o.get(_key, _dflt))
+            _note = "" if _v == _dflt else "   [not the default]"
+            A(f"{_lab}: {_names.get(_v, _v)}{_note}")
+        if stats.get("mode") == "imported HDR":
+            A("hot pixels   : n/a — an imported image has no raw frames to repair")
+            A("frames used  : n/a — one finished image, imported")
+        else:
+            A(f"hot pixels   : "
+              f"{'repaired' if o.get('despeckle', True) else 'left as shot'}")
+            _fm = {"all": "all frames per tier (best SNR)",
+                   "best50": "sharpest half per tier",
+                   "best": "sharpest frame only (max detail)"}
+            A(f"frames used  : "
+              f"{_fm.get(o.get('frames', 'all'), o.get('frames', 'all'))}")
 
     A("")
     A("METHODS")
@@ -697,8 +714,7 @@ def build(stats):
                 "plain phase correlation of a half-resolution high-passed log "
                 "green channel, every frame tied directly to the first frame of "
                 "the shortest tier. No link network, no prominence anchors, no "
-                "lag-2 solve -- deliberately sharing nothing with the normal "
-                "path, so that this run is an independent check on it",
+                "lag-2 solve",
             "HDR merge":
                 "weighted average of the tier means divided by exposure ratios "
                 "MEASURED between adjacent tiers on pixels well exposed in both, "
@@ -708,10 +724,16 @@ def build(stats):
                 "in the outer field where it holds only noise",
             "Demosaic":
                 "a 3-plane FITS is read as planes, with no mosaic/demosaic round "
-                "trip at all; a Bayer raw takes Malvar-He-Cutler as usual",
+                "trip at all, and used as written. A Bayer raw takes "
+                "Malvar-He-Cutler after bias, dark and flat (when present), "
+                "then the camera's as-shot white balance and the camera->sRGB "
+                "matrix, per frame -- the same instrumental steps the full "
+                "pipeline applied. Raw-saturated photosites are flagged at 2x2 "
+                "superpixel resolution BEFORE any of that scales them, and "
+                "excluded from the tier mean",
             "Inner corona":
                 "MGN of the mean of the four shortest tiers, put on the merged "
-                "scene's scale. Independent of the merge, as on the normal path",
+                "scene's scale. Independent of the merge",
         }
     # The Demosaic entry used to be a constant, so a run made with VNG still
     # reported Malvar-He-Cutler in its own methods section -- the report

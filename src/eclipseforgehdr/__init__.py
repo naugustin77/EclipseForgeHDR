@@ -1,4 +1,4 @@
-__version__ = "0.23.4"
+__version__ = "0.23.7"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -309,6 +309,13 @@ CACHE_FAMILIES = (
     # under the new report. A full re-stack is correct here, and it is exactly
     # the case the "a wrong reuse costs a wrong picture" rule exists for.
     frozenset({"0.22.87", "0.23.0", "0.23.1"}),
+    # 0.23.5 changes nothing the normal path writes into the work directory:
+    # it removes a render-time slider and its stack-time measurement, and
+    # changes the fallback path, which has its own opts.json mode. A 0.23.4
+    # stack is the same data.
+    # 0.23.6 rebuilds only the partial-convolution masks (HILL_BUILD 7);
+    # the stack is the same data. 0.23.7 likewise (HILL_BUILD 10).
+    frozenset({"0.23.4", "0.23.5", "0.23.6", "0.23.7"}),
 
 )
 

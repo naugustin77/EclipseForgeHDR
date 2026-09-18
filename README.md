@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.4
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.7
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
 
@@ -183,9 +183,15 @@ and the prominences are excluded from both the convolution and its
 normalisation, so nothing is smeared out of them into the corona. It is also
 additive and linear where MGN, NAFE and RHEF are multiplicative and locally
 normalised — faint structure stays faint instead of being lifted to the same
-texture as everything else. A noise threshold, set against a per-pixel
-photon-noise model, keeps the far field from being embossed by its own grain.
-After Jonathan Hill, "Advanced Solar Eclipse Photography".
+texture as everything else. Built on the raw merge, not the denoised master,
+so the masks carry honest photon noise and the noise threshold (against a
+per-pixel photon-noise model) means what it says. The 2 px mask is off by
+default — at 600 mm it is the same sky as Hill's 1 px — and the ladder starts
+at 4 px. The base weight slider shows the masks on their own (0, Hill's
+"E" panel, judged at half size) or added to the log-stretched base (1); the
+blend into the composite is an overlay of that grey layer, bounded, so it
+adds contrast and never brightness. After Jonathan Hill, "Advanced Solar
+Eclipse Photography".
 *Sliders: the Partial convolution group. Off by default.*
 
 **Inner — short-exposure inner corona**

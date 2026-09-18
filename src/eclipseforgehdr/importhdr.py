@@ -318,6 +318,12 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
            "geometry": {"cy": cy, "cx": cx, "R": R, "rms": rms,
                         "rays_kept": nk, "rays": nt}}
     _st.update(stats or {})
+    # A caller may add its own PROCESSING keys (the simple path adds its flag).
+    # Merge them onto the defaults rather than letting the update replace the
+    # whole block, which would drop denoise and fnrgf_preset.
+    if isinstance((stats or {}).get("options"), dict):
+        _st["options"] = {"denoise": denoise, "fnrgf_preset": fnrgf_preset,
+                          **stats["options"]}
     _st["geometry"] = {"cy": cy, "cx": cx, "R": R, "rms": rms,
                        "rays_kept": nk, "rays": nt}
     stats = _st

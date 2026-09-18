@@ -1,55 +1,43 @@
-"""The simple stack: align, average, merge on measured ratios. The fallback.
+"""The simple stack: calibrate per frame, align, average per tier, merge on
+measured exposure ratios. THE FALLBACK -- not the merge.
 
-WHY THIS EXISTS. The normal path fits a photometric ladder, a shared pedestal,
-per-channel floors, an azimuthal affine per tier and a feather. Each is there
-for a measured reason, and when the result is wrong none of them can be blamed
-individually because there is no baseline to compare against. This is the
-baseline, and it is offered to the user as a fallback: when nothing else gives a
-clean stack, this gives a stack.
+    read -> bias/dark, flat, demosaic, white balance, colour matrix  (per frame)
+         -> one black level for the whole set, from the shortest tier
+         -> align -> mean per tier
+         -> exposure ratios MEASURED between adjacent tiers (a slope fit)
+         -> hat-weighted linear merge
+         -> importhdr.build_from_rgb: every enhancement layer, as an import
 
-    read -> per-frame per-channel pedestal -> align -> mean per tier
-         -> exposure ratios MEASURED between tiers -> hat-weighted linear merge
+WHY IT IS THE FALLBACK AND NOT THE MERGE (0.23.5). It was promoted to the
+only merge for one build, and on the 600 mm reference bracket -- 12 tiers at
+1.5-3x steps, 2-5 frames each -- it printed the tier boundaries as concentric
+isophotes in the corona. The hat weight has hard window edges per exposure
+group and nothing feathers across them; the full pipeline's photometric ladder
+solve, feather and tier projection exist for exactly that. It had looked clean
+on a 23-tier set with 1.2x steps because there the boundaries are too dense to
+see. So: the normal path is the merge, and this is what you run when the normal
+path gives you something obviously wrong and you want a picture rather than a
+diagnosis, or as a control to find out whether a problem is in the merge or in
+the data.
 
-Then it hands the merge to `importhdr.build_from_rgb`, which is what an imported
-HDR already goes through, so the result opens in the preview with MGN, FNRGF,
-NAFE-VN, the inner-corona layer, Pellett and the prominence gate exactly like
-any other run.
+WHAT IT HAS SINCE 0.23.5 that it did not before: the per-frame instrumental
+steps a Bayer raw needs -- bias, dark, flat when present, the camera's as-shot
+white balance and the camera->sRGB matrix -- and raw-saturated photosites
+excluded from the tier mean. A 3-plane FITS is used as written.
 
-WHAT IT DELIBERATELY DOES NOT DO, and the report says so: no dark, no flat, no
-hot-pixel repair, no lunar masking per tier, no ladder solve, no LDIC, no
-feather, no tier projection. Anything that can fail on an awkward bracket is
-absent, which is the point.
+THE EXPOSURE LADDER IS MEASURED, never read. The header exposure is only a
+grouping key. The ratio is the slope of one tier mean against the previous,
+not a median of ratios: a ratio is biased by any additive error common to both
+tiers, and the black level always carries the shortest tier's sky.
 
-THE ONE THING IT DOES THAT THE NORMAL PATH DOES NOT. The per-frame pedestal is
-the median of the frame's own corners, per channel -- which is black level PLUS
-sky. The normal path removes one constant shared by every tier, correct for a
-black level and wrong for sky, because sky scales with exposure exactly like the
-corona and so survives the merge as a constant added to every pixel. On Val
-Italo's set that constant is 2.4x the corona in red and 6.8x in blue at 2.85 R,
-with the opposite colour. Removing it is most of why this path looks clean.
+THE BLACK LEVEL IS ONE NUMBER, from the shortest tier's corners, used for every
+frame. The sky is LEFT IN: it scales with exposure exactly as the corona does,
+so it reaches the merged result as one constant per channel. Per-frame sky
+removal (0.23.2-0.23.4, "Remove sky") is gone: measured on a 251-frame set it
+cost 26-34% more pixel-to-pixel noise beyond 3 R and shifted the ladder by 15%.
 
-
-    ECLIPSEFORGE_SIMPLE_KEEPSKY=1 subtracts only the BLACK LEVEL and leaves the
-    sky in, as a control. The default subtracts each frame's own corner median,
-    which is black level AND sky together, and it is not obvious from the
-    pictures alone which of the two is doing the work -- the simple path changes
-    many things at once, and attributing the result to the sky step was an
-    inference, not a measurement. This switch isolates it.
-
-    The black level is taken from the FIRST frame of the SHORTEST tier, because
-    a black level does not depend on the shutter speed while sky does, so the
-    shortest exposure is where the corner median is least contaminated by sky.
-    It is then used for every frame. On a bracket whose shortest tier is already
-    long, that estimate still carries some sky and the control is weaker; the
-    log prints the number so it can be judged.
-
-
-ITS LIMIT, stated because a fallback that hides its own failure is worse than no
-fallback. One number per frame per channel cannot follow a sky that varies
-ACROSS the frame. On a small field it works. On the 600 mm reference set the sky varies
-about 28% corner to corner and a constant leaves broad colour blobs beyond ~4 R
--- the failure documented in docs/SKY_SUBTRACTION.md, which no version of this
-has escaped. Judge it by eye.
+WHAT IT DOES NOT DO, and the report says so: no hot-pixel repair, no per-tier
+lunar masking, no ladder solve, no LDIC, no feather, no tier projection.
 """
 from __future__ import annotations
 import os
@@ -90,34 +78,176 @@ def _planes_direct(path):
     try:
         sat = float(sat)
     except (TypeError, ValueError):
-        sat = 65535.0
+        # No saturation keyword. This used to assume 65535 whatever the file
+        # held, so a float FITS scaled 0..1 got a ceiling 65535x too high and
+        # every absolute threshold below it (the ratio floor, the hat) was
+        # wrong by the same factor. The bit depth is the honest guess, as in
+        # fits.py; for float data the data's own maximum is all there is.
+        try:
+            bp = int(h.get("BITPIX", 16))
+        except (TypeError, ValueError):
+            bp = 16
+        mx = float(np.nanmax(a)) if a.size else 1.0
+        sat = (65535.0 if bp == 16 else 255.0 if bp == 8 else max(mx, 1.0))
+        sat = max(sat, mx, 1.0)
     return a, sat
 
 
-def _load(path, demosaic_method="mhc"):
-    """(3, H, W) float32 raw ADU, pedestal not yet removed, and sat_level."""
+def _load(path, demosaic_method="mhc", calib=None, seconds=None):
+    """(3, H, W) float32 scene-linear in sRGB primaries, black level not yet
+    removed, plus the saturation level in the same units.
+
+    A 3-plane FITS comes back as it is: whatever wrote it already calibrated and
+    colour-managed it. A Bayer raw gets, in this order, the same per-frame
+    INSTRUMENTAL steps the full pipeline applies:
+
+        raw saturation mask   decided FIRST, on the sensor's own numbers, at
+                              2x2 superpixel resolution -- a flat brightens a
+                              corner, a matrix mixes channels, and a threshold
+                              tested after either would miss clipped pixels
+        - bias - rate*t       additive, before the multiplicative one
+        / flat
+        demosaic
+        * white balance       the camera's as-shot multipliers (pick_wb)
+        @ cam2rgb             camera primaries -> sRGB primaries
+
+    Saturated raw pixels come back as NaN in all three channels, so the tier
+    mean leaves them out (it counts finite pixels) and no clipped value ever
+    enters the merge. Every other stage here already treats NaN as "absent".
+    """
     direct = _planes_direct(path)
     if direct is not None:
         return direct
-    from .raw import open_frame, demosaic
+    from .raw import open_frame, demosaic, pick_wb
+    from .pipeline import tier_headroom
     rf = open_frame(path)
-    rgb = demosaic(rf.bayer, demosaic_method)
-    return (np.ascontiguousarray(rgb.transpose(2, 0, 1), np.float32),
-            float(rf.sat_level))
+    bay = np.asarray(rf.bayer, np.float32)
+    sat_raw = float(rf.sat_level)
+    h2, w2 = bay.shape[0] // 2, bay.shape[1] // 2
+    _b = bay[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2)
+    satm = (_b >= sat_raw).any(axis=(1, 3))
+    del _b
+    if calib:
+        bias, rate, flat = calib.get("bias"), calib.get("rate"), calib.get("flat")
+        if bias is not None and bias.shape == bay.shape:
+            bay = bay - bias
+        elif calib.get("black") is not None:
+            # ADDITIVE BEFORE MULTIPLICATIVE. A black level that rides through
+            # the flat division stops being a constant: 512 ADU divided by a
+            # vignette of 0.65 in the corner is 788 there and 512 in the
+            # middle, and the one constant subtracted afterwards leaves a
+            # gradient. rawpy raws arrive with the camera's black already off;
+            # a FITS that reports none gets this one, measured once on the
+            # shortest tier's own corners -- see _calibration.
+            bay = bay - np.float32(calib["black"])
+        if rate is not None and rate.shape == bay.shape and seconds:
+            bay = bay - rate * np.float32(seconds)
+        if flat is not None and flat.shape == bay.shape:
+            bay = bay / flat
+    rgb = demosaic(bay, demosaic_method)
+    del bay
+    wb, _ = pick_wb(rf, "camera")
+    rgb *= wb[None, None, :]
+    rgb = (rgb.reshape(-1, 3) @ rf.cam2rgb.T).reshape(rgb.shape)
+    a = np.ascontiguousarray(rgb.transpose(2, 0, 1), np.float32)
+    del rgb
+    if satm.any():
+        full = np.zeros(a.shape[1:], bool)
+        full[: h2 * 2, : w2 * 2] = np.repeat(np.repeat(satm, 2, 0), 2, 1)
+        a[:, full] = np.nan
+        del full
+    del satm
+    # the hat's upper shoulder needs the saturation level in OUTPUT units: white
+    # balance and the matrix push a raw-saturated pixel above sat_raw
+    return a, sat_raw * tier_headroom(wb, rf.cam2rgb)
+
+
+def _calibration(folder, files, flat_dir, secs, progress, short_file=None):
+    """Master bias, dark rate and flat for a Bayer folder, or None.
+
+    Built once, before any light is decoded, through the same cached builders
+    the full pipeline uses -- so a folder that already has masterflat.npy /
+    masterdark.npz beside its layers reuses them. A 3-plane FITS folder gets
+    None: it was calibrated by whatever wrote it.
+    """
+    if _planes_direct(files[0]) is not None:
+        return None, {"note": "3-plane FITS: calibrated by the writer, none applied"}
+    from .pipeline import resolve_flat_dir, resolve_calib_dir, workdir as _wd
+    from . import flat as _flat, dark as _dark
+    from .raw import open_frame
+    wd = _wd(folder)
+    fd = resolve_flat_dir(folder, flat_dir)
+    bd = resolve_calib_dir(folder, "bias")
+    dd = resolve_calib_dir(folder, "dark")
+    info = {"flat_dir": fd, "bias_dir": bd, "dark_dir": dd,
+            "flat_applied": False, "bias_applied": False, "dark_applied": False}
+    if not (fd or bd or dd):
+        return None, info
+    shape = tuple(open_frame(files[0]).bayer.shape)
+    out = {}
+    if fd:
+        try:
+            m, fi = _flat.load_or_build(folder, fd, shape, progress, wd)
+            if m is not None and tuple(m.shape) == shape:
+                out["flat"] = np.asarray(m, np.float32)
+                info["flat_applied"] = True
+                info["flat"] = fi
+        except Exception as e:
+            progress.log(f"flat correction skipped ({e})", None)
+            info["flat_error"] = str(e)
+    if bd or dd:
+        try:
+            bias, rate, ci = _dark.load_or_build(
+                folder, bd, dd, shape, progress, wd,
+                light_iso=None, max_light_seconds=(max(secs) if secs else None))
+            ci.pop("defect_map", None)
+            if bias is not None and tuple(bias.shape) == shape:
+                out["bias"] = np.asarray(bias, np.float32)
+                info["bias_applied"] = True
+            if rate is not None and tuple(rate.shape) == shape:
+                out["rate"] = np.asarray(rate, np.float32)
+                info["dark_applied"] = True
+            info["calib"] = ci
+        except Exception as e:
+            progress.log(f"bias/dark correction skipped ({e})", None)
+            info["calib_error"] = str(e)
+    # A flat with no bias master: the black level has to come off before the
+    # division (see _load). rawpy raws already have it off; a FITS that
+    # reported none does not, and its shortest tier's corners are the one
+    # place to read it with almost no sky in them.
+    if "flat" in out and "bias" not in out and short_file is not None:
+        try:
+            rf = open_frame(short_file)
+            if not getattr(rf, "black_level_reported", True):
+                b = np.asarray(rf.bayer, np.float32)
+                h, w = b.shape
+                cy, cx = max(int(h * 0.04), 8), max(int(w * 0.04), 8)
+                blk = float(np.nanmedian(np.concatenate([
+                    b[:cy, :cx].ravel(), b[:cy, -cx:].ravel(),
+                    b[-cy:, :cx].ravel(), b[-cy:, -cx:].ravel()])))
+                out["black"] = blk
+                info["black_pre_flat"] = blk
+                progress.log("  black level %.1f ADU from the shortest tier's "
+                             "raw corners, subtracted before the flat (this "
+                             "file reports none and there is no bias master)"
+                             % blk, None)
+        except Exception as e:
+            progress.log(f"pre-flat black level not measured ({e})", None)
+    return (out or None), info
 
 
 def _pedestal(a, frac=0.04):
-    """Per-channel median of the four corners: black level AND sky, together.
+    """Per-channel median of the four corners of one frame.
 
-    Taken per channel because a colour cast that changes with radius is exactly
-    a per-channel additive term, and one shared number cannot express it.
+    On the shortest tier this is the black level with almost no sky in it,
+    which is the one use it has now: measured once there, applied everywhere.
     """
     h, w = a.shape[1:]
     cy, cx = max(int(h * frac), 8), max(int(w * frac), 8)
     out = np.empty(3, np.float64)
     for c in range(3):
         p = a[c]
-        out[c] = np.median(np.concatenate([
+        out[c] = np.nanmedian(np.concatenate([
             p[:cy, :cx].ravel(), p[:cy, -cx:].ravel(),
             p[-cy:, :cx].ravel(), p[-cy:, -cx:].ravel()]))
     return out
@@ -198,18 +328,46 @@ def _shift(x, dy, dx, out=None):
 # ------------------------------------------------------------------ merge ---
 
 def _ratio(a, b, sat, lo=200.0):
-    """Median b/a over pixels well exposed in BOTH: the measured ratio.
+    """The exposure ratio between two tier means: the SLOPE of b against a.
 
-    Measured on green and applied to all three channels. On a third tester's 23
-    tiers the channels' own ratios agree to under 1.2% per step and diverge
-    6.8% over the whole ladder, so per-channel freedom buys nothing and costs a
-    noisier estimate.
+    This was median(b / a) over pixels well exposed in both. A ratio of two
+    values is biased by any common additive error -- and there always is one,
+    because the black level comes from the shortest tier's corners and carries
+    that tier's own sky along with it. Subtract the same offset d from both and
+        b / a = (k A - d) / (A - d)  >  k       for d > 0,
+    worst where A is small, which is also where most of the qualifying pixels
+    are. On a synthetic bracket with a known 5.000x step the median read 5.34 /
+    5.45 / 5.10. A straight line b = k a + c absorbs the offset into c and
+    leaves k unbiased: the same bracket then measures 5.00x within 1%.
+
+    Least squares on the masked pixels, then once more without the residual
+    outliers (misregistration, a star, the odd hot photosite). Measured on
+    green and applied to all three channels: on a 23-tier set the channels'
+    own ratios agree to under 1.2% per step, so per-channel freedom buys
+    nothing and costs a noisier estimate.
     """
     m = (np.isfinite(a) & np.isfinite(b) & (a > lo) & (b > lo)
          & (a < sat * 0.8) & (b < sat * 0.8))
-    if m.sum() < 2000:
-        return np.nan, int(m.sum())
-    return float(np.median(b[m] / a[m])), int(m.sum())
+    n = int(m.sum())
+    if n < 2000:
+        return np.nan, n
+    x = a[m].astype(np.float64)
+    y = b[m].astype(np.float64)
+    if x.size > 400000:                       # one number; a sample is plenty
+        idx = np.random.default_rng(0).choice(x.size, 400000, replace=False)
+        x, y = x[idx], y[idx]
+    for _pass in range(2):
+        A = np.vstack([x, np.ones_like(x)]).T
+        (k, c), *_ = np.linalg.lstsq(A, y, rcond=None)
+        res = y - (k * x + c)
+        sd = 1.4826 * float(np.median(np.abs(res - np.median(res)))) + 1e-9
+        keep = np.abs(res) < 3.0 * sd
+        if keep.sum() < 1000 or keep.all():
+            break
+        x, y = x[keep], y[keep]
+    if not np.isfinite(k) or k <= 0:
+        return np.nan, n
+    return float(k), n
 
 
 def _weight(v, sat):
@@ -226,8 +384,8 @@ def _weight(v, sat):
 # -------------------------------------------------------------------- run ---
 
 def run(folder, progress, denoise="fine", demosaic_method="mhc",
-        fnrgf_preset="ours", remove_sky=False):
-    """Stack `folder` the simple way and build every layer the renderer needs."""
+        fnrgf_preset="ours", flat_dir=""):
+    """Stack `folder` and build every layer the renderer needs."""
     from .raw import list_raws, read_exif
     from . import importhdr
     from . import __version__
@@ -242,9 +400,7 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
         raise RuntimeError("no readable frames in this folder")
 
     # The HEADER exposure is used ONLY as a grouping key. Every photometric
-    # number below comes from the pixels -- which matters, because on Val
-    # Italo's set the headers are Siril "manual group assignment" labels
-    # stepping a uniform 1.5x where the pixels measure 1.19 / 1.49 / 1.99.
+    # number below comes from the pixels.
     tiers = {}
     skipped = 0
     for p in files:
@@ -257,46 +413,28 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
     secs = sorted(tiers)
     if len(secs) < 2:
         raise RuntimeError(
-            "the simple stack needs at least two exposure groups; this folder "
+            "the merge needs at least two exposure groups; this folder "
             "has %d" % len(secs))
     n_used = sum(len(v) for v in tiers.values())
-    progress.log(f"simple stack: {n_used} frames in {len(secs)} exposure groups"
+    progress.log(f"{n_used} frames in {len(secs)} exposure groups"
                  + (f" ({skipped} unreadable, skipped)" if skipped else ""), 0.02)
-    progress.log("no dark, no flat, no hot-pixel repair, no ladder solve, no "
-                 "LDIC, no feather — this path is the fallback and does the "
-                 "least a program can do and still merge a bracket", None)
 
-    # DEFAULT SINCE 0.23.4: black level only, sky left in.
-    #
-    # It was the other way round, and the comparison that changed it was run on
-    # a 251-frame FITS set both ways. Subtracting each frame's OWN corner median
-    # flattens the corona's colour with radius -- B/R swing 1.67x against 2.75x,
-    # measured -- and that is the photometrically better answer. It also loses,
-    # on the picture, twice, to the same observer: grainier outer field and an
-    # olive cast where the control is warm and smooth.
-    #
-    # The reason is not taste. A per-frame corner median is 251 independently
-    # estimated constants, each carrying its own error, and each error lands on
-    # a whole frame. Absolute scatter in the outer field measured 4.5 against
-    # 3.3 for the single well-measured constant. So this step removes the sky
-    # AND injects noise, and on that set the noise costs more than the colour
-    # correction gains. The sky being blue also means subtracting it pulls the
-    # residual yellow-green, which is the olive.
-    #
-    # It is also what this path is FOR. The simple stack does the least a
-    # program can do; estimating a sky per frame is not the least. Removing it
-    # stays available for data that shows the colour cast the sky causes.
-    keep_sky = not remove_sky
-    if keep_sky:
-        progress.log("black level only — the sky is LEFT IN. Tick 'Remove sky' "
-                     "if the corona's colour drifts with radius; it flattens "
-                     "the colour but costs noise in the outer field.", None)
-    else:
-        progress.log("REMOVING THE SKY: each frame's own corner median per "
-                     "channel, which is the black level and the sky together.",
-                     None)
+    calib, calib_info = _calibration(folder, files, flat_dir, secs, progress,
+                                     short_file=sorted(tiers[secs[0]])[0])
+    if calib:
+        progress.log("per-frame calibration: "
+                     + ", ".join(k for k in ("bias", "rate", "flat") if k in calib)
+                     .replace("rate", "dark"), None)
+    is_planes = _planes_direct(files[0]) is not None
+    progress.log("SIMPLE STACK -- the fallback path", None)
+    progress.log("3-plane FITS read as planes, used as written" if is_planes else
+                 "Bayer raw: demosaic, camera white balance and colour matrix "
+                 "per frame, as the full pipeline does", None)
+    progress.log("no hot-pixel repair, no ladder solve, no LDIC, no feather; "
+                 "the exposure ratios are measured from the pixels and the sky "
+                 "is left in for the render to decide about", None)
+
     black = None
-
     ref_feat = None
     num = den = None
     prev_g = None
@@ -309,20 +447,20 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
         acc = cnt = None
         shifts = []
         for p in fs:
-            f, sl = _load(p, demosaic_method)
+            f, sl = _load(p, demosaic_method, calib=calib, seconds=s)
             if sat is None:
                 sat = sl
-            _ped = _pedestal(f)
-            if keep_sky:
-                if black is None:
-                    black = _ped.copy()
-                    progress.log("  black level from the shortest tier's first "
-                                 "frame: R %.1f  G %.1f  B %.1f"
-                                 % tuple(black), None)
-                f -= black[:, None, None]
-            else:
-                f -= _ped[:, None, None]
-            ft = _feature(f[1])
+            if black is None:
+                # ONE black level for the whole set, from the exposure where
+                # the sky contributes least. See the module docstring.
+                black = _pedestal(f)
+                progress.log("  black level from the shortest tier's first "
+                             "frame: R %.1f  G %.1f  B %.1f" % tuple(black), None)
+            f -= black[:, None, None]
+            # the alignment feature must be finite: a saturated pixel is NaN
+            # by now, and reads as the saturation level for this purpose,
+            # which is what the sensor recorded there
+            ft = _feature(np.where(np.isfinite(f[1]), f[1], np.float32(sat)))
             if ref_feat is None:
                 ref_feat = ft
                 dy = dx = 0.0
@@ -336,8 +474,9 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
             shifts.append((float(dy), float(dx)))
             g = np.stack([_shift(f[c], dy, dx) for c in range(3)])
             del f
-            ok = np.isfinite(g[0]).astype(np.float32)
+            ok = np.isfinite(g).all(axis=0).astype(np.float32)
             np.nan_to_num(g, copy=False)
+            g *= ok[None]
             acc = g if acc is None else acc + g
             cnt = ok if cnt is None else cnt + ok
             del g, ok
@@ -408,13 +547,19 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
         folder, rgb, progress, denoise=denoise, short_lum=short,
         fnrgf_preset=fnrgf_preset,
         stats={"n_files": n_used, "mode": "simple stack",
-               "simple_keep_sky": keep_sky,
+               "options": {"simple": True},
+               "calibration": calib_info,
+               "planes_input": is_planes,
                "simple_ladder": ladder,
                "simple_ladder_span": {"header": secs[-1] / secs[0],
                                       "measured": rel},
                "tiers": [{"sec": s, "n": len(tiers[s])} for s in secs]},
         opts={"mode": "simple", "denoise": denoise,
-              "keep_sky": keep_sky,
               "fnrgf_preset": fnrgf_preset,
               "demosaic": demosaic_method, "n_files": n_used,
+              "flat_dir": (calib_info or {}).get("flat_dir", ""),
+              "flat_applied": bool((calib_info or {}).get("flat_applied")),
+              "bias_applied": bool((calib_info or {}).get("bias_applied")),
+              "dark_applied": bool((calib_info or {}).get("dark_applied")),
+              "wb_source": "none" if is_planes else "camera",
               "secs": list(secs)})

@@ -103,7 +103,7 @@ print("look file     : carries no processing keys")
 r = app.post("/api/processing/save", json={
     "name": "recipe1",
     "processing": {"align_corr": "cross", "stack_combine": "clip",
-                   "fnrgf_preset": "published"}})
+                   "fnrgf_preset": "published", "simple": "True"}})
 j = r.get_json(); assert j["ok"], j
 ppath = j["path"]
 print("recipe saved  : %d setting(s) -> %s" % (j["n"], os.path.basename(ppath)))
@@ -116,8 +116,10 @@ assert j["ok"], j
 pr = j["processing"]
 assert "notAKeyWeKnow" not in pr, "unknown key was not dropped"
 assert pr["align_corr"] == "cross" and pr["stack_combine"] == "clip", pr
+assert pr["simple"] == "True", "the Simple stack flag must travel in the recipe"
 assert "tier_mode" not in pr, "a key the file omits must not be invented"
 assert (j.get("ids") or {}).get("align_corr") == "alignCorr", j.get("ids")
+assert (j.get("ids") or {}).get("simple") == "simpleStack", j.get("ids")
 assert set(j["changed"]) >= {"align_corr", "stack_combine", "fnrgf_preset"}, j["changed"]
 assert any("does not know" in n for n in j["notes"]), j["notes"]
 print("recipe loaded : %d set, %d flagged for a re-stack, unknown key dropped"

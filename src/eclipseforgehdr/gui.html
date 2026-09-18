@@ -112,12 +112,8 @@ button:disabled{opacity:.45;cursor:default}
         title="Skip stacking entirely and run the enhancement layers on one finished HDR image you already have - from Siril, PixInsight, Photoshop, or this app's own aligned tier TIFFs. 16-bit TIFF or FITS. The tone curve is read from the file's embedded colour profile, so an sRGB export is linearised correctly; a file with no profile must say 'linear' in its name. What you give up: the inner-corona layer is no longer an independent source, the prominence gate is weaker, and there is no alignment or photometry section in the report.">
       <button id="brwImport" class="brw" title="Pick one finished HDR image">Browse…</button>
       <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="THE FALLBACK. Align the frames, average each exposure group, measure the exposure ratios from the pixels themselves, and merge. Nothing else: no dark, no flat, no hot-pixel repair, no photometric ladder, no LDIC, no feather. Every stage that can fail on an awkward bracket is simply absent, so a set the normal path cannot handle still gives a clean stack. It also subtracts each frame's own corner level per channel, which removes the sky as well as the black level - the thing the normal merge has no model for. The result opens in the preview with all the usual enhancement layers. Its limit: one number per frame cannot follow a sky that varies across the frame, so on a wide field expect colour blotches in the far outer corona. Judge it by eye.">
+        title="THE FALLBACK. Align the frames, average each exposure group, measure the exposure ratios from the pixels themselves, and merge. Nothing else: no dark, no flat, no hot-pixel repair, no photometric ladder, no LDIC, no feather. Every stage that can fail on an awkward bracket is simply absent, so a set the normal path cannot handle still gives a clean stack. Since 0.23.5 it applies the same per-frame calibration as the normal path (bias, dark, flat, camera white balance, colour matrix), subtracts ONE black level measured on the shortest tier, and leaves the sky in. Its limit: nothing feathers across exposure groups, so on a bracket with few, widely spaced tiers the group boundaries can print as rings - which is why it is the fallback and not the merge. Judge it by eye.">
         <input type="checkbox" id="simpleStack"> Simple stack
-      </label>
-      <label id="lblRemoveSky" style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Simple stack only. OFF by default: each frame has its own black level subtracted and the SKY IS LEFT IN. Tick this and each frame's own corner median is subtracted per channel instead, which removes the black level AND the sky. That flattens the corona's colour with radius - measured on a 251-frame set, a B/R swing of 1.67x against 2.75x - and it is the photometrically better answer. It also costs noise: a corner median per frame is one independently estimated constant per frame, each with its own error landing on a whole frame, and the outer field measured noisier for it. On the set it was compared on, the version with the sky left in looked better. Tick this if your corona's colour drifts strongly from the limb outwards.">
-        <input type="checkbox" id="simpleRemoveSky"> Remove sky
       </label>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
         Denoise
@@ -274,7 +270,10 @@ button:disabled{opacity:.45;cursor:default}
       <div id="g-hill"></div></div>
     <div class="group"><h2>Inner corona</h2><div id="g-inner"></div></div>
     <div class="group"><h2>Prominences</h2><div id="g-prom"></div></div>
-    <div class="group"><h2>Color</h2><div id="g-color"></div></div>
+    <div class="group"><h2>Color</h2>
+      <button id="pickwb" style="margin:2px 0 8px 0"
+        title="Set the white point from a spot you choose. Press this, then drag a box on the preview (or click for a 5x5 patch). The median colour inside the box is made neutral by setting Warmth and Tint - the same two sliders, so the export matches the preview exactly. Neutralise corona does the same thing automatically from a fixed ring at 1.05-1.6 R; this is the targeted version. Esc cancels.">Pick white point…</button>
+      <div id="g-color"></div></div>
     <div class="group"><h2>Tone</h2><div id="g-tone"></div></div>
     <div class="group"><h2>Diamond ring</h2>
       <input type="text" id="ringpath" placeholder="/path/to/contact_frame.RW2" spellcheck="false"
@@ -358,8 +357,9 @@ const DEFS = [
  ["logK","Log stretch",0,7,0.1,"structure"],
  ["hillMix","Blend into image (0 = off)",0,1,0.01,"hill"],
  ["hillLogK","Base stretch",1,7,0.05,"hill"],
- ["hillGain","Amplification",0,1.2,0.005,"hill"],
+ ["hillGain","Amplification",0,0.2,0.001,"hill"],
  ["hillDenoise","Noise threshold (0 = off)",0,6,0.05,"hill"],
+ ["hillBase","Base weight (0 = masks only)",0,1,0.01,"hill"],
  ["hill0","  2 px",0,2,0.01,"hill"],
  ["hill1","  4 px",0,2,0.01,"hill"],
  ["hill2","  8 px",0,2,0.01,"hill"],
@@ -371,12 +371,10 @@ const DEFS = [
  ["promGain","Prominence contrast",0,2,0.01,"prom"],
  ["promDetail","Prominence detail",0,1,0.01,"prom"],
  ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
- ["temp","Warmth (R/B)",0.8,1.3,0.005,"color"],
- ["tint","Tint (green/magenta)",0.8,1.3,0.005,"color"],
- ["coronaNeutral","Neutralise corona",0,1,0.01,"color"],
- ["radialNeutral","Neutralise radial",0,1,0.01,"color"],
+ ["temp","Temperature (blue ← → yellow)",0.30,1.84,0.001,"color"],
+ ["tint","Tint (green ← → magenta)",0.544,1.84,0.001,"color"],
  ["bgNeutral","Neutralise sky cast",0,1.2,0.01,"color"],
- ["satur","Saturation",0.5,2,0.01,"color"],
+ ["satur","Saturation",0.5,2,0.001,"color"],
  ["hlCompress","Highlight compression",0,1,0.01,"color"],
  ["hlDesat","Highlight desaturation",0,0.8,0.01,"color"],
  ["outGamma","Output gamma",0.8,1.8,0.01,"tone"],
@@ -391,6 +389,40 @@ const DEFS = [
 ];
 let VIEW = "composite";
 let P = {}, GEO = null, L = {}, ready = false;
+
+// HOW THREE SLIDERS ARE SHOWN, as against what they are.
+//
+// Temperature, Tint and Saturation are stored, exported and saved as what the
+// render uses: two colour gains (R*t, B/t; G*tint) and an exponent on the
+// chroma. On screen they read the way Camera Raw's do: 0 is "as stacked",
+// Temperature runs -300..+150 (blue..yellow), Tint -150..+150 (green..magenta,
+// + is magenta = LESS green), Saturation -100..+100. The map is logarithmic,
+// which is what a gain should be, and symmetric: +100 is x1.5, -100 is x1/1.5;
+// Saturation's +100 is exponent 2, -100 is 0.5. Temperature reaches further
+// down than Camera Raw's -150 because a corona a few degrees above the
+// horizon is reddened by the atmosphere far more than any daylight scene:
+// on the 600 mm reference set the picker wanted below -150 and clamped.
+//
+// ONLY the control changes. P, the settings file, the export sidecar, the
+// report and render.py all keep the multiplier, so a file saved under the old
+// labels loads as the same picture, and nothing here can open a
+// preview/export gap.
+const DISPLAY = {
+  temp:  {min:-300, max:150, step:1,
+          to:   m => 100*Math.log(m)/Math.log(1.5),
+          from: d => Math.pow(1.5, d/100)},
+  tint:  {min:-150, max:150, step:1,
+          to:   m => -100*Math.log(m)/Math.log(1.5),
+          from: d => Math.pow(1.5, -d/100)},
+  satur: {min:-100, max:100, step:1,
+          to:   m => 100*Math.log2(m),
+          from: d => Math.pow(2, d/100)},
+};
+const dispFmt = v => { const n = Math.round(v); return (n > 0 ? "+" : "") + n; };
+// slider position -> P value, and P value -> what the control shows
+function dispTo(k, m){ const d = DISPLAY[k]; return d ? d.to(m) : m; }
+function dispFrom(k, v){ const d = DISPLAY[k]; return d ? d.from(v) : v; }
+function dispText(k, v){ return DISPLAY[k] ? dispFmt(v) : String(v); }
 const $ = id => document.getElementById(id);
 
 // Controls that only work when an optional cached layer is present. Without
@@ -407,8 +439,11 @@ function buildSliders(defaults){
     const off = need && GEO && !GEO[need[0]];
     if (off) P[k] = 0;                     // never render with a weight we cannot honour
     const div = document.createElement("div"); div.className = "ctl";
-    div.innerHTML = `<label${off?' style="opacity:.45"':''}>${label}${off?' \u2014 '+need[1]:''}<span class="val" id="v_${k}">${off?"n/a":defaults[k]}</span></label>
-      <input type="range" id="s_${k}" min="${min}" max="${max}" step="${step}" value="${off?0:defaults[k]}"${off?' disabled':''}>`;
+    const D = DISPLAY[k];
+    const smin = D ? D.min : min, smax = D ? D.max : max, sstep = D ? D.step : step;
+    const sval = off ? 0 : dispTo(k, defaults[k]);
+    div.innerHTML = `<label${off?' style="opacity:.45"':''}>${label}${off?' \u2014 '+need[1]:''}<span class="val" id="v_${k}">${off?"n/a":dispText(k, sval)}</span></label>
+      <input type="range" id="s_${k}" min="${smin}" max="${smax}" step="${sstep}" value="${sval}"${off?' disabled':''}>`;
     // A slider naming a group that does not exist used to throw here, and the
     // throw happened during init -- so ONE bad group id in the table above left
     // the app with no sliders, no preview and no error the user could see, while
@@ -419,7 +454,7 @@ function buildSliders(defaults){
     _grp.appendChild(div);
     const el = div.querySelector("input");
     el.addEventListener("input", () => {
-      P[k] = parseFloat(el.value); $("v_"+k).textContent = el.value;
+      P[k] = dispFrom(k, parseFloat(el.value)); $("v_"+k).textContent = dispText(k, el.value);
       scheduleRender();
     });
   }
@@ -488,18 +523,6 @@ function syncStart(){
   }
 }
 $("importPath").addEventListener("input", syncStart);
-// Remove sky belongs to the simple stack and does nothing on the normal path:
-// its step (a corner median per frame) exists only there. Leaving it live would
-// promise a control that is silently ignored, so it is disabled and dimmed
-// unless Simple stack is on.
-function syncSimpleSky(){
-  const on = $("simpleStack").checked;
-  $("simpleRemoveSky").disabled = !on;
-  const L = $("lblRemoveSky");
-  if (L){ L.style.opacity = on ? "1" : "0.4"; L.style.cursor = on ? "" : "not-allowed"; }
-}
-$("simpleStack").addEventListener("change", syncSimpleSky);
-syncSimpleSky();
 $("simpleStack").addEventListener("change", () => {
   // Ticking it mid-session must not silently reuse the normal path's layers;
   // the server compares opts.json["mode"], and this only keeps the two paths'
@@ -536,8 +559,6 @@ async function startRun(){
                           flatDir: $("flatDir").value,
                           importPath: $("importPath").value,
                           simple: $("simpleStack").checked,
-                          simpleRemoveSky: $("simpleStack").checked
-                                            && $("simpleRemoveSky").checked,
                           frames: $("frames").value})});
   let _j = null;
   try { _j = await _r.json(); } catch (e) { _j = null; }
@@ -709,7 +730,7 @@ const _ss = x => { x = x<0?0:x>1?1:x; return x*x*(3-2*x); };
 // Accumulated inside the pixel loop that is already running and used on the
 // NEXT render -- neither sum depends on it, so there is no feedback and it
 // settles in one frame. renderNow schedules that frame itself when it moves.
-let HSCL = 1;
+
 
 async function loadLayers(){
   GEO = await (await fetch("/api/geometry")).json();
@@ -723,7 +744,7 @@ async function loadLayers(){
   // preview and the file disagreed. Going 250mm -> 360mm -> 600mm in one
   // session is exactly the sequence that hits it.
   L = {};
-  HSCL = 1;                       // the level match belongs to the old stack
+
   if (VIEW !== "composite" && !GEO.hasHill && VIEW === "partialconv")
     VIEW = "composite";           // its button is about to be hidden
   if (Object.keys(P).length === 0) buildSliders(GEO.defaults);
@@ -929,7 +950,9 @@ function renderNow(){
   // the rms of the FINEST mask -- one number for the whole set, so the ratios
   // between scales stay exactly Hill's. Mirrors render.py.
   const HMIX = (GEO.hasHill ? (P.hillMix||0) : 0), HN = GEO.nHill||0;
-  const HSPAN = GEO.hillSpan || [], HRMS = GEO.hillRms || [];
+  const HSPAN = GEO.hillSpan || [];
+  // normalised to the STRUCTURE rms, as render.py is -- see server.py
+  const HRMS = ((GEO.hillRmsStruct||[]).length === HN) ? GEO.hillRmsStruct : (GEO.hillRms || []);
   // the ladder is NORMALISED -- balance on the five, strength on the master;
   // see render.py
   const HDEF = [1,0.6,0.2,0.1,0.05];
@@ -966,13 +989,12 @@ function renderNow(){
   // leaves alone. Without this the threshold cuts ~3.5x too hard at 2 px here
   // and correctly in the export -- see the note beside hill_prev_att.
   const HATT = GEO.hillPrevAtt || [];
-  let hsA = 0, hsB = 0, hsN = 0;
+
   // Hill's im_enhanced at one pixel. Factored out because the Hill VIEW and
   // the composite must be the same number -- the view is what gets tuned and
   // exported, so a second copy of this arithmetic would be a second image.
-  function hillYh(j){
-    const ui = L.hilllog[j]*256 + L.hilllog[j+1];
-    const hl = HLUT ? HLUT[ui] : ui/65535;
+  // the masks alone, in im_log units (k*E); hillYh adds the base
+  function hillE(j){
     let E = 0;
     for (let k=0;k<HN;k++){
       if (!HG[k] || !HL[k]) continue;
@@ -985,7 +1007,24 @@ function renderNow(){
       }
       E += HG[k]*mv;
     }
-    return hl + HK*E;
+    return HK*E;
+  }
+  function hillYh(j){
+    const ui = L.hilllog[j]*256 + L.hilllog[j+1];
+    const hl = HLUT ? HLUT[ui] : ui/65535;
+    return hl + hillE(j);
+  }
+
+  // The Partial-conv VIEW: render.py's headroom (0.75, so the masks have
+  // somewhere to go above the limb) and the base weight -- see the note there.
+  // Until 0.23.7 the page drew hl + k*E with no headroom, so the preview was
+  // brighter than the TIFF it stood for.
+  const HB = (P.hillBase == null) ? 1 : Math.max(0, Math.min(1, P.hillBase));
+  function hillView(j){
+    const ui = L.hilllog[j]*256 + L.hilllog[j+1];
+    const hl = HLUT ? HLUT[ui] : ui/65535;
+    const yh = hillYh(j);
+    return 0.75*yh + (1-HB)*(0.5 - 0.75*hl);
   }
   // Single-layer views. This used to be a ternary chain ending in a bare
   // `: pr[j]/255`, so ANY view not spelled out in it drew the prominence gate
@@ -995,6 +1034,12 @@ function renderNow(){
   // layer is missing falls back to the composite rather than to whichever
   // layer happened to be last in the chain.
   const VSRC = {nafe:"nafe", tangential:"pel", prom:"prom", flat:"flat"};
+  let HDISC = 0.5;
+  if (VIEW==="partialconv" && L.hilllog){
+    // GEO.cy/cx/W/H are in the layers' own (preview) frame
+    const cyi = Math.round(GEO.cy), cxi = Math.round(GEO.cx);
+    if (cyi >= 0 && cyi < GEO.H && cxi >= 0 && cxi < GEO.W) HDISC = hillView((cyi*GEO.W + cxi)*4);
+  }
   const vHill = VIEW==="partialconv" && !!L.hilllog;
   const vComputed = VIEW==="mgn" || VIEW==="fnrgf" || VIEW==="inner" || vHill;
   const vArr = VSRC[VIEW] ? L[VSRC[VIEW]] : null;
@@ -1004,8 +1049,10 @@ function renderNow(){
   for (let i=0,j=0; i<wf.length; i++,j+=4){
     const [mg, fn, inEff] = detailAt(j);
     if (solo){
+      // the Partial-conv view paints the disc out to the masks' own edge
+      // (Rmask + pad), at the base value at the Moon's centre -- see render.py
       const v = VIEW==="mgn" ? mg : VIEW==="fnrgf" ? fn : VIEW==="inner" ? inEff
-                : vHill ? hillYh(j) : vArr[j]/255;
+                : vHill ? ((rr_[i] < L.rmask[i] + 6/DEC) ? HDISC : hillView(j)) : vArr[j]/255;
       const b = Math.max(0, Math.min(255, v*255));
       d[j]=b; d[j+1]=b; d[j+2]=b; d[j+3]=255;
       continue;
@@ -1040,11 +1087,10 @@ function renderNow(){
     // Hill's chain -- MUST match render.py's block of the same name, or the
     // sliders are tuned on one image and applied to another on export
     if (HMIX > 0 && L.hilllog){
-      // matched in level first -- HSCL is measured in the pre-pass below, so
-      // the slider compares STRUCTURE and not brightness (see render.py)
-      const yh = hillYh(j);
-      if (r > 1.15*GEO.R && r < 3.0*GEO.R){ hsA += Y; hsB += yh; hsN++; }
-      Y = (1-HMIX)*Y + HMIX*HSCL*yh;
+      // OVERLAY of the masks-only layer (0.5 + 0.75 k E) at opacity HMIX --
+      // bounded, so no blow-out; see render.py
+      const dd = Math.max(-0.5, Math.min(0.5, HMIX*0.75*hillE(j)));
+      Y = Y < 0.5 ? Y*(1 + 2*dd) : 1 - (1 - Y)*(1 - 2*dd);
     }
     // driven by the prominence layer when the workdir has one -- see the
     // measurement in render.py beside the same line
@@ -1095,13 +1141,6 @@ function renderNow(){
   }
   octx.putImageData(out, 0, 0);
   draw();
-  // settle the Hill level match; see the note beside HSCL
-  if (HMIX > 0 && hsN > 100 && hsB > 1e-9){
-    const ns = (hsA/hsN) / (hsB/hsN);
-    if (isFinite(ns) && ns > 0 && Math.abs(ns/HSCL - 1) > 0.01){
-      HSCL = ns; scheduleRender();
-    }
-  }
 }
 document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () => {
   VIEW = b.dataset.view;
@@ -1122,15 +1161,116 @@ cv.addEventListener("wheel", e => {
   draw();
 }, {passive:false});
 let drag = null;
-cv.addEventListener("pointerdown", e => {drag=[e.clientX,e.clientY,vtx,vty]; cv.setPointerCapture(e.pointerId);});
+cv.addEventListener("pointerdown", e => {
+  if (PICKWB){ pickStart(e); cv.setPointerCapture(e.pointerId); return; }
+  drag=[e.clientX,e.clientY,vtx,vty]; cv.setPointerCapture(e.pointerId);
+});
 cv.addEventListener("pointermove", e => {
+  if (PICKWB){ pickMove(e); return; }
   if (!drag || !GEO) return;
   const rc = cv.getBoundingClientRect(), s = GEO.W/rc.width;
   vtx = drag[2]+(e.clientX-drag[0])*s; vty = drag[3]+(e.clientY-drag[1])*s;
   clampView(); draw();
 });
-cv.addEventListener("pointerup", () => drag=null);
-cv.addEventListener("dblclick", () => {vz=1; vtx=vty=0; draw();});
+cv.addEventListener("pointerup", e => { if (PICKWB){ pickEnd(e); return; } drag=null; });
+cv.addEventListener("dblclick", () => { if (PICKWB) return; vz=1; vtx=vty=0; draw(); });
+
+/* ---- white point picker -----------------------------------------------
+   Photoshop's eyedropper, on the preview. The box's median chroma is taken
+   from the SAME ratio layer the render uses and pushed through the same
+   chain up to the point where Warmth and Tint apply -- saturation, sky-cast
+   and corona neutralise included -- and then those two sliders are solved
+   so the sample renders neutral. Only two existing sliders move, and both
+   already render identically here and in the TIFF, so this cannot open a
+   preview/export gap. Warmth and Tint are the last two gains before the
+   luminance renormalisation:
+       aR*temp : aG*tint : aB/temp = 1 : 1 : 1
+       =>  temp = sqrt(aB/aR),  tint = aR*temp/aG                          */
+let PICKWB = false, pickA = null, pickRect = null;
+function canvasToLayer(e){
+  // client -> canvas pixels -> undo the view transform -> undo the orientation
+  const rc = cv.getBoundingClientRect();
+  const cxp = (e.clientX-rc.left)*cv.width/rc.width, cyp = (e.clientY-rc.top)*cv.height/rc.height;
+  const ux = (cxp-vtx)/vz, uy = (cyp-vty)/vz;
+  let x = ux, y = uy;
+  if (ORIENT === "flipv"){ y = GEO.H-uy; }
+  else if (ORIENT === "fliph"){ x = GEO.W-ux; }
+  else if (ORIENT === "180"){ x = GEO.W-ux; y = GEO.H-uy; }
+  else if (ORIENT === "cw"){ x = uy; y = GEO.H-ux; }
+  else if (ORIENT === "ccw"){ x = GEO.W-uy; y = ux; }
+  return [x, y, cxp, cyp];
+}
+function pickBegin(){
+  if (!ready || !GEO) return;
+  PICKWB = true; pickA = null; pickRect = null;
+  $("pickwb").classList.add("primary"); cv.style.cursor = "crosshair";
+  $("status").textContent = "white point: drag a box on the preview (click = 5x5 patch, Esc = cancel)";
+}
+function pickCancel(msg){
+  PICKWB = false; pickA = null; pickRect = null;
+  $("pickwb").classList.remove("primary"); cv.style.cursor = "";
+  draw();
+  if (msg) $("status").textContent = msg;
+}
+function pickStart(e){ pickA = canvasToLayer(e); pickRect = null; }
+function pickMove(e){
+  if (!pickA) return;
+  const b = canvasToLayer(e);
+  pickRect = [pickA[2], pickA[3], b[2], b[3]];
+  draw();
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.strokeStyle = "#ffcc55"; ctx.lineWidth = 1.5;
+  ctx.strokeRect(Math.min(pickRect[0],pickRect[2]), Math.min(pickRect[1],pickRect[3]),
+                 Math.abs(pickRect[2]-pickRect[0]), Math.abs(pickRect[3]-pickRect[1]));
+}
+function pickEnd(e){
+  if (!pickA){ pickCancel(); return; }
+  const b = canvasToLayer(e);
+  let x0 = Math.min(pickA[0], b[0]), x1 = Math.max(pickA[0], b[0]);
+  let y0 = Math.min(pickA[1], b[1]), y1 = Math.max(pickA[1], b[1]);
+  if (x1-x0 < 2 && y1-y0 < 2){ x0 = pickA[0]-2.5; x1 = pickA[0]+2.5; y0 = pickA[1]-2.5; y1 = pickA[1]+2.5; }
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(GEO.W-1, Math.ceil(x1)); y1 = Math.min(GEO.H-1, Math.ceil(y1));
+  solveWhite(x0, y0, x1, y1, null, "white point from ");
+}
+function solveWhite(x0, y0, x1, y1, pred, label){
+  // the chain up to Warmth/Tint, exactly as renderNow computes it
+  const ch = L.ratio, satur = P.satur;
+  const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
+  const bc = GEO.bgChroma || [1,1,1], bn = P.bgNeutral || 0;
+  const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
+  const cg = GEO.coronaGain || [1,1,1], CN = P.coronaNeutral || 0;
+  const CG = [Math.pow(cg[0],CN), Math.pow(cg[1],CN), Math.pow(cg[2],CN)];
+  const Rm2 = (GEO.Rmask || GEO.R) * (GEO.Rmask || GEO.R);
+  const A0 = [], A1 = [], A2 = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++){
+    const dy = y-GEO.cy, dx = x-GEO.cx;
+    if (dy*dy+dx*dx < Rm2) continue;                    // the disc is forced neutral; no information there
+    if (pred && !pred(dx, dy)) continue;
+    const j = (y*GEO.W+x)*4;
+    const cf = L.cconf ? L.cconf[j]/255 : 1;
+    let a0 = Math.pow(_cl(ch[j]),   satur)/(1 + cf*(BC[0]-1));
+    let a1 = Math.pow(_cl(ch[j+1]), satur)/(1 + cf*(BC[1]-1));
+    let a2 = Math.pow(_cl(ch[j+2]), satur)/(1 + cf*(BC[2]-1));
+    if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
+    A0.push(a0); A1.push(a1); A2.push(a2);
+  }
+  if (A0.length < 1){ pickCancel("white point: the box holds no corona pixels (inside the disc?) - nothing changed"); return; }
+  const med = a => { a.sort((p,q)=>p-q); return a[a.length>>1]; };
+  const m0 = med(A0), m1 = med(A1), m2 = med(A2);
+  const temp = Math.sqrt(m2/Math.max(m0,1e-6)), tint = m0*temp/Math.max(m1,1e-6);
+  // clamp and round on the SLIDER's scale, so P and the control agree
+  const Dt = DISPLAY.temp, Dn = DISPLAY.tint;
+  const tW = Dt.to(temp), nW = Dn.to(tint);
+  const tD = Math.min(Dt.max, Math.max(Dt.min, Math.round(tW)));
+  const nD = Math.min(Dn.max, Math.max(Dn.min, Math.round(nW)));
+  const clipped = Math.abs(tD-tW) > 1 || Math.abs(nD-nW) > 1;
+  applyParams({temp: Dt.from(tD), tint: Dn.from(nD)});
+  pickCancel(label + A0.length + " px: Temperature " + dispFmt(tD) + ", Tint " + dispFmt(nD)
+             + (clipped ? "  (wanted " + dispFmt(tW) + " / " + dispFmt(nW) + " - clamped to the slider range; that spot is further from neutral than these sliders reach)" : ""));
+}
+$("pickwb").addEventListener("click", () => { if (PICKWB) pickCancel("white point: cancelled"); else pickBegin(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && PICKWB) pickCancel("white point: cancelled"); });
 
 $("ringload").addEventListener("click", async () => {
   $("ringload").disabled = true;
@@ -1277,9 +1417,9 @@ function applyParams(np){
     if (!(k in np)) continue;
     P[k] = np[k];
     const el = $("s_"+k);
-    if (el && !el.disabled){ el.value = np[k]; }
+    if (el && !el.disabled){ el.value = dispTo(k, np[k]); }
     const v = $("v_"+k);
-    if (v && el && !el.disabled) v.textContent = el.value;
+    if (v && el && !el.disabled) v.textContent = dispText(k, el.value);
   }
   scheduleRender();
 }
@@ -1318,7 +1458,13 @@ async function processingLoad(path){
     // three runs later.
     const ids = j.ids || {};
     for (const k in (j.processing || {})){
-      const el = $(ids[k]); if (el) el.value = j.processing[k];
+      const el = $(ids[k]); if (!el) continue;
+      const v = j.processing[k];
+      // the recipe carries every value as a string, and setting .value on a
+      // checkbox does nothing at all -- which is why Simple stack never came
+      // back from a recipe file
+      if (el.type === "checkbox") el.checked = (v === "True" || v === "true");
+      else el.value = v;
     }
     const ch = j.changed || [];
     let msg = j.file + " — " + j.n + " setting(s) set"
@@ -1342,9 +1488,12 @@ function currentProcessing(){
                stack_combine:"stackCombine", fnrgf_preset:"fnrgfPreset",
                photo_solve:"photoSolve", tier_mode:"tierMode",
                feather:"feather", wb_source:"wb", photometry:"photometry",
-               frames:"frames", denoise:"denoise"};
+               frames:"frames", denoise:"denoise", simple:"simpleStack"};
   const o = {};
-  for (const k in ids){ const e = $(ids[k]); if (e) o[k] = e.value; }
+  for (const k in ids){
+    const e = $(ids[k]); if (!e) continue;
+    o[k] = (e.type === "checkbox") ? (e.checked ? "True" : "False") : e.value;
+  }
   return o;
 }
 

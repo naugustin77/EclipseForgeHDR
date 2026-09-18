@@ -14,10 +14,22 @@ DEFAULTS = {
     # Hill's chain. hillMix 0 renders exactly as every build before 0.22.64;
     # hill0..hill4 are his 100:60:20:10 ratios at 2:4:8:16 px, extended one
     # octave, and hillGain is the one master that scales the set.
-    "hillMix": 0.0, "hillGain": 0.06, "hillLogK": 3.0, "hillDenoise": 0.0,
-    "hill0": 1.0, "hill1": 0.6, "hill2": 0.2, "hill3": 0.1, "hill4": 0.05,
-    "radialFlatten": 0.5, "mgnContrast": 0.04, "fnCompress": 0.9,
-    "clarity": 0.39, "smoothing": 0.25, "pelGain": 0.0,
+    # hillDenoise 3.0 (was 0): measured on the reference set at threshold 0 the
+    # masks beyond 2 R are pure photon noise, amplified into visible grain; at
+    # 3 sigma they are zero there and the inner corona keeps its structure.
+    # 0.23.7 defaults are what the 600 mm reference set settled on, viewed as
+    # Hill views his (masks on mid grey, half size): raw base, no threshold,
+    # the 2 px mask off -- on this set it carries noise only -- and the
+    # ladder starting at 4 px.
+    "hillMix": 0.0, "hillGain": 0.025, "hillLogK": 3.0, "hillDenoise": 0.0,
+    # hillBase: how much of the log-mapped base the Partial-conv view shows
+    # under the masks. 1 = Hill's im_enhanced; 0 = the masks alone on mid
+    # grey, which is his "E" panel, the layer the blend overlays, and the
+    # honest way to judge them -- the default since 0.23.7.
+    "hillBase": 0.0,
+    "hill0": 0.0, "hill1": 1.0, "hill2": 0.6, "hill3": 0.2, "hill4": 0.1,
+    "radialFlatten": 0.5, "mgnContrast": 0.15, "fnCompress": 0.9,
+    "clarity": 0.39, "smoothing": 0.25, "pelGain": 0.15,
     "nafeMix": 0.15, "innerMix": 0.31, "innerDenoise": 0.4, "innerDim": 0.05, "promGain": 0.4,
     # How much of the detail inside the prominence gate comes from the
     # prominence's own layer rather than from the corona filters. 0 reproduces
@@ -77,7 +89,7 @@ DEFAULTS = {
     # five do not agree with each other:
     #
     #     set                    far sky R/G   B/G
-    #     560 mm 2024 test set         1.244    0.908
+    #     the tester 2024 560mm         1.244    0.908
     #     a second tester 2026 360mm         1.206    0.880
     #     a second tester 2026 250mm         1.116    0.757
     #     a tester Lumix 600mm           0.992    0.647
@@ -96,8 +108,8 @@ DEFAULTS = {
     # already does exactly this, and is gated to files with no camera WB, so it
     # never runs on a raw bracket. Opening that gate is the real answer and is
     # not this change.
-    "temp": 1.0, "tint": 1.0, "coronaNeutral": 0.0, "radialNeutral": 0.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.1, "hlDesat": 0.0,
-    "outGamma": 1.0, "bgBlack": 0.005,
+    "temp": 1.0, "tint": 1.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.0, "hlDesat": 0.0,
+    "outGamma": 1.0, "bgBlack": 0.02,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
 }
@@ -465,18 +477,6 @@ class Layers:
         # much of it to use, so the default picture is unchanged and the
         # correction is adjustable without re-stacking.
         self.corona_gain = np.ones(3, np.float32)
-        # (3, nbin): radius in R, then R/G and B/G measured there.
-        # See pipeline.measure_radial_colour for what it is and why it
-        # is stored rather than applied.
-        self.colour_radial = None
-        try:
-            _cr = os.path.join(wd, "colour_radial.npy")
-            if os.path.exists(_cr):
-                _v = np.load(_cr)
-                if _v.ndim == 2 and _v.shape[0] == 3 and _v.shape[1] >= 8:
-                    self.colour_radial = _v.astype(np.float32)
-        except Exception:
-            self.colour_radial = None
         self.corona_r_over_gb = None
         try:
             _cm = (r > 1.05 * self.R) & (r < 1.60 * self.R)
@@ -1073,8 +1073,10 @@ def render(layers: Layers, params, preview=False, view="composite"):
             _E += np.float32(_hg[i]) * _mi
             del _mi
         del _sig
-        Yh = _base + np.float32(_k) * _E
-        del _E, _base
+        _E *= np.float32(_k)                    # the masks, in im_log units
+        Yh = _base + _E
+        _base_keep = _base if _hview else None
+        del _base
         # THE HILL RESULT ON ITS OWN, as a monochrome view -- Hill's
         # im_enhanced and nothing else: no envelope, no radial flatten, no
         # prominence term, no disc fill, and NO level match (there is nothing
@@ -1102,29 +1104,52 @@ def render(layers: Layers, params, preview=False, view="composite"):
             # composite path below is untouched (it level-matches to the
             # multiplicative render's own annulus mean, which already sets its
             # exposure).
+            # BASE WEIGHT (0.23.7). Yh = base + k*E. The view shows
+            #     hillBase * 0.75 * base + (1 - hillBase) * 0.5 + 0.75 * k * E
+            # so at 0 the masks sit on mid grey with the same amplitude they
+            # have at 1: the slider moves the base under them and nothing else.
+            _hb = float(np.clip(P.get("hillBase", 1.0), 0.0, 1.0))
             _Y = np.float32(_HILL_HEADROOM) * Yh
             del Yh
+            if _hb < 1.0:
+                _Y += np.float32((1.0 - _hb)) * (np.float32(0.5)
+                                                - np.float32(_HILL_HEADROOM) * _base_keep)
+            # THE DISC IS PAINTED OUT TO THE MASKS' OWN EDGE (0.23.7). The
+            # masks are zero inside Rmask + HILL_LIMB_PAD by construction, so
+            # that band showed the bare log base at its brightest -- a bright
+            # rim with nothing on it. Hill's disc runs flat to the corona
+            # edge; so does this one now, at the base's own value at the
+            # Moon's centre (the composite is untouched -- its edge blend
+            # covers the same band).
+            from .detail import HILL_LIMB_PAD as _HLP
+            _pad = (Re - P["discTrim"] / decim) + (_HLP + 1.0) / decim
+            _cv = float(_Y[int(round(cy)), int(round(cx))]) if (
+                0 <= int(round(cy)) < H and 0 <= int(round(cx)) < W) else 0.5
+            _Y = np.where(r < _pad, np.float32(_cv), _Y).astype(np.float32)
             return np.repeat(np.clip(_Y, 0, 1)[:, :, None], 3, axis=2)
-        # MATCHED IN LEVEL BEFORE THE CROSSFADE, so the slider compares
-        # STRUCTURE and not brightness. Un-matched, the two paths differ by
-        # about 3x in the mean -- Y here is an envelope times a detail
-        # modulation, Yh is a log-mapped 0..1 image -- so every intermediate
-        # setting was mostly just making the picture brighter, which reads as
-        # the inner corona blowing out. Median over the corona annulus, which
-        # is where the eye judges it, and subsampled because this is one number.
-        # A MEAN, not a median, and over the same annulus the page uses: the
-        # page accumulates its two sums inside the pixel loop it is already
-        # running, and a median there would cost a sort of a million floats on
-        # every slider move. Neither sum depends on the scale, so the two agree.
-        _ann = (r > 1.15 * R) & (r < 3.0 * R)
-        if _ann.any():
-            _ma = float(np.mean(Y[_ann]))
-            _mb = float(np.mean(Yh[_ann]))
-            if _mb > 1e-6 and _ma > 1e-6:
-                Yh *= np.float32(_ma / _mb)
-        del _ann
-        Y = (1.0 - _hmix) * Y + _hmix * Yh
-        del Yh
+        # OVERLAY ONTO THE COMPOSITE (0.23.7), not crossfaded and not
+        # multiplied.
+        #
+        # The crossfade mixed two images with different tone curves (the
+        # log-mapped one is flat, so matched in the mean it was brighter at
+        # the limb and darker outside: blow-out and lost outer detail). A
+        # multiplication by exp(k E) -- Hill's straight addition in the log
+        # domain -- is right for LINEAR data, but Y here is already
+        # tone-mapped, so it clipped the inner corona just the same.
+        #
+        # Overlay of a mid-grey layer is bounded by construction: below 0.5
+        # the base is multiplied, above 0.5 it is screened, and no mask can
+        # push a pixel past white; the contrast it adds tapers toward either
+        # end of the range. It is what a high-pass layer does in Photoshop
+        # and what Hill points to ("soft light blending mode"). The grey
+        # layer is EXACTLY what the Partial-conv view draws at Base weight
+        # 0: 0.5 + 0.75 k E. So the view shows the layer, and the slider is
+        # its opacity.
+        _d = np.clip(np.float32(_hmix * _HILL_HEADROOM) * _E, -0.5, 0.5)
+        _lo = Y < 0.5
+        Y = np.where(_lo, Y * (1.0 + 2.0 * _d),
+                     1.0 - (1.0 - Y) * (1.0 - 2.0 * _d)).astype(np.float32)
+        del Yh, _E, _d, _lo
     # prominence: local-contrast modulation inside the gate, with a small
     # positive bias so a detected prominence gains presence, not just texture.
     #
@@ -1172,37 +1197,18 @@ def render(layers: Layers, params, preview=False, view="composite"):
     # field's chroma has already been faded to neutral, and a flat gain turns
     # neutral into the sky-blue that makes the corona read as white against a
     # sky. That is the picture that works.
+    # coronaNeutral (0.22.48-0.23.4) was a flat gain from the 1.05-1.6 R
+    # annulus at a chosen strength. Since 0.23.5 the page's "Auto: corona"
+    # button samples that same ring through this chain and sets Temperature
+    # and Tint instead -- one mechanism for white, and one the user can also
+    # aim by hand. The key is still honoured here for an old settings file.
     if P.get("coronaNeutral", 0) > 0:
         a *= (layers.corona_gain[None, None, :] ** P["coronaNeutral"])
-    # RADIAL NEUTRALISE. The flat gain above takes the K-corona as a white
-    # reference and applies that one measurement everywhere, which is right
-    # only while the frame's colour does not change with radius. Low in the
-    # sky it does: on a third tester's set R/B swings 2x between 1.5 R and 5 R, the
-    # same shape on two tiers twelve times apart in exposure, so it is the
-    # scene and not the stack. A constant cannot flatten a gradient, and what
-    # is left over is the orange-centre-to-grey-edge split.
-    #
-    # The profile is divided out with the SAME unit-luminance convention as
-    # every other colour move here, so brightness is untouched and only the
-    # ratios move. Outside the measured range the end values are held, never
-    # extrapolated -- a ratio profile fitted to noise and then run outward
-    # invents colour in exactly the region with least signal.
-    _cr = getattr(layers, "colour_radial", None)
-    if P.get("radialNeutral", 0) > 0 and _cr is not None:
-        _rr = (r / max(float(R), 1e-6)).astype(np.float32)
-        _rg = np.interp(_rr, _cr[0], _cr[1]).astype(np.float32)
-        _bg = np.interp(_rr, _cr[0], _cr[2]).astype(np.float32)
-        _g = np.empty(a.shape, np.float32)
-        _g[:, :, 0] = 1.0 / np.maximum(_rg, 1e-6)
-        _g[:, :, 1] = 1.0
-        _g[:, :, 2] = 1.0 / np.maximum(_bg, 1e-6)
-        _gl = (0.2126 * _g[:, :, 0] + 0.7152 * _g[:, :, 1]
-               + 0.0722 * _g[:, :, 2])
-        _g /= np.maximum(_gl, 1e-6)[:, :, None]
-        if P["radialNeutral"] != 1.0:
-            _g = _g ** np.float32(P["radialNeutral"])
-        a *= _g
-        del _rr, _rg, _bg, _g, _gl
+    # Neutralise radial (0.22.x-0.23.4) lived here: a stored per-annulus colour
+    # profile divided out at render time. Removed in 0.23.5. It was measured at
+    # stack time on the full pipeline only, stored in the workdir rather than
+    # the settings file, never implemented in the browser preview, and
+    # unbounded -- a channel median through zero became a gain of a million.
     a[:, :, 0] *= P["temp"]
     a[:, :, 2] /= P["temp"]
     a[:, :, 1] *= P.get("tint", 1.0)
@@ -1314,12 +1320,41 @@ def _png_add_iccp(path, prof):
         pass                                     # a missing tag is not fatal
 
 
-def export(layers: Layers, params, fmt, out_path, view="composite", size="full"):
+def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
+           notes=None):
     """fmt: tif16 | tif8 | png (16-bit when OpenCV present, else 8-bit) | jpg.
+    notes: an optional list the caller passes in to collect warnings about the
+    file that was just written -- see the black-point check below.
     view: composite | mgn | fnrgf | nafe | inner | prom | tangential |
     partialconv | flat (detail views export grayscale).
     size: full | half (half = 2x2 binned, ~2x better SNR)."""
     rgb = render(layers, params, preview=False, view=view)
+    # THE BLACK POINT CLIPS EACH CHANNEL ON ITS OWN, and used to say nothing
+    # when it did. Where green and blue fall under it and red does not, the
+    # outer field prints as flat saturated red with the structure still visible
+    # in it -- a tester's export did exactly that, and looked like a stacking
+    # fault rather than a slider. Count it and say so.
+    if notes is not None and view == "composite":
+        try:
+            _bb = float((params or {}).get("bgBlack", 0.0) or 0.0)
+            if _bb > 0:
+                _h, _w = rgb.shape[:2]
+                _dy = np.arange(_h, dtype=np.float32)[:, None] - layers.cy
+                _dx = np.arange(_w, dtype=np.float32)[None, :] - layers.cx
+                _out = (_dy * _dy + _dx * _dx) > (layers.Rmask + 8.0) ** 2
+                _n = float(_out.sum())
+                if _n > 1000.0:
+                    _flat = (_out & (rgb[:, :, 1] <= 0.0) & (rgb[:, :, 2] <= 0.0)
+                             & (rgb[:, :, 0] > 0.2))
+                    _f = float(_flat.sum()) / _n
+                    if _f > 0.01:
+                        notes.append(
+                            "WARNING: Black point %.3f drives green and blue to "
+                            "zero on %.0f%% of the corona while red stays up, so "
+                            "that area prints as flat red. Lower Black point, or "
+                            "correct the colour before raising it." % (_bb, 100.0 * _f))
+        except Exception:
+            pass
     rgb = apply_orient(rgb, (params or {}).get("orient", ""))
     if size == "half":
         H2, W2 = rgb.shape[0] // 2 * 2, rgb.shape[1] // 2 * 2

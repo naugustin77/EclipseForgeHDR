@@ -24,7 +24,7 @@ blue at 2.85 R, with the opposite colour -- which is the warm-inside,
 blue-outside picture he reported.
 
 THE LIMIT, stated plainly. One number per frame per channel cannot follow a sky
-that varies across the frame. On Val's set (2.9 R to the frame edge) it works.
+that varies across the frame. On a third tester's set (2.9 R to the frame edge) it works.
 On the 600 mm reference set the sky's brightness varies about 28% corner to corner, and
 subtracting a constant leaves broad colour blobs beyond ~4 R -- the failure
 documented in docs/SKY_SUBTRACTION.md, which no version of this has escaped.
@@ -190,7 +190,7 @@ def _ratio(a, b, sat, lo=200.0):
     """Median b/a over pixels well exposed in BOTH. The measured exposure ratio.
 
     Measured on green, and the SAME number is applied to all three channels. On
-    Val's 23 tiers the three channels' own ratios agree to under 1.2% per step,
+    a third tester's 23 tiers the three channels' own ratios agree to under 1.2% per step,
     so the colour freedom buys nothing and costs a noisier estimate.
     """
     m = (np.isfinite(a) & np.isfinite(b) & (a > lo) & (b > lo)
