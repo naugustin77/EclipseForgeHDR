@@ -25,7 +25,8 @@ canvas{max-width:100%;max-height:calc(100vh - 130px);display:block;box-shadow:0 
 .railinner{padding:8px 18px 18px}
 .group{padding:12px 0 6px;border-bottom:1px solid var(--line)}
 .group h2{margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--gold)}
-.ctl label{font-size:13px;display:flex;justify-content:space-between;margin-top:6px}
+.ctl label{font-size:13px;display:flex;justify-content:space-between;margin-top:6px;
+  -webkit-user-select:none;user-select:none}   /* so a double-click resets rather than selects */
 .ctl label .val{font:12px ui-monospace,monospace;color:var(--muted)}
 input[type=range]{width:100%;appearance:none;height:4px;border-radius:2px;background:#2a303a;outline:none}
 input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;
@@ -125,7 +126,7 @@ button:disabled{opacity:.45;cursor:default}
           <option value="strong">Strong</option>
         </select></label>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How the merge weight behaves at each tier&#39;s clipping boundary, which is a trade with no right answer. Blended edge blurs the weight across that boundary: the tiers join without a seam and a ring artifact just outside the limb is suppressed, but weight leaks from clipped pixels into unclipped ones and the corona reads low there - on some brackets a little, on others enough to show as a coloured rim. Exact edge keeps the weight exact at the boundary: radiometrically correct, rings visible. The log prints what the trade would cost on YOUR data, measured, so you can decide.">
+        title="How the merge weight behaves at each tier&#39;s clipping boundary, which is a trade with no right answer. Blended edge blurs the weight across that boundary: the tiers join without a seam and a ring artifact just outside the limb is suppressed, but weight leaks from clipped pixels into unclipped ones and the corona reads low there - on some brackets a little, on others a factor (the leak is achromatic since 0.23.8; it used to print as a magenta rim because the channels clip at different depths). Exact edge keeps the weight exact at the boundary: radiometrically correct, rings visible. The log prints what the trade would cost on YOUR data, measured, so you can decide.">
         Merge weight
         <select id="feather" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
           border-radius:4px;padding:5px 6px;font:12px system-ui">
@@ -164,6 +165,15 @@ button:disabled{opacity:.45;cursor:default}
           border-radius:4px;padding:5px 6px;font:12px system-ui">
           <option value="exposure" selected>By shutter speed</option>
           <option value="frame">Per frame (ignore grouping)</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="What the subs INSIDE one exposure tier are aligned on, which is a different question from the tier-to-tier links below. Corona Align ignores the Moon entirely: the disc is filled with the corona&#39;s smooth continuation and the per-radius mean about it removed, so the lunar edge and the radial gradient - the two features Druckmullerova names as hijacking a corona registration - are gone before the correlation. That matters when a bracket is shot as whole brackets one after another, because then the frames of one tier span the whole sequence and the Moon drifts several pixels against the corona between them; locking on the Moon there stacks a sharp Moon and a smeared corona. Measured on synthetic pairs: the Moon lock is up to 12 px wrong about the corona, the corona lock within 1.4 px. Moon Align is the pre-0.23.8 estimator, for an A/B or for a set where the corona is too thin to trust. Mixed splits the two: the corona where the pair&#39;s common corona covers at least a quarter of the window, the Moon elsewhere. The criterion is MEASURED coverage rather than the shutter speed itself, which on any real bracket comes out as the fast subs on the Moon and the long ones on the corona, and correctly keeps a fast sub of a bright corona on the corona. Offered for experiment, NOT measured, and it gives up the corona on exactly the subs that carry the inner corona. Whatever is chosen, a window with almost no corona falls back to the lunar edge on its own and the log says so per tier. Changing this re-stacks.">
+        Intra-tier lock
+        <select id="intraLock" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="corona" selected>Corona Align</option>
+          <option value="moon">Moon Align</option>
+          <option value="mixed">Mixed (fast subs Moon, long subs Corona)</option>
         </select></label>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
         title="How the shift between two exposures is found. Cross-correlation is what every build up to 0.23.1 used: it keeps each frequency's amplitude, so bright structure dominates. Semi-phase correlation divides by the amplitude spectra plus a small constant (Druckmullerova, master's thesis Def. 3.25), which flattens the spectrum so faint structure counts too, while the constant stops it lifting frequencies that carry only noise. Full whitening is the same with that constant removed - it gives a nearly signal-free short tier the same weight as a well exposed one, which is why it is not the default. On tiers built from a real bracket, semi cut the error on a known shift by 22% and cut the pull toward zero shift - the sensor's own dust and fixed pattern dragging the answer - by 80%. Changing this re-stacks.">
@@ -205,6 +215,9 @@ button:disabled{opacity:.45;cursor:default}
         title="Map hot/dead photosites on the shortest tier and repair them in every frame.">
         <input type="checkbox" id="despeckle" checked> Fix hot pixels</label>
       <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Build the partial-convolution layer. It is the most expensive step in the run - roughly half the wall clock on a 24 Mpx merge, because the polar blur is taken in radial bands - and nothing else depends on it. Off gives the same composite as leaving the Partial convolution sliders at zero, just sooner: use it while you are finding the rest of the settings, then turn it on for the final render. Turning it back on does NOT re-stack; it costs the mask build alone. While it is off its sliders and its view button are hidden, and any masks from an earlier run are deleted, because they were built on a different merge.">
+        <input type="checkbox" id="partialConv" checked> Partial convolution layer</label>
+      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
         title="Also write each aligned exposure tier as a 16-bit TIFF into eclipseforge_output/aligned_tiers/, for blending or HDR combining in PixInsight, Photoshop or Affinity. Aligned and demosaiced but not merged or tone mapped; each tier sits at its own real signal level, so the exposure relationship between tiers is preserved. An ICC profile is embedded so no host has to guess.">
         <input type="checkbox" id="exportTiers"> Export aligned tier TIFFs</label>
       <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
@@ -242,6 +255,8 @@ button:disabled{opacity:.45;cursor:default}
     <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas></div>
     <div id="credit" style="position:fixed;right:346px;bottom:8px;color:#8b93a0;
       font:11px ui-monospace,monospace;opacity:.8;pointer-events:none"></div>
+    <div id="zoompct" style="position:fixed;left:18px;bottom:8px;color:#8b93a0;
+      font:11px ui-monospace,monospace;opacity:.85;cursor:default"></div>
   </div>
   <aside class="rail"><div class="railinner">
     <div class="group"><h2>Pipeline</h2>
@@ -374,7 +389,7 @@ const DEFS = [
  ["temp","Temperature (blue ← → yellow)",0.30,1.84,0.001,"color"],
  ["tint","Tint (green ← → magenta)",0.544,1.84,0.001,"color"],
  ["bgNeutral","Neutralise sky cast",0,1.2,0.01,"color"],
- ["satur","Saturation",0.5,2,0.001,"color"],
+ ["satur","Saturation",0,2,0.001,"color"],
  ["hlCompress","Highlight compression",0,1,0.01,"color"],
  ["hlDesat","Highlight desaturation",0,0.8,0.01,"color"],
  ["outGamma","Output gamma",0.8,1.8,0.01,"tone"],
@@ -398,7 +413,10 @@ let P = {}, GEO = null, L = {}, ready = false;
 // Temperature runs -300..+150 (blue..yellow), Tint -150..+150 (green..magenta,
 // + is magenta = LESS green), Saturation -100..+100. The map is logarithmic,
 // which is what a gain should be, and symmetric: +100 is x1.5, -100 is x1/1.5;
-// Saturation's +100 is exponent 2, -100 is 0.5. Temperature reaches further
+// Saturation's +100 is exponent 2; below 0 it runs linearly to exponent 0
+// at -100, which is monochrome (0.23.8: it used to stop at 0.5, and the
+// exponent sat before the balance, so its floor was a flat WB-coloured
+// frame rather than a grey one). Temperature reaches further
 // down than Camera Raw's -150 because a corona a few degrees above the
 // horizon is reddened by the atmosphere far more than any daylight scene:
 // on the 600 mm reference set the picker wanted below -150 and clamped.
@@ -414,9 +432,9 @@ const DISPLAY = {
   tint:  {min:-150, max:150, step:1,
           to:   m => -100*Math.log(m)/Math.log(1.5),
           from: d => Math.pow(1.5, -d/100)},
-  satur: {min:-100, max:100, step:1,
-          to:   m => 100*Math.log2(m),
-          from: d => Math.pow(2, d/100)},
+  satur: {min:-100, max:100, step:1,      // -100 = monochrome, 0 = as balanced, +100 = doubled in the log
+          to:   m => m >= 1 ? 100*Math.log2(m) : 100*(m-1),
+          from: d => d >= 0 ? Math.pow(2, d/100) : 1 + d/100},
 };
 const dispFmt = v => { const n = Math.round(v); return (n > 0 ? "+" : "") + n; };
 // slider position -> P value, and P value -> what the control shows
@@ -432,13 +450,19 @@ const $ = id => document.getElementById(id);
 const NEEDS_LAYER = {detailScale: ["has_mgn_fine", "re-stack needed"],
                      nafeMix:     ["has_nafe",     "re-stack needed"]};
 
+// The defaults the SERVER sent for this workdir (import mode has its own set),
+// kept so a control can be put back where it started -- see the double-click
+// below. Not DEFS: that table holds the slider ranges, not the values.
+let SLIDER_DEFAULTS = {};
 function buildSliders(defaults){
+  SLIDER_DEFAULTS = Object.assign({}, defaults);
   for (const [k,label,min,max,step,grp] of DEFS){
     P[k] = defaults[k];
     const need = NEEDS_LAYER[k];
     const off = need && GEO && !GEO[need[0]];
     if (off) P[k] = 0;                     // never render with a weight we cannot honour
     const div = document.createElement("div"); div.className = "ctl";
+    div.title = "Double-click to reset to the default";
     const D = DISPLAY[k];
     const smin = D ? D.min : min, smax = D ? D.max : max, sstep = D ? D.step : step;
     const sval = off ? 0 : dispTo(k, defaults[k]);
@@ -455,6 +479,20 @@ function buildSliders(defaults){
     const el = div.querySelector("input");
     el.addEventListener("input", () => {
       P[k] = dispFrom(k, parseFloat(el.value)); $("v_"+k).textContent = dispText(k, el.value);
+      scheduleRender();
+    });
+    // DOUBLE-CLICK PUTS A CONTROL BACK TO ITS DEFAULT, the way a plugin knob
+    // does. On the row as a whole, not just the track: the label and the
+    // number are the part of the control the pointer is nearest when the
+    // value is what you are looking at. A disabled slider (its layer was
+    // never built) keeps its 0 -- there is nothing to go back to.
+    div.addEventListener("dblclick", () => {
+      if (el.disabled) return;
+      const dv = SLIDER_DEFAULTS[k];
+      if (dv == null) return;
+      P[k] = dv;
+      el.value = dispTo(k, dv);
+      $("v_"+k).textContent = dispText(k, el.value);
       scheduleRender();
     });
   }
@@ -548,6 +586,8 @@ async function startRun(){
                           photometry: $("photometry").value,
                           photoSolve: $("photoSolve").value,
                           tierMode: $("tierMode").value,
+                          intraLock: $("intraLock").value,
+                          partialConv: $("partialConv").checked,
                           alignCorr: $("alignCorr").value,
                           alignFilter: $("alignFilter").value,
                           stackCombine: $("stackCombine").value,
@@ -777,7 +817,7 @@ async function loadLayers(){
   oc.width = GEO.W; oc.height = GEO.H;
   out = octx.createImageData(GEO.W, GEO.H);
   applyBrand(GEO);
-  $("credit").textContent = `${BRAND.app} ${GEO.version || ""} · \u00a9 2026 N. Augustin with ClaudeAI`;
+  $("credit").textContent = `${BRAND.app} ${GEO.version || ""} · \u00a9 2026 N. Augustin (with Claude)`;
   const names = ["bg","rprof","mgn","fnrgf","mgn_lo","mgn_sm","fnrgf_lo","fnrgf_sm",
                  "pel","inner","inner0","earth","prom","ratio","cconf"];
   // optional: a workdir built before 0.18, or a run whose gate found nothing,
@@ -885,7 +925,43 @@ function draw(){
   else if (ORIENT === "ccw"){ ctx.translate(0, GEO.W); ctx.rotate(-Math.PI/2); }
   ctx.drawImage(oc, 0, 0);
   ctx.restore();
+  updateZoom();
 }
+
+// THE ZOOM READOUT IS AGAINST THE FULL-RESOLUTION IMAGE, not against the
+// preview. That is the number the eye needs: "1:1" and "50%" are judgements
+// about the EXPORT -- whether grain that shows at full size averages away at
+// half -- and the preview is decimated by GEO.decim, so a percentage against
+// it would read four times too large on the reference set.
+//
+// One image pixel per CSS pixel is 100%, the same convention a browser uses
+// for an image at its natural size. On a HiDPI screen the browser then draws
+// that over more than one physical pixel; nothing here can see that, so the
+// number is what the picture MEASURES on screen, not how crisp it looks.
+//
+// Above the preview's own resolution (100/decim %) the canvas is interpolating
+// and no amount of zoom adds detail the page has. The number turns gold there
+// rather than being hidden: zooming past it to look at a shape is fine, and
+// judging grain past it is not.
+function updateZoom(){
+  const el = $("zoompct");
+  if (!el) return;
+  if (!GEO || !cv.width){ el.textContent = ""; return; }
+  const rc = cv.getBoundingClientRect();
+  if (!rc.width){ el.textContent = ""; return; }
+  const dec = GEO.decim || 1;
+  const native = 100 / dec;
+  const pct = 100 * vz * (rc.width / cv.width) / dec;
+  const fmt = v => v < 10 ? v.toFixed(1) : String(Math.round(v));
+  el.textContent = "zoom " + fmt(pct) + "%";
+  el.style.color = pct > native + 0.05 ? "var(--gold)" : "#8b93a0";
+  el.title = "Percent of the full-resolution image — the size the export "
+           + "writes. The preview itself is " + fmt(native) + "% of full "
+           + "resolution, so above that the view is interpolated and grain "
+           + "cannot be judged on it. Scroll to zoom, drag to pan, "
+           + "double-click the image to fit.";
+}
+addEventListener("resize", updateZoom);
 let ORIENT = "";
 function setOrient(v){
   ORIENT = v || "";
@@ -1101,18 +1177,21 @@ function renderNow(){
     // the sky-cast correction is weighted by the chroma confidence, exactly as
     // render.py does it -- see the note beside _cconf there
     const cf = L.cconf ? L.cconf[j]/255 : 1;
-    let a0 = Math.pow(_cl(ch[j]),   satur)/(1 + cf*(BC[0]-1));
-    let a1 = Math.pow(_cl(ch[j+1]), satur)/(1 + cf*(BC[1]-1));
-    let a2 = Math.pow(_cl(ch[j+2]), satur)/(1 + cf*(BC[2]-1));
+    let a0 = _cl(ch[j])  /(1 + cf*(BC[0]-1));
+    let a1 = _cl(ch[j+1])/(1 + cf*(BC[1]-1));
+    let a2 = _cl(ch[j+2])/(1 + cf*(BC[2]-1));
     if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
     a0 *= temp; a2 /= temp; a1 *= P.tint;
+    // Saturation AFTER the balance, so 0 is white as balanced -- see render.py
+    if (satur !== 1){ a0 = Math.pow(a0, satur); a1 = Math.pow(a1, satur); a2 = Math.pow(a2, satur); }
     const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
     a0 /= alum; a1 /= alum; a2 /= alum;
     a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
     // prominence structure in green/blue -- red is already pinned at 255 in
     // there, so this is the only channel pair with room. See render.py.
     if (P.promChroma !== 0 && L.promdet){
-      const cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
+      let cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
+      if (satur !== 1) cfac = Math.pow(Math.max(cfac, 1e-3), satur);
       a1 *= cfac; a2 *= cfac;
     }
     let r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
@@ -1235,7 +1314,7 @@ function pickEnd(e){
 }
 function solveWhite(x0, y0, x1, y1, pred, label){
   // the chain up to Warmth/Tint, exactly as renderNow computes it
-  const ch = L.ratio, satur = P.satur;
+  const ch = L.ratio;   // Saturation applies after Warmth/Tint since 0.23.8, so it does not enter the solve
   const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
   const bc = GEO.bgChroma || [1,1,1], bn = P.bgNeutral || 0;
   const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
@@ -1249,9 +1328,9 @@ function solveWhite(x0, y0, x1, y1, pred, label){
     if (pred && !pred(dx, dy)) continue;
     const j = (y*GEO.W+x)*4;
     const cf = L.cconf ? L.cconf[j]/255 : 1;
-    let a0 = Math.pow(_cl(ch[j]),   satur)/(1 + cf*(BC[0]-1));
-    let a1 = Math.pow(_cl(ch[j+1]), satur)/(1 + cf*(BC[1]-1));
-    let a2 = Math.pow(_cl(ch[j+2]), satur)/(1 + cf*(BC[2]-1));
+    let a0 = _cl(ch[j])  /(1 + cf*(BC[0]-1));
+    let a1 = _cl(ch[j+1])/(1 + cf*(BC[1]-1));
+    let a2 = _cl(ch[j+2])/(1 + cf*(BC[2]-1));
     if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
     A0.push(a0); A1.push(a1); A2.push(a2);
   }
@@ -1299,7 +1378,7 @@ $("ringload").addEventListener("click", async () => {
 });
 fetch("/api/version").then(r => r.json()).then(j => {
   applyBrand(j);
-  $("credit").textContent = `${BRAND.app} ${j.version} · \u00a9 2026 N. Augustin with ClaudeAI`;
+  $("credit").textContent = `${BRAND.app} ${j.version} · \u00a9 2026 N. Augustin (with Claude)`;
 }).catch(() => {});
 
 /* ---- file / folder picker -----------------------------------------------
@@ -1484,7 +1563,8 @@ async function processingLoad(path){
 function currentProcessing(){
   // Only used when the folder has not been stacked yet; otherwise the server
   // records what the run actually used, which is the more honest thing to save.
-  const ids = {align_corr:"alignCorr", align_filter:"alignFilter",
+  const ids = {intra_lock:"intraLock", partialconv:"partialConv",
+               align_corr:"alignCorr", align_filter:"alignFilter",
                stack_combine:"stackCombine", fnrgf_preset:"fnrgfPreset",
                photo_solve:"photoSolve", tier_mode:"tierMode",
                feather:"feather", wb_source:"wb", photometry:"photometry",

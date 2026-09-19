@@ -626,6 +626,134 @@ def pc_shift(ref, mov, upsample=20):
     return sh, err
 
 
+# INTRA-TIER ALIGNMENT LOCKS ON THE CORONA, NOT ON THE MOON (0.23.7).
+#
+# prep_pc above is a log image high-passed at 30 px with a Hann window and
+# nothing else, and in a crop centred on the disc the strongest thing left
+# after that high-pass is the lunar limb. So the frames of a tier were being
+# registered on the Moon. That is right only while the Moon and the corona do
+# not move against each other, and they do: the Moon crosses the corona at
+# about 0.5"/s, 0.12 px/s on a 360 mm bracket, and a bracket shot round-robin
+# spreads each tier's frames over the whole sequence -- 72 s on the 80D set
+# that found this, i.e. up to 9 px of coronal motion INSIDE one tier average.
+# Measured there: single raw frames put the limb at 1.75-2.0 px, the merge at
+# 3.0 with the corona visibly blurred, and the lunar track across tiers read
+# 0.02 px/s -- a Moon that does not move is a Moon every tier was locked to.
+#
+# The cross-tier aligner already does it right (prep_pair: log with a noise
+# floor, a signal weight, 25 px high-pass). This is the same recipe with the
+# limb band eroded out of the weight, so the correlation sees corona and
+# prominences and never the edge. The Moon then smears inside a tier by the
+# drift instead, which the disc margin absorbs: it follows the measured limb
+# ramp. A window that carries too little corona for this -- the fastest tiers
+# of a shallow bracket -- falls back to the old Moon lock, and says so.
+#
+# ECLIPSEFORGE_INTRA_LOCK=moon restores the old estimator for an A/B.
+INTRA_LOCK_MIN_WEIGHT = 0.02      # fraction of the window that must carry corona
+# The same threshold for the "mixed" setting, which is the user asking for the
+# Moon wherever the corona is thin and the corona only where it is solid. The
+# criterion is the MEASURED coverage of the pair's common corona, not the
+# shutter speed: a fast tier of a bright corona can carry a lock and a slow
+# tier under thin cloud may not, and coverage is what actually decides. On the
+# 360mm bracket the fast tiers sit near 0.06 and the mid tiers above 0.7, so
+# 0.25 splits them the way "fast tiers on the Moon" intends.
+INTRA_LOCK_MIXED_MIN = 0.25
+
+
+def prep_corona(crop, sat, hp=25.0, erode=8):
+    """prep_pair's recipe for one frame, with the Moon taken OUT of the
+    picture rather than merely down-weighted. Returns (prepped, good mask).
+
+    Down-weighting is not enough: the limb is a step of several natural-log
+    units against coronal texture of a few tenths, so a weight that leaks one
+    percent of it into the correlation still hands the lock to the Moon
+    (measured on a synthetic pair: the eroded-weight version returned the
+    Moon's shift on a fast-tier frame). So the disc and its ramp are filled
+    with the corona's own smooth continuation (normalized convolution, the
+    same fill detail.py uses for prominence patches) BEFORE the log and the
+    high-pass, and there is no edge left to lock on.
+
+    The signal floor is the frame's dark level plus five noise sigmas -- not
+    the window median, which in a window full of corona sits in the corona.
+    """
+    if sat is None or sat.shape != crop.shape:
+        sat = np.zeros(crop.shape, bool)
+    c = np.clip(crop, 0, None).astype(np.float32)
+    dark = float(np.percentile(c, 5))
+    hp3 = c - ndimage.gaussian_filter(c, 3)
+    sig = 1.4826 * float(np.median(np.abs(hp3))) + 1e-6
+    floor = dark + 5.0 * sig
+    good = (~ndimage.binary_dilation(sat, iterations=4)) & (
+        ndimage.gaussian_filter(c, 3) > floor)
+    good = ndimage.binary_erosion(good, iterations=erode)
+    frac = float(good.mean())
+    if frac <= 0.0:
+        return None, None
+    g = good.astype(np.float32)
+    num = ndimage.gaussian_filter(c * g, 20.0)
+    den = ndimage.gaussian_filter(g, 20.0)
+    fill = num / np.maximum(den, 1e-4)
+    c = np.where(good, c, fill)
+    x = np.log1p(c / max(floor, 1e-3))
+    # THE AZIMUTHAL MEAN ABOUT THE DISC GOES TOO (Druckmullerova, thesis sec.
+    # 4.2: the lunar edge and the radial gradient are what hijack a corona
+    # registration, and both are constant around a Sun-centred circle). The
+    # fill above removes the step; the bowl the fill leaves -- lower than the
+    # corona it continues, and bounded by the Moon -- is circular about the
+    # disc, so subtracting the per-radius mean removes it as well, and the
+    # corona's own radial falloff with it. What is left varies AROUND the
+    # circle: streamers, plumes, prominences -- the Sun's, not the Moon's.
+    # The centre is the hole in `good` itself; no other input needed.
+    hole = ~good
+    yy_, xx_ = np.nonzero(hole)
+    if yy_.size:
+        cy_, cx_ = float(yy_.mean()), float(xx_.mean())
+        rr_ = np.hypot(np.arange(x.shape[0], dtype=np.float32)[:, None] - cy_,
+                       np.arange(x.shape[1], dtype=np.float32)[None, :] - cx_)
+        ri = np.minimum(rr_.astype(np.int32), 4095).ravel()
+        n_ = np.bincount(ri, minlength=4096).astype(np.float64)
+        s_ = np.bincount(ri, x.ravel().astype(np.float64), minlength=4096)
+        prof = s_ / np.maximum(n_, 1)
+        x = x - prof[ri].reshape(x.shape).astype(np.float32)
+    x -= ndimage.gaussian_filter(x, hp)
+    # NOT weighted here. The weight must be the SAME function on both frames
+    # of a pair -- see corona_shift -- or its envelope, which is centred on
+    # each frame's own Moon, is itself a feature that moves with the Moon and
+    # pulls the peak toward it (measured: a per-frame weight left the lock a
+    # third of the way to the Moon on a fast-tier pair; a common one does not).
+    return x.astype(np.float32), good
+
+
+def corona_shift(ref, mov, sat_ref, sat_mov, upsample=20, lock=None):
+    """Shift registering `mov` to `ref` on the corona. Returns (shift, err,
+    mode) where mode is 'corona' or 'moon' (fallback).
+
+    `lock` is the Intra-tier lock setting ("corona" or "moon"); the
+    ECLIPSEFORGE_INTRA_LOCK environment variable still overrides it, so a
+    run can be A/B'd without touching the toolbar.
+    """
+    _lk = (os.environ.get("ECLIPSEFORGE_INTRA_LOCK", "").strip().lower()
+           or str(lock or "corona").strip().lower())
+    if _lk == "moon":
+        sh, err = pc_shift(ref, mov, upsample)
+        return sh, err, "moon"
+    _floor = INTRA_LOCK_MIXED_MIN if _lk == "mixed" else INTRA_LOCK_MIN_WEIGHT
+    a, ga = prep_corona(ref, sat_ref)
+    b, gb = prep_corona(mov, sat_mov)
+    if a is None or b is None:
+        sh, err = pc_shift(ref, mov, upsample)
+        return sh, err, "moon"
+    common = ga & gb
+    if float(common.mean()) < _floor:
+        sh, err = pc_shift(ref, mov, upsample)
+        return sh, err, "moon"
+    wgt = ndimage.gaussian_filter(common.astype(np.float32), 5)
+    wgt *= np.hanning(a.shape[0])[:, None] * np.hanning(a.shape[1])[None, :]
+    sh, err, _ = phase_cross_correlation(a * wgt, b * wgt, upsample_factor=upsample,
+                                         normalization=None)
+    return sh, err, "corona"
+
+
 # NOTE ON THE SIGN OF abs_shift (fixed in 0.8.8)
 #
 # phase_cross_correlation(ref, mov) returns the shift that must be APPLIED to
@@ -685,10 +813,40 @@ def _moon_track(tier_moon, tier_time, progress):
     rate = float(np.hypot(cy[0], cx[0]))
     span = rate * float(np.ptp(t))
     info = {"drift_px_per_s": rate, "drift_px_total": span,
-            "scatter_y_px": float(np.std(ry)), "scatter_x_px": float(np.std(rx))}
+            "scatter_y_px": float(np.std(ry)), "scatter_x_px": float(np.std(rx)),
+            "time_base_s": float(np.ptp(t))}
     progress.log(f"lunar track: {rate:.2f} px/s, {span:.0f} px across the "
                  f"bracket; scatter about the line {np.std(ry):.0f}/"
-                 f"{np.std(rx):.0f} px", None)
+                 f"{np.std(rx):.0f} px; the tiers' mean times span "
+                 f"{np.ptp(t):.0f} s", None)
+    # THE RATE IS CHECKED AGAINST ORBITAL MECHANICS (0.23.8). The Moon crosses
+    # the corona at 0.4-0.6 arcsec/s during totality (its own motion less the
+    # Sun's, with the observer's parallax), and the plate scale follows from
+    # the fitted lunar radius. A fit far off that is not measuring the Moon:
+    # 0.02 px/s on a 360 mm bracket was every tier locked to the lunar edge,
+    # and 1.49 px/s on the same bracket, once the tiers were on the corona,
+    # was the 9.7 px cross-tier residual spread over a 7 s time base -- on a
+    # round-robin bracket all tiers share nearly the same mean time, so the
+    # line has almost no base to fit a slope on and any per-tier error is a
+    # rate. Positions from the line are still fine; the RATE is not.
+    _Rr = float(np.polyval(cr, float(np.median(t)))) if len(cr) else 0.0
+    if _Rr > 0:
+        _exp = 0.5 / (1920.0 / (2.0 * _Rr))          # px/s at this scale
+        info["drift_expected_px_per_s"] = _exp
+        if rate > 2.0 * _exp or rate < 0.3 * _exp:
+            _why = ("the tiers are locked to the lunar edge, not the corona"
+                    if rate < 0.3 * _exp else
+                    "this fit is describing the cross-tier alignment error, "
+                    "not the Moon" + (f" (only {np.ptp(t):.0f} s between the "
+                                      f"tiers' mean times: a round-robin "
+                                      f"bracket gives the slope no base)"
+                                      if np.ptp(t) < 20.0 else ""))
+            progress.log(f"WARNING: at this plate scale the Moon moves about "
+                         f"{_exp:.2f} px/s against the corona; the track reads "
+                         f"{rate:.2f} px/s, so {_why}. The positions on the "
+                         f"line are used as before; the rate is not a "
+                         f"measurement.", None)
+            info["rate_implausible"] = True
     # SCATTER THAT DWARFS THE TRACK MEANS THERE IS NO TRACK.
     #
     # a tester's 560mm run: "0.63 px/s, 6 px across the bracket; scatter
@@ -1129,7 +1287,10 @@ FEATHER_NAMES = {"plain": "Blended edge", "taper": "Exact edge",
 # limb for pictures that do not show rings -- and the price is NOT a constant.
 # 25% of the true level at 1.02 R on the 600 mm reference set; a factor of EIGHT on
 # the test set's 360 mm, where it prints as a pink rim. He reported exactly that on
-# 0.22.26, which is what killed this as a global default.
+# 0.22.26, which is what killed this as a global default. The PINK of that rim
+# is understood since 0.23.8 and removed in the merge loop (the leaked value
+# is made achromatic: the channels clip at different depths); the brightness
+# error stays, by design.
 #
 # Since 0.22.28 the feather is chosen per dataset by measuring that ratio on
 # the half-resolution stacks before the merge -- see _pick_feather. This
@@ -1150,7 +1311,7 @@ _PEDESTAL_MAX = 0.002
 # The same ceiling for a file that reported NO black level, so the whole of it
 # is still in the pixels rather than a residue of it. 0.02 of saturation is
 # 1310 ADU on a 16-bit FITS and 328 on a 14-bit raw: wide enough for a real
-# black level -- a third tester's measures 142 -- and still far below anything that
+# black level -- Val Italo's measures 142 -- and still far below anything that
 # could be corona. See TODO 22.
 _PEDESTAL_UNKNOWN_MAX = 0.02
 # How large a per-link offset the linear-fit chain will accept, as a fraction of
@@ -1407,7 +1568,7 @@ def _fit_channel_floors(pmed, secs, iters=200, exposures=None):
     with `s_i` ONE effective exposure per tier, SHARED by the three channels.
     A shutter that did not honour the requested time, a wrong EXPTIME, a gain
     compounding along the ladder -- all of these are achromatic, so they land
-    in `s_i` and cannot reach `b_c`. On a third tester's set the fitted ladder comes out
+    in `s_i` and cannot reach `b_c`. On Val's set the fitted ladder comes out
     -15.5% at 1/20 s and -10.4% at 1/13 s against the stated EXPTIME, which is
     the same shape found independently from corner-patch rates; the floors come
     out regardless.
@@ -1446,7 +1607,7 @@ def _fit_channel_floors(pmed, secs, iters=200, exposures=None):
     # THE LADDER, PINNED RATHER THAN FREE, when a measured one is offered.
     #
     # `sv` free per tier is what the docstring above argues for, and on data
-    # whose stated times are roughly right it is fine. On a third tester's FITS it is
+    # whose stated times are roughly right it is fine. On Val Italo's FITS it is
     # not: his headers carry a synthetic 1.5^n ladder ("Manual group
     # assignment" in Siril's own comment on the card) where the corner rates
     # measure ~1.25x per step, and the SHORT tiers have almost no sky in the
@@ -1539,7 +1700,7 @@ def _fit_channel_floors(pmed, secs, iters=200, exposures=None):
     # `s * cal`, measured independently on the bright corona, there is no d to
     # absorb and the component along `a` is as real as any other.
     #
-    # MEASURED on a third tester's set, where the true floors happen to lie largely
+    # MEASURED on Val Italo's set, where the true floors happen to lie largely
     # along the rate direction and the projection therefore throws most of the
     # correction away. Floors extrapolated from his two shortest frames, as
     # deltas about the mean, against what each mode returns:
@@ -2448,7 +2609,7 @@ def _per_channel_photometry(bayer, sat_half, secs, ref, links_good, cal,
     # THE FLOOR FIT NEEDS THE FAINT FIELD, AND `_gp` CANNOT REACH IT.
     #
     # `_grid` caps its radius at the nearest frame edge, so on a bracket where
-    # the disc fills the frame it stops early -- 2.85 R on a third tester's set. At
+    # the disc fills the frame it stops early -- 2.85 R on Val Italo's set. At
     # that radius the corona still swamps a hundred ADU of floor, the fit is
     # ill-conditioned, and with one free exposure per tier it can absorb the
     # mismatch into the ladder instead: the first real run returned an
@@ -2488,7 +2649,7 @@ def _per_channel_photometry(bayer, sat_half, secs, ref, links_good, cal,
             # ONLY THE TIERS WHERE A FLOOR IS STILL PART OF THE SIGNAL.
             #
             # The model is one rate plus one floor per channel. It breaks on the
-            # long end of a third tester's set, where the corner level rises ~2.0x
+            # long end of Val Italo's set, where the corner level rises ~2.0x
             # per 1.5x step -- the sky brightened through the end of totality,
             # so a constant rate cannot describe it, and with all 18 tiers in
             # the residual is 3.5% and the fit is refused. Those tiers carry no
@@ -3391,9 +3552,24 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         photometry="linfit", bias_dir=None, dark_dir=None,
         photo_solve="chain", tier_mode="exposure",
         fnrgf_preset="ours", stack_combine="mean",
-        align_filter="isotropic", align_corr="semi"):
+        align_filter="isotropic", align_corr="semi",
+        intra_lock="corona", partialconv=True):
     from . import flat as _flat
     from . import dark as _dark
+    # WHAT THE FRAMES OF ONE TIER ARE ALIGNED ON. "corona" ignores the Moon
+    # (see corona_shift); "moon" is the pre-0.23.8 estimator. Per PAIR, the
+    # corona setting still falls back to the Moon when that window holds too
+    # little corona to lock on -- measured, not assumed, and the log says so
+    # per tier. "mixed" is that same fallback with a far higher bar
+    # (INTRA_LOCK_MIXED_MIN), which in practice puts the fast tiers on the Moon
+    # and the rest on the corona, but by measured coverage rather than by
+    # shutter speed. It is offered, NOT recommended and NOT measured: on a
+    # round-robin bracket the fast tiers are the ones whose inner corona must
+    # not be smeared, so sending them to the Moon gives up exactly what the
+    # corona lock was for. It is here to be A/B'd on real data.
+    _intra_lock = str(intra_lock or "corona").strip().lower()
+    if _intra_lock not in ("corona", "moon", "mixed"):
+        _intra_lock = "corona"
     wd = workdir(folder)
     paths = list_raws(folder)
     if len(paths) < 3:
@@ -3427,6 +3603,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          "stack_combine": str(stack_combine),
                          "align_filter": str(align_filter),
                          "align_corr": str(align_corr),
+               "intra_lock": str(intra_lock),
+               "partialconv": bool(partialconv),
+                         "intra_lock": str(intra_lock),
+                         "partialconv": bool(partialconv),
                          "tier_mode": str(tier_mode),
                          "flat_dir": _flat_dir,
                          "bias_dir": _bias_dir, "dark_dir": _dark_dir},
@@ -3448,7 +3628,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # -- and get averaged as though they were the same measurement -- because
     # their headers say so.
     #
-    # On a third tester's set the exposure times were typed in by hand from the
+    # On Val Italo's set the exposure times were typed in by hand from the
     # video, so that is exactly the assumption that does not hold. Druckmüller,
     # Rušin & Minarovjech (2006) do not group at all: every frame is calibrated
     # and enters one weighted average. This is that, reached the cheap way.
@@ -3646,7 +3826,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 # FITS has no such header. `fits.py` re-mosaics a 3-plane cube
                 # into a CFA, so each plane's own floor survives as a
                 # per-Bayer-position offset and nothing downstream removes it.
-                # On a third tester's set the three floors are 102.7, 116.2 and
+                # On Val Italo's set the three floors are 102.7, 116.2 and
                 # 222.8 ADU against one shared scalar of 111.8 -- 107 ADU left
                 # in blue, which is nothing against the inner corona and is
                 # the entire signal in the outer field. That is the colour
@@ -3939,6 +4119,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         _clip_h = [acc_h.copy()] if _clip_stack else None
         _clip_b = [acc_b.copy()] if _clip_stack else None
         _intra = []
+        _lock = {"corona": 0, "moon": 0}
         _edge.setdefault(s, [0.0, 0.0, 0.0, 0.0])
         # Same rule as the cross-tier window: leave it alone unless the frames
         # genuinely move too far for it. Within a tier the exposure is constant,
@@ -3957,7 +4138,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             else:
                 crop = lums[p][y0:y0 + ref_crop.shape[0], x0:x0 + ref_crop.shape[1]]
                 yp, xp = y0, x0
-            (dy, dx), err = pc_shift(ref_crop, crop)
+            _sref = sats[best][y0:y0 + ref_crop.shape[0], x0:x0 + ref_crop.shape[1]]
+            _smov = sats[p][yp:yp + ref_crop.shape[0], xp:xp + ref_crop.shape[1]]
+            (dy, dx), err, _mode = corona_shift(ref_crop, crop, _sref, _smov,
+                                                lock=_intra_lock)
+            _lock[_mode] += 1
             dy += y0 - yp          # put the coarse re-centring back in
             dx += x0 - xp
             _intra.append(float(np.hypot(dy, dx)) * 2.0)
@@ -3976,6 +4161,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             sat_u |= sats[p]
         if _intra:
             quality[s]["intra_shift_px"] = [round(v, 1) for v in _intra]
+            quality[s]["intra_lock"] = dict(_lock)
+            if _lock["moon"]:
+                progress.log(f"{_exp_name(s)}: {_lock['moon']} of "
+                             f"{_lock['moon'] + _lock['corona']} frames aligned "
+                             f"on the lunar edge (too little corona in the "
+                             f"window for a corona lock)", None)
             # _intra is full-res (x2 at the point it is appended), _sz is the
             # half-res window, so this used to fire at half the intended motion
             if max(_intra) > 0.5 * _sz:
@@ -4171,6 +4362,19 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # DIFFERENT WINDOWS DO NOTHING HERE; see ASYM_WINDOW.
     _tangential = str(align_filter or "isotropic").strip().lower() == "tangential"
     _corr = str(align_corr or "semi").strip().lower()
+    # BETWEEN-TIER LINKS STAY ON THE LUNAR-EDGE PREP. 0.23.8 moved them to the
+    # corona prep as well and it FAILED on the reference set's 600 mm set: network residual
+    # 1.17 -> 83 px (half-res), the long tiers thrown 55-236 px, output
+    # unusable. The evidence for the move was synthetic and the synthetics had
+    # no tier whose inner corona is SATURATED OUT TO A LARGE RADIUS, which is
+    # what a 0.5 s or 1.6 s tier is -- and that is the case prep_corona cannot
+    # handle: its fill is a 20 px normalized convolution, so a hole a thousand
+    # pixels across fills with nothing, and what is left for the correlation is
+    # each tier's own saturation boundary. Exactly the failure the 0.22.28
+    # note above describes: a synthetic test that cannot fail the way the real
+    # thing fails is not evidence. See TODO: a corona prep for cross-tier links
+    # has to treat the saturated region as missing data, not as a hole to fill,
+    # and be benched on a real bracket's long tiers before it goes back in.
 
     def _arc_blur(x, sigma, org):
         """T_sigma's blur: a Gaussian along a Sun-centred ARC, not a disc.
@@ -4850,7 +5054,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # level, and the three real raw sets that show one land at 2.9, 5.5
             # and -2.0 ADU. When the file reported no black level the whole of
             # it is still in the data, and that ceiling makes it unrecoverable:
-            # on a third tester's FITS the true level is 142 ADU against a 131 ADU
+            # on Val Italo's FITS the true level is 142 ADU against a 131 ADU
             # cap, so the fit pinned against its own limit and left ~23 ADU in
             # every channel. The prior is still zero and the jackknife shrinkage
             # is unchanged, so a set with no pedestal does not acquire one --
@@ -5753,7 +5957,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 # pinwheel centred on the Moon, and an order-4 trigonometric
                 # polynomial is exactly what a pinwheel looks like.
                 #
-                # Measured on a third tester's exported 1/4 s tier, azimuthal swing
+                # Measured on Val Italo's exported 1/4 s tier, azimuthal swing
                 # of the median in 24 sectors: 60% at 0.2-0.6 R and 55% at
                 # 0.6-0.95 R, inside a disc that should be featureless. The
                 # composite hides it under the disc mask; an exported tier does
@@ -5840,6 +6044,43 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # tilting toward the shorter, sharper tiers buys limb detail without
         # costing the outer field. See _pick_weight_alpha.
         _wf = _feather_weight(wsat, _valid, _feather, _fm)
+        if _fm == "plain" and k > 0:
+            # THE BLENDED EDGE'S LEAK IS MADE ACHROMATIC (0.23.8).
+            #
+            # The plain blur hands this tier weight where it is clipped, and
+            # a clipped pixel under-reports -- that is the documented trade
+            # above, and the luminance error is what covers the rings. But the
+            # three channels do not clip together. Measured on the test set's 360 mm
+            # raws (1/8 s at 1.02-1.08 R): R and G on the plateau in 90-96% of
+            # photosites, B in 17-48%, because the raw channels sit at
+            # G:R:B = 1:1:0.25. So the leaked value has R and G capped and B
+            # not: a magenta pixel. A two-tier merge of 1/125 and 1/8 s put
+            # R/G 0.83 -> 0.90 and B/G 0.40 -> 0.59 at 1.02 R, and the full
+            # 12-tier merge, where four clipped tiers leak at up to 4.6x the
+            # weight, doubled B/G in a 35 px band at the limb: the diffuse
+            # magenta ring reported on that set. The exact edge does not do it.
+            #
+            # Here the clipped pixel keeps ITS OWN brightness -- so the
+            # luminance leak, and with it the ring cover, is unchanged
+            # (measured 0.78 of truth at 1.02 R against 0.76 before) -- but
+            # takes the chroma of the tiers already merged, which are the
+            # shorter ones, unclipped there. Bench: R/G 0.829 against a truth
+            # of 0.832, B/G 0.413 against 0.404. Tiers merge shortest first,
+            # so `acc / wsum` at this point is exactly that composite; where no
+            # shorter tier has weight (wsum == 0) nothing is touched.
+            _inv = (_valid < 0.5) & (wsum > 0)
+            if _inv.any():
+                _cmp = acc[_inv] / wsum[_inv][:, None]
+                _lc = (0.2126 * _cmp[:, 0] + 0.7152 * _cmp[:, 1]
+                       + 0.0722 * _cmp[:, 2])
+                _own = rgb[_inv]
+                _lt = (0.2126 * _own[:, 0] + 0.7152 * _own[:, 1]
+                       + 0.0722 * _own[:, 2])
+                _g = _lc > 0
+                _own[_g] = _cmp[_g] * (_lt[_g] / _lc[_g])[:, None]
+                rgb[_inv] = _own
+                del _cmp, _lc, _own, _lt, _g
+            del _inv
         w = np.float32(s ** _walpha) * _wf
         mw = moon_weight(s)
         if mw is not None:
@@ -5874,7 +6115,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     #
     # `hdr = acc / max(wsum, 1e-9)` is 0/0 at every pixel that is clipped in all
     # tiers, and 0 is not a plausible value for the brightest thing in the frame
-    # -- it is a hole. hit on the 250 mm test set in 0.22.35: the core
+    # -- it is a hole. It appeared on the 250 mm test set in 0.22.35: the core
     # of a prominence came out as a black sliver inside the prominence.
     #
     # It appeared with 0.22.35 and was not caused by it. Measured on that set's
@@ -6126,7 +6367,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # Against the three real datasets available:
     #
     #   set                consensus  spread  merged fit  |diff|  fires?
-    #   600 mm ref            617 px    7 px    619.1 px   2.1 px   no
+    #   reference 600mm           617 px    7 px    619.1 px   2.1 px   no
     #   the tester 250mm         298 px    7 px    300.2 px   2.2 px   no
     #   the tester 360mm         456 px    2 px    470.2 px  14.2 px   YES
     #
@@ -6165,7 +6406,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # amount that tracks the merged limb ramp and nothing else.
         #
         #   set                 consensus  spread   merged fit   bias   ramp
-        #   600 mm ref             617 px    7 px      619.1     +2.1     8
+        #   reference 600mm            617 px    7 px      619.1     +2.1     8
         #   the tester 250mm          298 px    7 px      300.3     +2.3     9
         #   the tester 360mm          456 px    2 px      470.4    +14.4    21
         #   the tester 2024 560mm     525 px   15 px      553.0    +28.0    28
@@ -6356,12 +6597,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             #   1.02-1.15 R   19.4 / 9.9     10.9 / 2.5     13.9 / 2.7     15.1 / 4.6
             #   1.15-1.40 R    4.5 / 3.7      1.7 / 2.0      2.1 / 0.7      3.2 / 1.5
             #   1.40-1.80 R    3.2 / 3.0      0.6 / 1.5      0.9 / 0.6      1.9 / 1.3
-            #                 (250 mm test set / 600 mm ref)
+            #                 (250mm set / 600mm reference set)
             #
-            # The ringing lives in a band 1.02-1.15 R wide and is 2 to 5.3x his,
-            # while the merged luminance it is built from oscillates only 1.4%
-            # there. So the filters are amplifying a real tier disagreement by
-            # about ten, not inventing it.
+            # The ringing lives in a band 1.02-1.15 R wide and is 2 to 5.3x
+            # the reference set's, while the merged luminance it is built from
+            # oscillates only 1.4% there. So the filters are amplifying a real
+            # tier disagreement by about ten, not inventing it.
             #
             # NAFE is the tell: it is 5.3x worse and it is the one layer that
             # does not use the limb fit or the disc mask at all. So this is not
@@ -6517,7 +6758,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     from . import detail
     lstats = detail.build_layers(wd, progress, denoise=denoise,
                                  earthshine=earthshine,
-                                 fnrgf_preset=fnrgf_preset)
+                                 fnrgf_preset=fnrgf_preset,
+                                 partialconv=partialconv)
     if isinstance(lstats, dict):
         stats.update(lstats)
     json.dump({"export_tiers": bool(export_tiers),

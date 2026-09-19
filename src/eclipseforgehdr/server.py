@@ -333,6 +333,21 @@ def start_run():
                   if request.is_json else "semi")
     if align_corr not in ("cross", "semi", "phase"):
         align_corr = "semi"
+    # What the frames WITHIN one tier are aligned on. Separate from the two
+    # above, which govern the tier-to-tier network.
+    intra_lock = (request.json.get("intraLock", "corona")
+                  if request.is_json else "corona")
+    if intra_lock not in ("corona", "moon", "mixed"):
+        intra_lock = "corona"
+    # PARTIAL CONVOLUTION ON/OFF. About half the run time on a big merge and
+    # nothing else depends on it, so it is turned off while the rest of the
+    # settings are being found and on for the final render. NOT part of the
+    # stack cache key below: it changes only which detail layers are built,
+    # not the stack, so switching it does not force a re-stack -- turning it
+    # back on costs the mask build alone, the same path a folder stacked
+    # before 0.22.64 takes.
+    partialconv = (bool(request.json.get("partialConv", True))
+                   if request.is_json else True)
     # VNG IS NO LONGER A TOOLBAR CHOICE. It was added in 0.22.63 so a render
     # could be compared with PixInsight's on equal terms, and that comparison
     # has now been made on the reference bracket: no visible advantage, and the
@@ -518,6 +533,12 @@ def start_run():
                            and o.get("stack_combine", "mean") == stack_combine
                            and o.get("align_filter", "isotropic") == align_filter
                            and o.get("align_corr", "semi") == align_corr
+                           # ... and what the frames within a tier locked on,
+                           # which changes every tier's stack. Defaulting the
+                           # stored value to "moon" keeps the cache of a folder
+                           # stacked before 0.23.8, when that was the only
+                           # behaviour.
+                           and o.get("intra_lock", "moon") == intra_lock
                            # ... and the grouping, which changes what a tier IS
                            and o.get("tier_mode", "exposure") == tier_mode
                            and _cache_ok(o.get("build"))
@@ -550,6 +571,8 @@ def start_run():
                              stack_combine=stack_combine,
                              align_filter=align_filter,
                              align_corr=align_corr,
+                             intra_lock=intra_lock,
+                             partialconv=partialconv,
                              tier_mode=tier_mode)
             else:
                 prog.log("using cached pipeline products "
@@ -558,8 +581,31 @@ def start_run():
             # luminance, the geometry, the prominence mask -- is already on
             # disk, so a folder stacked before 0.22.64 gains the layer for the
             # cost of the polar blur alone instead of a whole re-stack.
-            _hstale = not os.path.exists(os.path.join(wd, "hill.npy"))
-            if not _hstale:
+            # SWITCHED OFF: SKIP THIS WHOLE BLOCK, not just the staleness
+            # test. Setting _hstale = False here was not enough -- the next
+            # branch is `if not _hstale`, which re-derives staleness from
+            # report.json, finds no "hill" entry because the run did not write
+            # one, reads its build number as 1, and rebuilds. That is exactly
+            # what happened on the reference set's 600 mm run: the pipeline reported
+            # "partial convolution: OFF" and the masks were then built anyway
+            # right after "pipeline complete", turning an 18m39s run into 39
+            # minutes. Whatever is on disk is also dropped, since it was built
+            # on a different merge and nothing downstream could tell.
+            if not partialconv:
+                for _hf in ("hill.npy", "hill_log.npy", "hill_sigma.npy"):
+                    _hfp = os.path.join(wd, _hf)
+                    if os.path.exists(_hfp):
+                        try:
+                            os.remove(_hfp)
+                        except OSError:
+                            pass
+                prog.log("partial convolution: OFF (setting) — not built and "
+                         "any cached masks dropped; turning it back on costs "
+                         "the mask build alone, not a re-stack", None)
+                _hstale = False
+            else:
+                _hstale = not os.path.exists(os.path.join(wd, "hill.npy"))
+            if partialconv and not _hstale:
                 # masks built by an older recipe are rebuilt, not reused: the
                 # de-radialisation in 0.22.67 changes what is ON DISK
                 from .detail import HILL_BUILD as _HB
@@ -607,7 +653,7 @@ def start_run():
                 if _hstale:
                     prog.log("the cached partial-convolution masks were built by an older "
                              "recipe — rebuilding them", None)
-            if _hstale:
+            if partialconv and _hstale:
                 from .detail import build_hill
                 _hst = build_hill(wd, prog, denoise=denoise)
                 if _hst:
@@ -836,6 +882,8 @@ _SETTINGS_EXT = ".efsettings.json"
 # id -> (default, the element id on the page)
 _PROCESSING_KEYS = {
     "align_corr":    ("semi",      "alignCorr"),
+    "intra_lock":    ("corona",    "intraLock"),
+    "partialconv":   ("True",      "partialConv"),
     "align_filter":  ("isotropic", "alignFilter"),
     "stack_combine": ("mean",      "stackCombine"),
     "fnrgf_preset":  ("ours",      "fnrgfPreset"),

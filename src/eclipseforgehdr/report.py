@@ -17,7 +17,23 @@ METHODS = [
      "hot/dead photosites mapped on the shortest tier against a fitted photon+read "
      "noise model, repaired by the median of same-colour neighbours"),
     ("Alignment",
-     "SEMI-PHASE correlation of a gradient-flattened log corona, high-passed at "
+     "FRAME TO FRAME WITHIN A TIER the link is measured on the corona alone "
+     "(0.23.8): the lunar disc filled with the corona's smooth continuation, "
+     "the per-radius mean about the disc subtracted (Druckmullerova, thesis "
+     "sec. 4.2: the lunar edge and the radial gradient are what hijack a "
+     "corona registration), a 25 px high-pass, one weight common to both "
+     "frames, plain cross-correlation. That matters when a bracket is shot "
+     "round-robin, so the frames of one tier span the whole sequence and the "
+     "Moon drifts between them: the previous prep returned the Moon's shift "
+     "(up to 12 px wrong on synthetic pairs), this one is within 1.4 px, and "
+     "the Moon is what smears instead of the corona. A window with too little "
+     "corona falls back to the path below, which is also what "
+     "ECLIPSEFORGE_INTRA_LOCK=moon selects. TIER TO TIER the links use that "
+     "same path, because the tiers differ in exposure and a long tier's inner "
+     "corona is saturated over a large radius, which the corona prep cannot "
+     "fill: "
+     "SEMI-PHASE correlation of a gradient-flattened log corona, "
+     "high-passed at "
      "25 px, with lag-1 and lag-2 links solved together by weighted least "
      "squares. The cross-power spectrum is divided by the two amplitude spectra "
      "plus a constant p = q = 1e-4 of the peak amplitude (Druckmullerova, "
@@ -271,7 +287,17 @@ def build(stats):
         A(f"lunar motion : {mt['drift_px_per_s']:.2f} px/s, "
           f"{mt['drift_px_total']:.0f} px across the bracket "
           f"(scatter about the straight-line track "
-          f"{mt.get('scatter_y_px', 0):.0f}/{mt.get('scatter_x_px', 0):.0f} px)")
+          f"{mt.get('scatter_y_px', 0):.0f}/{mt.get('scatter_x_px', 0):.0f} px"
+          + (f"; tiers' mean times span {mt['time_base_s']:.0f} s"
+             if mt.get("time_base_s") is not None else "") + ")")
+        if mt.get("rate_implausible"):
+            A(f"             : NOT A RATE -- at this plate scale the Moon moves "
+              f"about {mt.get('drift_expected_px_per_s', 0):.2f} px/s; "
+              + ("the tiers are locked to the lunar edge"
+                 if mt['drift_px_per_s'] < 0.3 * mt.get('drift_expected_px_per_s', 1)
+                 else "the fit is describing cross-tier alignment error over "
+                      "a short time base (round-robin bracket)")
+              + "; the track's positions are used, its rate is not")
     mm = stats.get("moon_mask") or {}
     if mm.get("verdict"):
         A(f"moon masking : {mm['verdict']}")
@@ -342,7 +368,9 @@ def build(stats):
           f"limb is suppressed. It is suppressed by covering it with an error "
           f"of the same shape: weight leaks from clipped pixels into unclipped "
           f"ones and the corona reads low there — on some brackets a few "
-          f"percent, on others enough to show as a coloured rim. Exact edge "
+          f"percent, on others a factor. Since 0.23.8 that leak is achromatic "
+          f"(the channels clip at different depths, which used to print it as "
+          f"a magenta rim); the brightness error remains. Exact edge "
           f"keeps the weight exact at that boundary, which is radiometrically "
           f"correct and leaves the rings visible. Change it in the toolbar")
         if _ac and _fm == "plain":
@@ -605,6 +633,11 @@ def build(stats):
         A("             : where it can be measured and dealt with once.")
         A("")
         A(f"denoise      : {o.get('denoise', '?')}")
+        if not o.get("partialconv", True):
+            A("partial conv : OFF (setting) — the layer was not built, so its "
+              "sliders are hidden and the composite is what the Partial "
+              "convolution sliders at zero would give. Turn it on for the "
+              "final render; it does not re-stack")
         _fn = {"ours": "EFHDR (order 6, hard cutoff)",
                "published": "published (order 30, attenuated)"}
         _v = str(o.get("fnrgf_preset", "ours"))
@@ -645,7 +678,12 @@ def build(stats):
     else:
         A(f"denoise      : {o.get('denoise', '?')}")
         A(f"earthshine   : {'on' if o.get('earthshine') else 'off'}")
-        _sel = [("correlation  ", "align_corr", "semi",
+        _sel = [("intra-tier   ", "intra_lock", "corona",
+                 {"corona": "Corona Align (the Moon is ignored)",
+                  "moon": "Moon Align (the lunar edge, pre-0.23.8)",
+                  "mixed": "Mixed (fast subs on the Moon, long subs on the "
+                           "corona — split by measured corona coverage)"}),
+                ("correlation  ", "align_corr", "semi",
                  {"cross": "cross-correlation",
                   "semi": "semi-phase (amplitude floor)",
                   "phase": "full phase (whitened)"}),

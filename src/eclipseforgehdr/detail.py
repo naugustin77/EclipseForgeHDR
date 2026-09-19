@@ -1550,7 +1550,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
                 del _zl
             # HILL'S STEP 4: "replace any pixels restricted by the mask with
             # zero". Leaving it out is what put a row of dark blobs in an arc
-            # below the Moon on the 250 mm test set.
+            # below the Moon on the test set's 250 mm set.
             #
             # Where the mask is 0 the partial convolution has no data to work
             # with, so `blur` is whatever num/max(den, 1e-4) happens to produce
@@ -1670,7 +1670,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
 
 
 def build_layers(wd, progress, denoise="fine", earthshine=False,
-                 fnrgf_preset="ours"):
+                 fnrgf_preset="ours", partialconv=True):
     if denoise is True:
         denoise = "fine"
     if denoise is False:
@@ -1951,8 +1951,30 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     # work directory -- see build_hill. The same argument build_hill makes:
     # it would be absurd to charge someone a 13-minute re-stack for a layer that
     # is one transform of data they already have.
-    lstats["hill"] = build_hill(wd, progress, lum_dn=lum_dn, disc=disc_m,
-                                prom=_pm, cy=cy, cx=cx, frac=_DF["pellett"])
+    if partialconv:
+        lstats["hill"] = build_hill(wd, progress, lum_dn=lum_dn, disc=disc_m,
+                                    prom=_pm, cy=cy, cx=cx, frac=_DF["pellett"])
+    else:
+        # PARTIAL CONVOLUTION OFF. It is the most expensive layer in the run --
+        # about half the wall clock on a 24 Mpx merge, because the polar blur
+        # is taken in radial bands -- and nothing else depends on it: the
+        # renderer already hides its controls and its view when the workdir has
+        # no masks (GEO.hasHill), so the composite is exactly the same picture
+        # with the Partial convolution sliders at zero. Off is for finding the
+        # rest of the settings quickly; turn it back on for the final run.
+        # Any masks from an earlier run are removed rather than left behind:
+        # they were built on a different merge and the renderer cannot tell.
+        for _f in ("hill.npy", "hill_log.npy", "hill_sigma.npy"):
+            _fp = os.path.join(wd, _f)
+            if os.path.exists(_fp):
+                try:
+                    os.remove(_fp)
+                except OSError:
+                    pass
+        lstats["hill"] = None
+        progress.log("partial convolution: OFF (setting) — the most expensive "
+                     "layer in the run is skipped and its sliders will not "
+                     "appear; turn it on for the final render", _DF["pellett"])
 
     del lum_dn, Ldn
 
@@ -2101,7 +2123,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         # ...and how much of it survives the disc mask. A prominence flagged
         # UNDER the mask contributes nothing to the picture, so a report that
         # counts it is telling the user they have prominences they cannot see.
-        # Measured on an imported HDR (a third tester's Siril stack of 327 frames):
+        # Measured on an imported HDR (Val Italo's Siril stack of 327 frames):
         # 60 px flagged, every one of them between 0.97 and 1.01 R -- at or
         # inside the limb -- and 0 px visible. Beyond 1.02 R the highest
         # R/(G+B)/2 anywhere out to 1.3 R is 1.33 against a 1.35 threshold, so

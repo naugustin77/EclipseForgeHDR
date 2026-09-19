@@ -124,7 +124,7 @@ DEFAULTS = {
 # specific pipeline, not a property of coronae. Applied a second time to a file
 # that is already balanced it is simply a tint.
 #
-# MEASURED on a third tester's 16-bit sRGB stack (4680x3132), median chroma
+# MEASURED on Val Italo's 16-bit sRGB stack (4680x3132), median chroma
 # normalised to unit luminance, source against the rendered composite:
 #
 #                       source           as shipped        temp/tint 1.0
@@ -1177,7 +1177,13 @@ def render(layers: Layers, params, preview=False, view="composite"):
     Y = Y * edge + Yd * (1 - edge)
     del B, det, inner_eff, Yd, wf, wI, wG, mg, fn
 
-    a = np.clip(src["ratio"], 0.2, 3.0) ** P["satur"]
+    # NOT raised to the Saturation exponent here. Saturation is applied AFTER
+    # Temperature, Tint and the sky-cast correction below, so that at 0 the
+    # chroma collapses to white as balanced, not to the balance gains
+    # themselves. Measured before 0.23.8: Saturation at its floor left the
+    # whole frame the flat colour of the WB gains -- blue with the corona as
+    # the white reference, warm with the sky.
+    a = np.clip(src["ratio"], 0.2, 3.0)
     if P.get("bgNeutral", 0) > 0:
         # weighted by the same confidence that built `ratio` -- see the note
         # where _cconf is stored
@@ -1212,6 +1218,10 @@ def render(layers: Layers, params, preview=False, view="composite"):
     a[:, :, 0] *= P["temp"]
     a[:, :, 2] /= P["temp"]
     a[:, :, 1] *= P.get("tint", 1.0)
+    # Saturation: the balanced chroma's departure from white, raised to a
+    # power. 1 leaves it alone, 0 is monochrome, 2 doubles it in the log.
+    if abs(P["satur"] - 1.0) > 1e-9:
+        a = a ** np.float32(P["satur"])
     # renormalise to unit luminance so colour moves never change brightness
     al = (0.2126 * a[:, :, 0] + 0.7152 * a[:, :, 1] + 0.0722 * a[:, :, 2])
     a /= np.maximum(al, 1e-6)[:, :, None]
@@ -1244,6 +1254,8 @@ def render(layers: Layers, params, preview=False, view="composite"):
     if abs(P.get("promChroma", 0)) > 1e-6 and "promdet" in src:
         _f = 1.0 + P["promChroma"] * np.clip(src["prom"], 0, 1) * (
             2.0 * np.asarray(src["promdet"], np.float32) - 1.0)
+        if abs(P["satur"] - 1.0) > 1e-9:      # follows Saturation, so 0 is grey here too
+            _f = np.clip(_f, 1e-3, None) ** np.float32(P["satur"])
         a[:, :, 1] *= _f
         a[:, :, 2] *= _f
         del _f

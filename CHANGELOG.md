@@ -5,6 +5,66 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.23.8
+
+Alignment within an exposure tier, a colour error at the limb, and two new
+controls. This re-stacks: what the frames of a tier are aligned on has changed.
+
+- **Frames within a tier are now aligned on the corona, not the lunar edge.**
+  The previous estimator was a log crop high-passed at 25 px, and the strongest
+  feature in that is the Moon's edge. When a bracket is shot as whole brackets
+  one after another, the frames of one tier span the entire sequence and the
+  Moon drifts several pixels against the corona between them, so the tier
+  average came out with a sharp Moon and a corona smeared by the drift. The
+  disc is now filled with the corona's own smooth continuation and the
+  per-radius mean about it subtracted before the high-pass (Druckmullerova,
+  doctoral thesis sec. 4.2: the lunar edge and the radial gradient are what
+  hijack a corona registration), with one weight common to both frames of a
+  pair. On synthetic pairs with the Moon drifting 3-8 px against the corona the
+  old estimator returns the Moon's shift, up to 12.7 px wrong; this one is
+  within 1.1 px. The Moon now absorbs the drift instead, which the disc margin
+  covers. Selectable as **Intra-tier lock**: Corona Align (default), Moon Align
+  (the previous estimator) or Mixed, which uses the corona only where the
+  pair's common corona covers at least a quarter of the window. Part of the
+  stack cache key; `ECLIPSEFORGE_INTRA_LOCK` still overrides it. A bracket shot
+  tier by tier is unaffected, as its within-tier drift is sub-pixel: on the
+  600 mm reference set the two locks agree, network residual 1.42 -> 1.17 px
+  half-res.
+- **The Blended edge's weight leak is achromatic.** Blended edge lets merge
+  weight leak from clipped pixels into unclipped ones, and a clipped pixel
+  under-reports; that trade is deliberate and documented. But the three
+  channels do not clip together -- on a 360 mm test bracket the 1/8 s tier has
+  R and G on the clip plateau in 90-96 % of photosites at 1.02-1.08 R and B in
+  17-48 %, because the raw channels sit near G:R:B = 1:1:0.25 -- so the leaked
+  value had R and G capped and B not, and printed as a magenta rim. A clipped
+  pixel now keeps its own brightness, so the luminance trade is unchanged, but
+  takes the chroma of the shorter tiers already merged. Measured on that
+  bracket at 1.02 R: R/G 2.07 -> 1.77 and B/G 0.72 -> 0.42, against 1.75 and
+  0.43 in the corona further out. Exact edge is untouched.
+- **Saturation reaches monochrome, and its floor is neutral.** The exponent was
+  applied to the camera ratio before Temperature, Tint and the sky-cast
+  correction, so at its floor the frame took the flat colour of the white
+  balance gains rather than going grey, and the control stopped at exponent
+  0.5. It is now applied after the balance, in the renderer, the preview and
+  the white-point picker alike, and the control runs to monochrome. Identical
+  output at the default.
+- **The lunar track's rate is checked against orbital mechanics.** The Moon
+  crosses the corona at 0.4-0.6"/s and the plate scale follows from the fitted
+  lunar radius, so an implausible rate is now named: below 0.3x expected means
+  the tiers are locked to the lunar edge, above 2x means the fit is describing
+  cross-tier alignment error, which on a round-robin bracket has almost no time
+  base to fit a slope on. The track's positions are used as before; only the
+  rate is flagged.
+- **The partial-convolution layer can be switched off.** It is roughly half the
+  run time on a large merge and nothing else depends on it, so it can be left
+  off while the other settings are found and turned on for the final render.
+  The result is the same composite as its sliders at zero. It is not part of
+  the stack cache key, so turning it back on costs the mask build alone.
+- **`tools/smearaxis.py`**: reports whether a merge is smeared along one axis
+  and which, from cross-streamer against radial structure per azimuth, plus the
+  principal axis of the per-tier shifts. Comparing two runs cancels the
+  corona's own structure and fits the residual two-fold term.
+
 ## 0.23.7
 
 Partial convolution, second pass, measured on the 600 mm reference workdir;
@@ -63,14 +123,15 @@ shows it. The noise controls added along the way are kept as opt-ins.
   OFF (`ECLIPSEFORGE_HILL_RADIAL=2` turns both back on), Noise threshold 0,
   weights 0 / 1 / 0.6 / 0.2 / 0.1 — the 2 px mask carries noise only on this
   set, so the ladder starts at 4 px, which at 600 mm is the same sky as his
-  2 px at 300 mm — Amplification 0.025 (slider 0–0.2), Base weight 0.
+  2 px at 300 mm — Amplification 0.025 (slider 0–0.2), Base weight 0. With
+  the raw base and no threshold the view IS his chain; the grain that remains
+  is photon noise and averages out at half size, which is also the export's
+  half-size option.
 - **The preview normalised Amplification to the masks' total rms, the export
   to their structure rms.** Equal on a denoised set (75–90 % structure), 4×
   apart on a raw one, so the TIFF came out 4× stronger than the screen. The
   page now uses the structure rms too. Recipes saved before this carry a
-  value 4× too large for a raw-base workdir. With the raw base and no threshold the
-  view IS his chain; the grain that remains is photon noise and averages out
-  at half size, which is also the export's half-size option.
+  value 4× too large for a raw-base workdir.
 - **Prominence patches filled, disc painted to the masks' edge** (build 12).
   Inside a prominence patch every mask was zero (Hill's step 4, right for
   the data — the mask there is the prominence against a blur that never saw
@@ -87,6 +148,27 @@ shows it. The noise controls added along the way are kept as opt-ins.
 - **The preview of the Partial-conv view now applies the export's 0.75
   headroom.** It drew `base + k·E` without it, so the page was brighter than
   the TIFF it stood for.
+
+Elsewhere:
+
+- **Starting values outside the Hill group**, from the same session on the
+  reference set: MGN contrast 0.15 (was 0.04), Tangential 0.15 (was 0),
+  Black point 0.02 (was 0.005), Highlight compression 0 (was 0.1). A saved
+  settings file overrides all of them, so an existing recipe renders as it
+  did.
+- **Double-click a slider to put it back to its default** — the one the
+  server sent for this workdir, so an imported HDR gets the import defaults.
+  A disabled control (its layer was never built) keeps its 0.
+- **Zoom readout** under the preview, as a percentage of the FULL-RESOLUTION
+  image rather than of the preview: "1:1" and "50%" are judgements about the
+  export, and the preview is decimated. Above the preview's own resolution
+  (100/decim %, 25% on a normal run) the number turns gold — past that the
+  canvas is interpolating and grain cannot be judged on it.
+- **`tools/limbsharp.py`**: the 20-80% width of the lunar limb in a single
+  raw frame (at its own Bayer green, no demosaic) and in the merge built from
+  them, same yardstick, in pixels and arcseconds. It answers the one question
+  a soft set raises and the run report cannot: whether the softness is in the
+  data or in the pipeline.
 
 ## 0.23.6
 
