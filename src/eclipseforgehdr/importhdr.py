@@ -241,7 +241,7 @@ def read_image(path, progress=None, assume=None):
 # ---------- the run ----------
 
 def run(folder, image_path, progress, denoise="fine", assume=None,
-        fnrgf_preset="ours"):
+        fnrgf_preset="ours", partialconv=True):
     """Build every cached product the renderer needs, from one image."""
     from .pipeline import (workdir, find_disc, fit_limb_rays, remove_sky_gradient,
                            _exp_name)
@@ -262,16 +262,19 @@ def run(folder, image_path, progress, denoise="fine", assume=None,
     rgb, (kind, g) = read_image(image_path, progress, assume=assume)
     return build_from_rgb(
         folder, rgb, progress, denoise=denoise, fnrgf_preset=fnrgf_preset,
+        partialconv=partialconv,
         stats={"imported": image_path, "import_tone": kind, "import_gamma": g,
                "n_files": 1, "mode": "imported HDR"},
         opts={"import": os.path.basename(image_path),
               "import_mtime": int(os.path.getmtime(image_path)),
               "import_size": int(os.path.getsize(image_path)),
-              "denoise": denoise, "assume": assume, "mode": "import"})
+              "denoise": denoise, "assume": assume, "mode": "import",
+              "partialconv": bool(partialconv)})
 
 
 def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
-                   opts=None, short_lum=None, fnrgf_preset="ours"):
+                   opts=None, short_lum=None, fnrgf_preset="ours",
+                   partialconv=True):
     """Every cached product the renderer needs, from one scene-linear HxWx3.
 
     Split out of `run` in 0.23.3 so the SIMPLE STACK can reach it too. Both
@@ -406,7 +409,8 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
 
     progress.log("building the detail layers ...", 0.45)
     lstats = detail.build_layers(wd, progress, denoise=denoise, earthshine=False,
-                                 fnrgf_preset=fnrgf_preset)
+                                 fnrgf_preset=fnrgf_preset,
+                                 partialconv=partialconv)
     if isinstance(lstats, dict):
         stats.update(lstats)
     try:

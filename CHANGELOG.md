@@ -7,8 +7,9 @@ an exact version it is filed under the release it is known to precede.
 
 ## 0.23.8
 
-Alignment within an exposure tier, a colour error at the limb, and two new
-controls. This re-stacks: what the frames of a tier are aligned on has changed.
+Alignment within an exposure tier, a colour error at the limb, two new
+controls, and the simple stack's tier boundaries. This re-stacks: what the
+frames of a tier are aligned on has changed.
 
 - **Frames within a tier are now aligned on the corona, not the lunar edge.**
   The previous estimator was a log crop high-passed at 25 px, and the strongest
@@ -64,6 +65,20 @@ controls. This re-stacks: what the frames of a tier are aligned on has changed.
   and which, from cross-streamer against radial structure per azimuth, plus the
   principal axis of the per-tier shifts. Comparing two runs cancels the
   corona's own structure and fits the residual two-fold term.
+- **Simple stack: no more faint arcs along the exposure-tier boundaries.**
+  A tier left the hat merge between 0.85 and 0.97 of saturation, a brightness
+  factor of 1.14, so any sub-percent mismatch between tiers printed a step
+  along that tier's saturation isophote; MGN/NAFE with texture made the steps
+  visible as arcs. Confirmed on a 23-tier set: the merged log-luminance, binned
+  by its own level, showed dips at exactly the ladder spacing. A tier now fades
+  out from 0.35 to 0.90 of saturation and the top 10 % is not used. The report
+  states the fade-out range. Re-stack to apply.
+- **Simple stack: the controls it ignores are disabled while it is ticked**
+  (import path, feather, white balance, photometry, ladder solve, tier mode,
+  intra-tier lock, alignment options, stack combine, earthshine, hot pixels,
+  tier export, frames), with a tooltip saying so. Values are kept.
+- The partial-convolution switch now also reaches the simple-stack and import
+  paths; before, they built the layer regardless.
 
 ## 0.23.7
 

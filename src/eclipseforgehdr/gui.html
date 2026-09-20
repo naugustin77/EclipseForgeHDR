@@ -561,13 +561,46 @@ function syncStart(){
   }
 }
 $("importPath").addEventListener("input", syncStart);
+/* ---- simple stack: grey out what it does not use ----------------------
+   The simple stack aligns, averages each exposure group, measures the
+   ratios from the pixels and merges; it reads only Denoise, FNRGF, the
+   flats folder and the partial-convolution tick. Every other stacking
+   control is ignored by it, and a control that looks live but does nothing
+   is what confuses people. So they are disabled and dimmed while Simple
+   stack is ticked (the values are kept, and come back when it is unticked). */
+const SIMPLE_IGNORES = ["importPath", "brwImport", "feather", "wb", "photometry",
+  "photoSolve", "tierMode", "intraLock", "alignCorr", "alignFilter",
+  "stackCombine", "earthshine", "despeckle", "exportTiers", "tierLinear", "frames"];
+const SIMPLE_NOTE = "Not used by the simple stack. Untick Simple stack to use it.";
+function syncSimple(){
+  const on = $("simpleStack").checked;
+  for (const id of SIMPLE_IGNORES){
+    const el = $(id); if (!el) continue;
+    el.disabled = on;
+    const box = el.closest("label") || el;
+    box.style.opacity = on ? ".4" : "";
+    if (on){
+      if (box.dataset.ownTitle === undefined) box.dataset.ownTitle = box.title || "";
+      box.title = SIMPLE_NOTE;
+    } else if (box.dataset.ownTitle !== undefined){
+      box.title = box.dataset.ownTitle; delete box.dataset.ownTitle;
+    }
+  }
+}
 $("simpleStack").addEventListener("change", () => {
   // Ticking it mid-session must not silently reuse the normal path's layers;
   // the server compares opts.json["mode"], and this only keeps the two paths'
   // controls from looking usable at the same time.
   if ($("simpleStack").checked && $("importPath").value.trim())
     $("importPath").value = "";
+  syncSimple();
 });
+syncSimple();
+// A reload restores the form's previous values AFTER the script ran, without
+// a change event, so the tick can come back without the dimming. Sync again
+// once the page is fully loaded (and when it is shown from the back cache).
+window.addEventListener("load", syncSimple);
+window.addEventListener("pageshow", syncSimple);
 
 async function startRun(){
   $("start").disabled = true;
@@ -1545,6 +1578,7 @@ async function processingLoad(path){
       if (el.type === "checkbox") el.checked = (v === "True" || v === "true");
       else el.value = v;
     }
+    syncSimple();
     const ch = j.changed || [];
     let msg = j.file + " — " + j.n + " setting(s) set"
             + (j.from ? " (recorded from " + j.from + ")" : "");

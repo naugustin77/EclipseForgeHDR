@@ -673,8 +673,11 @@ def build(stats):
         A("frames used  : every frame of every group, averaged; a raw-saturated "
           "pixel is left out")
         A("merge weight : a hat on the pixel value — zero at the noise floor, "
-          "zero towards")
-        A("             : saturation, no exposure-time term")
+          "full from 460 ADU,")
+        A("             : fading out from 0.35 to 0.90 of saturation (0.23.8: was "
+          "0.85-0.97, which")
+        A("             : printed the tier boundaries as faint arcs); no "
+          "exposure-time term")
     else:
         A(f"denoise      : {o.get('denoise', '?')}")
         A(f"earthshine   : {'on' if o.get('earthshine') else 'off'}")

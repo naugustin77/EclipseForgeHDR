@@ -376,15 +376,28 @@ def _weight(v, sat):
     Weighting by exposure time instead -- what the normal merge does -- gives a
     short tier real weight in the outer field where it holds nothing but noise
     and whatever the pedestal step missed. This does not.
+
+    THE UPPER SHOULDER IS WIDE (0.23.8). It used to run from 0.85 to 0.97 of
+    saturation: a tier dropped out of the merge over a brightness factor of
+    1.14, i.e. over a dozen pixels of radius in the inner corona. Every tier
+    is off the others by a fraction of a percent (ratio error, offset, the
+    sensor's own bend below saturation), so each drop-out printed a step of
+    ~0.1% along that tier's saturation isophote. Measured on a 23-tier 16-bit
+    FITS set: the merged log-luminance, binned by its own level, showed dips
+    at exactly the ladder spacing (0.17 dex for the 1.5x steps), and MGN/NAFE
+    plus a texture slider made them visible as faint arcs. Now a tier fades
+    out from 0.35 to 0.90 of saturation -- a factor 2.6, several tiers at a
+    time -- so the same mismatch becomes a gradient no filter can find. The
+    upper 10% below saturation is left out entirely.
     """
     return (np.clip((v - 60.0) / 400.0, 0, 1)
-            * np.clip((sat * 0.97 - v) / (sat * 0.12), 0, 1)).astype(np.float32)
+            * np.clip((sat * 0.90 - v) / (sat * 0.55), 0, 1)).astype(np.float32)
 
 
 # -------------------------------------------------------------------- run ---
 
 def run(folder, progress, denoise="fine", demosaic_method="mhc",
-        fnrgf_preset="ours", flat_dir=""):
+        fnrgf_preset="ours", flat_dir="", partialconv=True):
     """Stack `folder` and build every layer the renderer needs."""
     from .raw import list_raws, read_exif
     from . import importhdr
@@ -545,7 +558,7 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
 
     return importhdr.build_from_rgb(
         folder, rgb, progress, denoise=denoise, short_lum=short,
-        fnrgf_preset=fnrgf_preset,
+        fnrgf_preset=fnrgf_preset, partialconv=partialconv,
         stats={"n_files": n_used, "mode": "simple stack",
                "options": {"simple": True},
                "calibration": calib_info,
@@ -556,6 +569,7 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
                "tiers": [{"sec": s, "n": len(tiers[s])} for s in secs]},
         opts={"mode": "simple", "denoise": denoise,
               "fnrgf_preset": fnrgf_preset,
+              "partialconv": bool(partialconv),
               "demosaic": demosaic_method, "n_files": n_used,
               "flat_dir": (calib_info or {}).get("flat_dir", ""),
               "flat_applied": bool((calib_info or {}).get("flat_applied")),

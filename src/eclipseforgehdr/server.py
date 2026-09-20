@@ -412,6 +412,10 @@ def start_run():
                         # folder: compare what was actually applied
                         and o.get("flat_dir", "") == (_fd or "")
                         and o.get("flat_inputs") == _flat_fp(_fd)
+                        # ... and whether the partial-convolution layer was
+                        # built. Without this, unticking it after a cached
+                        # simple run reused the layers and the masks stayed.
+                        and bool(o.get("partialconv", True)) == bool(partialconv)
                         and _cache_ok(o.get("build")))
                 have = all(os.path.exists(os.path.join(wd, f))
                            for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))
@@ -424,7 +428,8 @@ def start_run():
                     _simple.run(folder, prog, denoise=denoise,
                                 demosaic_method=demosaic_method,
                                 fnrgf_preset=fnrgf_preset,
-                                flat_dir=flat_dir)
+                                flat_dir=flat_dir,
+                                partialconv=partialconv)
                     try:
                         _o2 = json.load(open(opts_path))
                         _o2["flat_inputs"] = _flat_fp(_fd)
@@ -451,6 +456,7 @@ def start_run():
                         and o.get("import_mtime") == int(os.path.getmtime(import_path))
                         and o.get("import_size") == int(os.path.getsize(import_path))
                         and o.get("denoise") == denoise
+                        and bool(o.get("partialconv", True)) == bool(partialconv)
                         # NOT the feather (0.22.78): importhdr never writes that
                         # key, so comparing it against the toolbar's Merge weight
                         # made the test fail for every value but 'plain' and
@@ -465,7 +471,8 @@ def start_run():
                             os.remove(opts_path)
                         except OSError:
                             pass
-                    importhdr.run(folder, import_path, prog, denoise=denoise)
+                    importhdr.run(folder, import_path, prog, denoise=denoise,
+                                  partialconv=partialconv)
                 else:
                     prog.log("using cached layers for this image", 0.9)
                 prog.log("loading layers for preview...", None)
