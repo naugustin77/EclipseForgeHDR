@@ -176,6 +176,14 @@ button:disabled{opacity:.45;cursor:default}
           <option value="mixed">Mixed (fast subs Moon, long subs Corona)</option>
         </select></label>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
+        title="Near the horizon the atmosphere acts as a weak prism: blue is lifted more than red, so the three colour images of every exposure land a few pixels apart along one direction. White balance cannot fix that - it changes how bright a colour is, not where it is. Align to green measures the offset of the red and blue channels on the lunar limb in the shortest exposures and moves them onto green in every exposure before the merge. On a 600 mm set shot at a low Sun it measured 4.5 px between blue and red. If the offset is below 0.2 px, or the short exposures disagree by more than 1 px, nothing is moved and the log says so. Changing this re-stacks.">
+        Colour planes
+        <select id="colourPlanes" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
+          border-radius:4px;padding:5px 6px;font:12px system-ui">
+          <option value="auto" selected>Align to green (measured)</option>
+          <option value="off">As recorded</option>
+        </select></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
         title="How the shift between two exposures is found. Cross-correlation is what every build up to 0.23.1 used: it keeps each frequency's amplitude, so bright structure dominates. Semi-phase correlation divides by the amplitude spectra plus a small constant (Druckmullerova, master's thesis Def. 3.25), which flattens the spectrum so faint structure counts too, while the constant stops it lifting frequencies that carry only noise. Full whitening is the same with that constant removed - it gives a nearly signal-free short tier the same weight as a well exposed one, which is why it is not the default. On tiers built from a real bracket, semi cut the error on a known shift by 22% and cut the pull toward zero shift - the sensor's own dust and fixed pattern dragging the answer - by 80%. Changing this re-stacks.">
         Correlation
         <select id="alignCorr" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -569,7 +577,7 @@ $("importPath").addEventListener("input", syncStart);
    is what confuses people. So they are disabled and dimmed while Simple
    stack is ticked (the values are kept, and come back when it is unticked). */
 const SIMPLE_IGNORES = ["importPath", "brwImport", "feather", "wb", "photometry",
-  "photoSolve", "tierMode", "intraLock", "alignCorr", "alignFilter",
+  "photoSolve", "tierMode", "intraLock", "colourPlanes", "alignCorr", "alignFilter",
   "stackCombine", "earthshine", "despeckle", "exportTiers", "tierLinear", "frames"];
 const SIMPLE_NOTE = "Not used by the simple stack. Untick Simple stack to use it.";
 function syncSimple(){
@@ -620,6 +628,7 @@ async function startRun(){
                           photoSolve: $("photoSolve").value,
                           tierMode: $("tierMode").value,
                           intraLock: $("intraLock").value,
+                          colourPlanes: $("colourPlanes").value,
                           partialConv: $("partialConv").checked,
                           alignCorr: $("alignCorr").value,
                           alignFilter: $("alignFilter").value,
@@ -1597,7 +1606,7 @@ async function processingLoad(path){
 function currentProcessing(){
   // Only used when the folder has not been stacked yet; otherwise the server
   // records what the run actually used, which is the more honest thing to save.
-  const ids = {intra_lock:"intraLock", partialconv:"partialConv",
+  const ids = {intra_lock:"intraLock", colour_planes:"colourPlanes", partialconv:"partialConv",
                align_corr:"alignCorr", align_filter:"alignFilter",
                stack_combine:"stackCombine", fnrgf_preset:"fnrgfPreset",
                photo_solve:"photoSolve", tier_mode:"tierMode",

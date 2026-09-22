@@ -704,11 +704,20 @@ def build(stats):
                   "network": "network (least squares)"}),
                 ("tiers        ", "tier_mode", "exposure",
                  {"exposure": "by shutter speed",
-                  "frame": "per frame (grouping ignored)"})]
+                  "frame": "per frame (grouping ignored)"}),
+                ("colour planes", "colour_planes", "auto",
+                 {"off": "as recorded",
+                  "auto": "red and blue aligned to green (measured on the limb)"})]
         for _lab, _key, _dflt, _names in _sel:
             _v = str(o.get(_key, _dflt))
             _note = "" if _v == _dflt else "   [not the default]"
             A(f"{_lab}: {_names.get(_v, _v)}{_note}")
+        _cpm = stats.get("colour_planes")
+        if isinstance(_cpm, dict) and "R" in _cpm:
+            A(f"             : measured red {_cpm['R']['dy']:+.2f}/{_cpm['R']['dx']:+.2f} px, "
+              f"blue {_cpm['B']['dy']:+.2f}/{_cpm['B']['dx']:+.2f} px (dy/dx against green), "
+              f"tiers agree to {_cpm.get('spread_px', 0):.2f} px -- "
+              f"{'moved onto green' if _cpm.get('applied') else 'NOT applied'}")
         if stats.get("mode") == "imported HDR":
             A("hot pixels   : n/a — an imported image has no raw frames to repair")
             A("frames used  : n/a — one finished image, imported")

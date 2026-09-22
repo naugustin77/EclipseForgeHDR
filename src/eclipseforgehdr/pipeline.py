@@ -3545,6 +3545,111 @@ def resolve_calib_dir(folder, which, arg=None):
             else _dark.find_dark_dir(folder))
 
 
+# COLOUR-PLANE ALIGNMENT (0.23.9, setting "Colour planes", off by default).
+#
+# Near the horizon the atmosphere is a weak prism: it lifts blue more than red,
+# so the three colour images of one exposure land a few pixels apart along one
+# direction. White balance cannot touch that -- it scales each channel, it does
+# not move one. Measured on the 600 mm reference set (Sun low, August 2026):
+# the lunar limb fitted separately per channel sits 4.5 px apart in blue
+# against red (2.1 px red-green, 2.4 px blue-green) along one line at about
+# -48 deg in image coordinates, the same in a single 1/100 s tier (3.6 px) as in
+# the merge, a pure shift all round the limb (0.5 px left after a shift-only
+# fit, against 3.2 px before) and the SAME RADIUS in every channel -- so it is
+# not lateral colour in the lens, which would scale one channel against another.
+#
+# The offset is measured here on the short tiers, per camera channel, from the
+# lunar limb (fit_limb_rays on each channel, seeded by green), and red and blue
+# are moved onto green right after each tier's demosaic: in CAMERA channels,
+# before the white balance and the camera matrix, because the matrix mixes the
+# three and a shift applied after it would move a mixture.
+CPLANE_TIERS = 3            # the shortest tiers the offset is measured on
+CPLANE_MIN_PX = 0.2         # below this in both channels: nothing to correct
+CPLANE_MAX_SPREAD = 1.0     # tiers must agree to this (px) or nothing is applied
+
+
+def measure_colour_planes(stacks_bayer, secs, demosaic_method, progress):
+    """Offset of the red and blue camera channels against green, full-res px,
+    as {0: (dy, dx), 2: (dy, dx), "tiers": [...], ...}, or None with a reason
+    logged. Positive dy = that channel's image sits lower than green's."""
+    rows = []
+    for s in sorted(secs)[:CPLANE_TIERS]:
+        try:
+            rgb = _demosaic(stacks_bayer[s], demosaic_method)
+            g = np.ascontiguousarray(rgb[:, :, 1])
+            H, W = g.shape
+            c0 = fit_limb(g, H / 2.0, W / 2.0)
+            fg = fit_limb_rays(g, c0[0], c0[1], c0[2])
+            if fg is None:
+                continue
+            row = {"tier": float(s), "G": [fg[0], fg[1], fg[2], fg[3]]}
+            ok = True
+            for c, nm in ((0, "R"), (2, "B")):
+                f = fit_limb_rays(np.ascontiguousarray(rgb[:, :, c]), fg[0], fg[1], fg[2])
+                if f is None or f[4] < 0.5 * f[5]:
+                    ok = False
+                    break
+                row[nm] = [f[0] - fg[0], f[1] - fg[1], f[2] - fg[2], f[3]]
+            del rgb, g
+            if ok:
+                rows.append(row)
+        except Exception as e:
+            progress.log(f"colour planes: tier {_exp_name(s)} not measured ({e})", None)
+    if len(rows) < 2:
+        progress.log("colour planes: fewer than two tiers gave a limb in every "
+                     "channel -- nothing applied", None)
+        return None
+    out = {"tiers": rows}
+    worst = 0.0
+    for c, nm in ((0, "R"), (2, "B")):
+        dy = np.array([r[nm][0] for r in rows]); dx = np.array([r[nm][1] for r in rows])
+        my, mx = float(np.median(dy)), float(np.median(dx))
+        worst = max(worst, float(np.max(np.hypot(dy - my, dx - mx))))
+        out[c] = (my, mx)
+        out[nm] = {"dy": round(my, 3), "dx": round(mx, 3),
+                   "dr": round(float(np.median([r[nm][2] for r in rows])), 3)}
+    out["spread_px"] = round(worst, 3)
+    txt = ("red %+.2f/%+.2f px, blue %+.2f/%+.2f px (dy/dx against green, "
+           "median of %d tiers, tiers agree to %.2f px)"
+           % (out[0][0], out[0][1], out[2][0], out[2][1], len(rows), worst))
+    if worst > CPLANE_MAX_SPREAD:
+        progress.log("colour planes: " + txt + " -- the tiers disagree, nothing "
+                     "applied", None)
+        out["applied"] = False
+        return out
+    if max(np.hypot(*out[0]), np.hypot(*out[2])) < CPLANE_MIN_PX:
+        progress.log("colour planes: " + txt + " -- below %.1f px, nothing to "
+                     "correct" % CPLANE_MIN_PX, None)
+        out["applied"] = False
+        return out
+    progress.log("colour planes: " + txt + "; red and blue moved onto green "
+                 "before the merge", None)
+    out["applied"] = True
+    return out
+
+
+def _cp_apply(rgb, cp):
+    """Move the red and blue camera channels onto green (see above). Cubic, as
+    the tier shifts are, so no channel is softened against the others."""
+    if not cp or not cp.get("applied"):
+        return rgb
+    for c in (0, 2):
+        dy, dx = cp[c]
+        rgb[:, :, c] = ndimage.shift(rgb[:, :, c], (-dy, -dx), order=3,
+                                     mode="nearest")
+    return rgb
+
+
+def _cp_clip(cmax, cp):
+    """The clipping test is asked of the mosaic, where the channels are still
+    where the sensor put them; after the move a clipped red or blue photosite
+    lands up to a few px away, so the flag is widened by that much."""
+    if not cp or not cp.get("applied"):
+        return cmax
+    k = int(np.ceil(max(np.hypot(*cp[0]), np.hypot(*cp[2]))))
+    return ndimage.maximum_filter(cmax, size=2 * k + 1) if k > 0 else cmax
+
+
 def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         earthshine=False, despeckle=True, frames="all", export_tiers=False,
         tier_linear=False, flat_dir=None, feather="plain",
@@ -3553,7 +3658,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         photo_solve="chain", tier_mode="exposure",
         fnrgf_preset="ours", stack_combine="mean",
         align_filter="isotropic", align_corr="semi",
-        intra_lock="corona", partialconv=True):
+        intra_lock="corona", partialconv=True, colour_planes="auto"):
     from . import flat as _flat
     from . import dark as _dark
     # WHAT THE FRAMES OF ONE TIER ARE ALIGNED ON. "corona" ignores the Moon
@@ -3608,6 +3713,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                          "intra_lock": str(intra_lock),
                          "partialconv": bool(partialconv),
                          "tier_mode": str(tier_mode),
+                         "colour_planes": str(colour_planes),
                          "flat_dir": _flat_dir,
                          "bias_dir": _bias_dir, "dark_dir": _dark_dir},
              "camera_info": read_camera_info(paths[0])}
@@ -5788,6 +5894,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # `_fm` is passed to _feather_weight explicitly below, so nothing needs the
     # environment; writing to it only leaked state between runs.
 
+    _cp = None
+    if str(colour_planes) == "auto":
+        progress.log("colour planes: measuring the red and blue offset against "
+                     "green on the lunar limb...", None)
+        _cp = measure_colour_planes(stacks_bayer, secs, demosaic_method, progress)
+        if _cp is not None:
+            stats["colour_planes"] = {k: v for k, v in _cp.items()
+                                      if not isinstance(k, int)}
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
     _angmap = None
@@ -5797,7 +5911,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _fill_idx = None
     _fill_rgb = None
     for k, s in enumerate(secs):
-        rgb = _demosaic(stacks_bayer[s], demosaic_method)
+        rgb = _cp_apply(_demosaic(stacks_bayer[s], demosaic_method), _cp)
         # cmax is the CLIPPING test, so it has to be measured in raw units,
         # before white balance. WB runs at G=1, so the red gain (~2.1x) used to
         # push a red pixel past 0.97*sat_level while its photosite sat at only
@@ -5813,7 +5927,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # to a saturated photosite could come out below threshold and enter the
         # merge unflagged, carrying a value partly reconstructed from a
         # photosite that hit the ceiling.
-        cmax = cfa_clip_max(stacks_bayer[s])
+        cmax = _cp_clip(cfa_clip_max(stacks_bayer[s]), _cp)
         if _fsat is not None:
             cmax *= _fsat            # back to raw units -- see _fsat above
         _nclip_before = float((rgb.max(axis=2) *
@@ -6212,8 +6326,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                      f"shortest exposure (to {_exp_name(inner_secs[-1])})", None)
     accn = None; accw = None
     for s in inner_secs:
-        rgb = _demosaic(stacks_bayer[s], demosaic_method)
-        cmax = cfa_clip_max(stacks_bayer[s])   # see the merge loop
+        rgb = _cp_apply(_demosaic(stacks_bayer[s], demosaic_method), _cp)
+        cmax = _cp_clip(cfa_clip_max(stacks_bayer[s]), _cp)   # see the merge loop
         if _fsat is not None:
             cmax *= _fsat
         rgb *= wb[None, None, :]
@@ -6674,7 +6788,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         earth_tiers = [secs[-1]]
     accn = None; wtot = 0.0
     for s in earth_tiers:
-        rgb = _demosaic(stacks_bayer[s], demosaic_method)
+        rgb = _cp_apply(_demosaic(stacks_bayer[s], demosaic_method), _cp)
         rgb *= wb[None, None, :]
         rgb = (rgb.reshape(-1, 3) @ cam2rgb.T).reshape(H2, W2, 3)
         lt = (0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2])
@@ -6707,7 +6821,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     fast = [s for s in secs if s <= 0.0101]
     prom_tier = max(fast) if fast else min(secs)
     s = prom_tier
-    rgb = _demosaic(stacks_bayer[s], demosaic_method)
+    rgb = _cp_apply(_demosaic(stacks_bayer[s], demosaic_method), _cp)
     rgb *= wb[None, None, :]
     rgb = (rgb.reshape(-1, 3) @ cam2rgb.T).reshape(H2, W2, 3)
     rgb /= np.float32(s * cal[s])
@@ -6821,6 +6935,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                "align_filter": str(align_filter),
                "stack_combine": str(stack_combine),
                "fnrgf_preset": str(fnrgf_preset),
+               # THESE THREE WERE NEVER WRITTEN, and the server compares all
+               # three: intra_lock against a default of "moon" (so the 0.23.8
+               # default "corona" never matched), photo_solve against "chain",
+               # tier_mode against "exposure". Every Start on a folder stacked
+               # with Corona Align or the network solve re-stacked the whole
+               # folder, silently.
+               "intra_lock": str(intra_lock),
+               "photo_solve": str(photo_solve),
+               "tier_mode": str(tier_mode),
+               # changes the merged data, like everything above
+               "colour_planes": str(colour_planes),
                "build": __version__},
               open(os.path.join(wd, "opts.json"), "w"))
     import datetime

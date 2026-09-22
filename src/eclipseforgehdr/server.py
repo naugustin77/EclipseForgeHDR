@@ -339,6 +339,14 @@ def start_run():
                   if request.is_json else "corona")
     if intra_lock not in ("corona", "moon", "mixed"):
         intra_lock = "corona"
+    # COLOUR PLANES: move red and blue onto green by the offset measured on the
+    # lunar limb (atmospheric dispersion at a low Sun). Changes the merged
+    # data, so it is in the cache key below. On by default: it measures on
+    # every run and moves nothing when the offset is below 0.2 px.
+    colour_planes = (request.json.get("colourPlanes", "auto")
+                     if request.is_json else "auto")
+    if colour_planes not in ("off", "auto"):
+        colour_planes = "auto"
     # PARTIAL CONVOLUTION ON/OFF. About half the run time on a big merge and
     # nothing else depends on it, so it is turned off while the rest of the
     # settings are being found and on for the final render. NOT part of the
@@ -546,6 +554,9 @@ def start_run():
                            # stacked before 0.23.8, when that was the only
                            # behaviour.
                            and o.get("intra_lock", "moon") == intra_lock
+                           # a cache written before the setting existed was
+                           # stacked without it
+                           and o.get("colour_planes", "off") == colour_planes
                            # ... and the grouping, which changes what a tier IS
                            and o.get("tier_mode", "exposure") == tier_mode
                            and _cache_ok(o.get("build"))
@@ -579,6 +590,7 @@ def start_run():
                              align_filter=align_filter,
                              align_corr=align_corr,
                              intra_lock=intra_lock,
+                             colour_planes=colour_planes,
                              partialconv=partialconv,
                              tier_mode=tier_mode)
             else:
@@ -890,6 +902,7 @@ _SETTINGS_EXT = ".efsettings.json"
 _PROCESSING_KEYS = {
     "align_corr":    ("semi",      "alignCorr"),
     "intra_lock":    ("corona",    "intraLock"),
+    "colour_planes": ("auto",      "colourPlanes"),
     "partialconv":   ("True",      "partialConv"),
     "align_filter":  ("isotropic", "alignFilter"),
     "stack_combine": ("mean",      "stackCombine"),

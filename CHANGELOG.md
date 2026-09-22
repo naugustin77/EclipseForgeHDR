@@ -5,6 +5,35 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.23.9
+
+Colour-plane alignment, and a cache fix that stops needless re-stacks. This
+re-stacks once: the colour correction changes the merged data.
+
+- **Colour planes: red and blue are aligned to green before the merge (new
+  toolbar setting "Colour planes", on by default).** Near the horizon the
+  atmosphere acts as a weak prism, so the red, green and blue images of one
+  exposure land a few pixels apart along one direction. White balance cannot
+  fix that: it changes how bright a colour is, not where it is. Measured on a
+  600 mm set shot at a low Sun: the lunar limb, fitted separately per channel,
+  sat 4.5 px apart in blue against red, a pure shift all round the limb and the
+  same radius in every channel (so not lens colour error). Each run now fits
+  the limb per camera channel on the three shortest tiers and moves red and
+  blue onto green in every tier right after the demosaic, before white balance
+  and the camera matrix; the mosaic clipping flag is widened by the offset.
+  Nothing is moved when the offset is below 0.2 px (a high Sun) or when the
+  short tiers disagree by more than 1 px; the log and the report say which. On
+  that set the coloured limb fringe is gone, and the prominence colour gate
+  flags 9 686 pixels instead of 33 542: the red fringe had been read as H-alpha.
+  Raw input only; FITS, imported HDRs and the simple stack are unchanged.
+  "As recorded" restores the previous behaviour.
+- **Fixed: Start re-stacked every time on folders stacked with Corona Align or
+  the network photometric solve.** The cache file never recorded the intra-tier
+  lock, the photometric solve or the tier grouping, while the server compares
+  all three against older defaults. With the 0.23.8 default Corona Align the
+  cache therefore never matched. The three are now recorded; the first Start
+  after updating still re-stacks once.
+
 ## 0.23.8
 
 Alignment within an exposure tier, a colour error at the limb, two new
