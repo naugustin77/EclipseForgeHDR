@@ -5,6 +5,37 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.23.11
+
+**Detail layers now carry a recipe number (LAYER_BUILD); a cached stack whose
+layers are older is rebuilt from the cached merge on Start — minutes, no
+re-stack.** The two changes below arrive that way on every existing cache.
+
+**Prominence detection: the app's gate and convolution mask now also use the
+merge (layer recipe 5).**
+Both older detectors threshold the redness of ONE fast tier. Measured on the
+600 mm set after a full run: of the 15 prominences the merge's red excess
+shows (promlayer.detect: corona R/G per 2° sector, chromosphere band removed
+along the limb), the gate covered 4 fully, 2 in part (225°: 76 %) and 9 not
+at all — the 52 px prominence at 68° among them. Both now take the UNION
+with that detection, so Prominence gain / detail / colour reach every
+prominence and none is smeared by the detail filters; what only the old gate
+had was ~100 px of limb rim, and it is kept.
+
+**MGN's prominence holes get a soft edge (layer recipe 6).** The prominences are masked out of MGN and set flat to 0.5 with
+a boolean mask after an 8 px hard dilation, which bit a hard-edged notch into
+the limb beside every prominence: a flat pale patch whose boundary printed as
+a line in the composite. Found by elimination on the 600 mm set (NAFE mix 0:
+unchanged; Prominence contrast/detail 0: unchanged; MGN contrast 0: gone).
+The hole's interior stays exactly 0.5 (an MGN value with the pixel's own
+brightness excluded from its mean is undefined); the blend to 0.5 now fades
+in over ~2–3× PROM_FEATHER_PX (4 px) outside the hole. Applied to MGN and
+MGN-fine. ECLIPSEFORGE_PROM_FEATHER=<px> overrides for A/B runs, 0 = old edge.
+
+**Re-stacks say why.** When Start re-stacks a folder that has a cache, the log
+now lists every cache key that differs from the request, with the cached and
+the requested value (or "no key differs -- please report this").
+
 ## 0.23.10
 
 **New export option: prominence layer (RGBA TIFF).** Tick "Also export

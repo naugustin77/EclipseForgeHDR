@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.10
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.11
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
 
@@ -209,8 +209,15 @@ emit in H-alpha and are far redder than the corona, so the gate measures the
 corona's own red-to-green-plus-blue ratio in a ring around the limb and
 thresholds against a robust spread of that measurement, making it independent of
 white balance and of the camera. The result is confined to a narrow annulus
-above the limb. `Prominence contrast` then uses the mask to modulate local
-contrast and brightness there.
+above the limb. Since 0.23.11 the mask is the union of that with a second
+detection on the HDR merge itself (corona red-to-green per sector as the
+reference, the chromosphere's own band along the limb removed): on the 600 mm
+reference set the single-tier gate covered 4 of the 15 prominences the merge
+shows and missed the largest one. `Prominence contrast` then uses the mask to
+modulate local contrast and brightness there. The same mask keeps the
+prominences out of MGN and the partial convolution; the edge of that exclusion
+is feathered (4 px), so the filters ramp out beside a prominence instead of
+stopping on a line.
 *Slider: Prominence contrast.*
 
 ---

@@ -1,4 +1,4 @@
-__version__ = "0.23.10"
+__version__ = "0.23.11"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -320,7 +320,10 @@ CACHE_FAMILIES = (
     # the prominence-layer export) and changes nothing else the run writes. A
     # 0.23.9 cache lacks that file and the export says so (layer from the merge
     # alone); the stack itself is the same data.
-    frozenset({"0.23.9", "0.23.10"}),
+    # 0.23.11 changes the detail layers only (recipe 6: prominence detection,
+    # feathered MGN holes); the stack is the same data and the server rebuilds
+    # the layers from it on the next Start (minutes, no re-stack).
+    frozenset({"0.23.9", "0.23.10", "0.23.11"}),
 
 )
 

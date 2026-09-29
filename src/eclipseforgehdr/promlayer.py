@@ -412,3 +412,49 @@ def export_layer(wd, geo, out_path, orient="", size="full", log=print):
                                  "same grid as the composite export")
     return have_stack
 
+
+_DET_CACHE = {}
+
+
+def detect(wd, geo, shape, log=None):
+    """The prominence detection on the full layer grid: a soft 0..1 map of
+    where prominences are (band removed, dilated 3 px, feathered), for the
+    app's prominence gate and the convolution mask. None when there is no
+    merge to read.
+
+    WHY (0.23.10 lab): both older detectors threshold the redness R/((G+B)/2)
+    of ONE fast tier. Measured on the 600 mm set after a full run: of the 15
+    prominences this detection finds, the older gate covered 4 fully, 2 in
+    part (the 225 deg one 76 %) and 9 not at all -- among them the 52 px
+    prominence at 68 deg. What the gate had and this lacks: ~100 px of limb
+    rim. Callers take the UNION, so nothing either finds is lost."""
+    p = os.path.join(wd, "hdr_rgb.npy")
+    if not os.path.exists(p):
+        return None
+    key = (wd, os.path.getmtime(p), tuple(shape))
+    if key in _DET_CACHE:
+        return _DET_CACHE[key]
+    try:
+        cy, cx, R = float(geo["cy"]), float(geo["cx"]), float(geo["R"])
+        hdr = np.load(p, mmap_mode="r")
+        H, W = hdr.shape[:2]
+        if (H, W) != tuple(shape):
+            return None
+        y0, y1, x0, x1 = disc_box(cy, cx, R, H, W)
+        M = np.asarray(hdr[y0:y1, x0:x1], np.float64)
+        rr, ang = _polar_grid(M.shape[:2], y0, x0, cy, cx, R)
+        kR = corona_ratio(M, rr, ang)
+        pG = prominence_colour(M, kR, rr)[1]
+        _, _, _, _, soft, nprom, _ = _detect(M, kR, rr, ang, R, cy, cx, y0, x0, pG)
+        out = np.zeros((H, W), np.float32)
+        out[y0:y1, x0:x1] = soft
+        if log is not None:
+            log(f"  prominence detection (merge red excess, band removed): "
+                f"{nprom} prominence(s), {int((soft > 0.3).sum()) / 1e3:.1f}k px")
+        _DET_CACHE.clear()
+        _DET_CACHE[key] = out
+        return out
+    except Exception as e:
+        if log is not None:
+            log(f"  prominence detection failed ({e}); older detectors only")
+        return None

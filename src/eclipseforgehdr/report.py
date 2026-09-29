@@ -670,6 +670,11 @@ def build(stats):
             A("white balance: camera (as shot) multipliers and the camera->sRGB "
               "matrix, per frame")
         A("hot pixels   : not repaired")
+    _lr = stats.get("layer_recipe")
+    if isinstance(_lr, dict) and _lr.get("build"):
+        A("detail layers: recipe %s — prominence gate and mask also from the merge's "
+          "red excess; MGN's prominence holes feathered (%s px)"
+          % (_lr["build"], stats.get("prom_feather_px", "-")))
         A("frames used  : every frame of every group, averaged; a raw-saturated "
           "pixel is left out")
         A("merge weight : a hat on the pixel value — zero at the noise floor, "

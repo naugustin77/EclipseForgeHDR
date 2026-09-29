@@ -794,6 +794,21 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
                 f"{pct:g}th percentile {_pctv:.2f} -> "
                 f"{'the floor' if _floor > _pctv else 'the percentile'} decides, "
                 f"{int(out.sum()) / 1e3:.1f}k px before dilation", None)
+        # ...and the merge-based detection (promlayer.detect, 0.23.11): the
+        # redness above reads ONE fast tier and missed 9 of the 15 prominences
+        # on the 600 mm set, the 52 px one at 68 deg among them. Union, so
+        # nothing either finds is lost.
+        try:
+            from . import promlayer as _pl
+            _nd = _pl.detect(wd, geo, shape)
+            if _nd is not None:
+                _add = ring & (_nd > 0.3) & ~out
+                if progress is not None and _add.any():
+                    progress.log(f"  prominence mask: +{int(_add.sum()) / 1e3:.1f}k px "
+                                 f"from the merge-based detection", None)
+                out = out | (ring & (_nd > 0.3))
+        except Exception:
+            pass
         if grow > 0:
             out = ndimage.binary_dilation(out, iterations=int(grow)) & ring
         return out if out.any() else None
@@ -1159,6 +1174,11 @@ def _soft_norm(x, mask, p_lo=0.5, p_hi=99.7, gain=1.6):
     return 0.5 + 0.5 * np.tanh(gain * ((x - lo) / max(hi - lo, 1e-6) - 0.5))
 
 
+PROM_FEATHER_PX = 4.0       # 0.23.11: soft edge on MGN's prominence holes, see _prom_feather
+LAYER_BUILD = 6             # recipe number of the detail layers; the server rebuilds
+                            # them from a cached stack when a run's number is older.
+                            # 6: MGN prominence holes feathered. 5: prominence gate and
+                            # mask also from the merge (promlayer.detect). <=4: 0.23.10.
 HILL_BUILD = 12     # bump to force a rebuild of cached masks; 8 = arc-length
                     # tangential sigma + second-order NC at the limb (0.23.6);
                     # 9 = pixel-centred fit basis; 10 = raw base + radial
@@ -1669,6 +1689,28 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         return None
 
 
+def _prom_feather(pm, k):
+    """Weight 0..1 for blending MGN to its flat 0.5 inside the prominence holes:
+    1 on the hole itself, fading to 0 over ~2-3k px OUTSIDE it.
+
+    WHY. mgn() sets masked pixels to 0.5 with the boolean mask, so the hole has
+    a hard edge, and prominence_mask's 8 px dilation makes it a hard-edged
+    notch bitten into the limb -- a flat pale patch beside every prominence
+    whose boundary prints as a line in the composite. Nico, 600 mm set, MGN
+    contrast 0 made it vanish, nothing else did. The interior stays exactly
+    0.5: an MGN value computed with the pixel's own brightness excluded from
+    its mean is undefined (see the note above prominence_mask's call), so the
+    fade lives outside the hole, never inside it. ECLIPSEFORGE_PROM_FEATHER
+    overrides the width for A/B runs; 0 restores the hard edge."""
+    k = float(os.environ.get("ECLIPSEFORGE_PROM_FEATHER", k))
+    m = np.asarray(pm, bool)
+    if k <= 0:
+        return m.astype(np.float32)
+    f = ndimage.gaussian_filter(
+        ndimage.binary_dilation(m, iterations=int(round(k))).astype(np.float32), k)
+    return np.maximum(f, m.astype(np.float32))
+
+
 def build_layers(wd, progress, denoise="fine", earthshine=False,
                  fnrgf_preset="ours", partialconv=True):
     if denoise is True:
@@ -1749,6 +1791,10 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         lstats["prom_masked_px"] = int(_pm.sum())
     mgl = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half), scales=_sc)
     mgl = _deband(mgl, r, valid_stat, cy, cx, R + margin)
+    if _pm is not None and PROM_FEATHER_PX > 0:
+        _pf = _prom_feather(_pm, PROM_FEATHER_PX)
+        mgl = (mgl * (1.0 - _pf) + 0.5 * _pf).astype(np.float32)
+        lstats["prom_feather_px"] = float(os.environ.get("ECLIPSEFORGE_PROM_FEATHER", PROM_FEATHER_PX))
     np.save(os.path.join(wd, "mgn.npy"), mgl.astype(np.float32))
     del mgl
 
@@ -1783,6 +1829,9 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     mgf = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half),
               scales=_sc[:_nf], gains=(0.907, 0.976, 0.994)[:_nf])
     mgf = _deband(mgf, r, valid_stat, cy, cx, R + margin)
+    if _pm is not None and PROM_FEATHER_PX > 0:
+        mgf = (mgf * (1.0 - _pf) + 0.5 * _pf).astype(np.float32)
+        del _pf
     np.save(os.path.join(wd, "mgn_fine.npy"), mgf.astype(np.float32))
     lstats["mgn_fine_scales"] = [round(x, 2) for x in _sc[:_nf]]
     del nf, L, Lf, mgf
@@ -2099,6 +2148,25 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
             g = np.clip((redness - t0) / (t1 - t0), 0, 1)
             g *= _ss(np.clip((rh - (Rh - 0.026 * _Rs)) / (0.019 * _Rs), 0, 1))
             g *= _ss(np.clip(((Rh + 0.226 * _Rs) - rh) / (0.081 * _Rs), 0, 1))
+            # UNION with the merge-based detection (promlayer.detect, 0.23.11). This gate reads the redness of one fast tier; on the 600 mm
+            # set it covered 4 of the 15 prominences the merge shows, and missed
+            # the 52 px one at 68 deg entirely. The promdet layer below is scaled
+            # inside this gate too, so it now reaches them as well.
+            try:
+                from . import promlayer as _pl
+                _nd = _pl.detect(wd, geo, (H, W),
+                                 log=lambda m: progress.log(m, None))
+                if _nd is not None:
+                    _nh = _nd[:2 * h2, :2 * w2].reshape(h2, 2, w2, 2).mean(axis=(1, 3))
+                    _before = int((g > 0.3).sum())
+                    g = np.maximum(g, _nh / 1.6)     # *1.6 below brings it to full
+                    lstats.setdefault("prom", {})["merge_detect_px"] = int((_nd > 0.3).sum())
+                    progress.log(f"  prominence gate: {_before * 4 / 1e3:.1f}k px from the tier's "
+                                 f"redness, {int((g > 0.3).sum()) * 4 / 1e3:.1f}k px with the "
+                                 f"merge-based detection", None)
+                    del _nd, _nh
+            except Exception as _e:
+                progress.log(f"  merge-based prominence detection not used ({_e})", None)
             g = ndimage.gaussian_filter(g, 2)
             gate = _fit(np.clip(g * 1.6, 0, 1).repeat(2, 0).repeat(2, 1), (H, W))
             gate = ndimage.gaussian_filter(gate, 2)
@@ -2149,6 +2217,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         _earthshine(wd, r, cy, cx, R)
     elif os.path.exists(ep):
         os.remove(ep)
+    lstats["layer_recipe"] = {"build": LAYER_BUILD}
     return lstats
 
 

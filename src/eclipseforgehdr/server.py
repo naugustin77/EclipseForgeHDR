@@ -246,6 +246,44 @@ def clear_cache():
     return jsonify({"ok": True, "files": n, "bytes": size, "path": wd})
 
 
+def _layers_stale(wd):
+    """Was this work directory's detail-layer set built by an older recipe?
+    (detail.LAYER_BUILD, 0.23.11). The stack is not the question -- only what
+    was derived from it -- so this is what lets a layer change reach a cached
+    stack in minutes instead of a re-stack."""
+    from .detail import LAYER_BUILD
+    try:
+        _rj = json.load(open(os.path.join(wd, "report.json")))
+        have = int((_rj.get("layer_recipe") or {}).get("build", 0))
+    except Exception:
+        have = 0
+    return have < LAYER_BUILD, have, LAYER_BUILD
+
+
+def _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv, earthshine=False):
+    """Rebuild every detail layer from the cached merge and record the recipe
+    in report.json. Mirrors the tail of the pipeline: build_layers is the last
+    stage there, so nothing after it is skipped."""
+    from . import detail
+    stale, have, want = _layers_stale(wd)
+    if not stale:
+        return False
+    prog.log(f"the cached detail layers were built by recipe {have} and this build "
+             f"asks for {want} — rebuilding them from the cached merge (no re-stack)", 0.5)
+    lst = detail.build_layers(wd, prog, denoise=denoise, earthshine=earthshine,
+                              fnrgf_preset=fnrgf_preset, partialconv=partialconv)
+    _rp = os.path.join(wd, "report.json")
+    try:
+        _r = json.load(open(_rp)) if os.path.exists(_rp) else {}
+        if isinstance(lst, dict):
+            _r.update(lst)
+        from .report import write as _write_report
+        _write_report(wd, _r)          # report.json + report.txt, as the pipeline does
+    except Exception as _e:
+        prog.log(f"detail layers rebuilt but not recorded in the report ({_e})", None)
+    return True
+
+
 @app.post("/api/run")
 def start_run():
     # JSON ONLY (0.22.78). Both of these accepted a bodiless POST and ran with
@@ -567,6 +605,49 @@ def start_run():
                            and o.get("inputs") == _input_fingerprint(folder))
             have_all = all(os.path.exists(os.path.join(wd, f))
                            for f in ("prom.npy", "prom_rgb.npy", "pellett.npy"))
+            if not force and have_all and not opts_ok:
+                # SAY WHY. A re-stack that nobody asked for costs half an hour
+                # and, without this line, an afternoon of guessing (0.23.9 had
+                # three keys missing from opts.json; the next one will be
+                # something else). Every key the test above compares, with the
+                # cached and the requested value.
+                try:
+                    _want = {"denoise": denoise, "flat_dir": _fd, "bias_dir": _bd, "dark_dir": _dd,
+                             "earthshine": earthshine, "despeckle": despeckle, "frames": frames,
+                             "export_tiers": export_tiers, "tier_linear": tier_linear,
+                             "feather": feather, "wb_source": wb_source, "demosaic": demosaic_method,
+                             "photometry": ("hill" if _photometry_requested(folder, photometry) else "scalar"),
+                             "photo_solve": photo_solve, "fnrgf_preset": fnrgf_preset,
+                             "stack_combine": stack_combine, "align_filter": align_filter,
+                             "align_corr": align_corr, "intra_lock": intra_lock,
+                             "colour_planes": colour_planes, "tier_mode": tier_mode}
+                    _dflt = {"wb_source": "daylight", "demosaic": "mhc", "photometry": "scalar",
+                             "photo_solve": "chain", "fnrgf_preset": "ours", "stack_combine": "mean",
+                             "align_filter": "isotropic", "align_corr": "semi", "intra_lock": "moon",
+                             "colour_planes": "off", "tier_mode": "exposure", "feather": "plain",
+                             "frames": "all"}
+                    _diff = []
+                    for _k, _v in _want.items():
+                        _c = o.get(_k, _dflt.get(_k, False if isinstance(_v, bool) else None))
+                        if isinstance(_v, bool):
+                            _c = bool(_c)
+                        if _c != _v:
+                            _diff.append(f"{_k}: cached {_c!r}, requested {_v!r}")
+                    if o.get("flat_inputs") != _flat_fp(_fd):
+                        _diff.append("flats folder contents changed")
+                    if o.get("bias_inputs", []) != _calib_fp(_bd):
+                        _diff.append("bias folder contents changed")
+                    if o.get("dark_inputs", []) != _calib_fp(_dd):
+                        _diff.append("darks folder contents changed")
+                    if not _cache_ok(o.get("build")):
+                        from . import __version__ as _ver
+                        _diff.append(f"build: cached {o.get('build')!r}, this is {_ver!r}")
+                    if o.get("inputs") != _input_fingerprint(folder):
+                        _diff.append("raw files changed (name, size or date)")
+                    prog.log("re-stacking, the cache does not match this request: "
+                             + ("; ".join(_diff) if _diff else "no key differs -- please report this"), None)
+                except Exception as _e:
+                    prog.log(f"re-stacking (could not say why: {_e})", None)
             if force or not have_all or not opts_ok:
                 # A run that dies partway leaves a valid-looking opts.json from
                 # the previous run beside a mix of new and old products; clear it
@@ -596,6 +677,12 @@ def start_run():
             else:
                 prog.log("using cached pipeline products "
                          "(press Clear cache to redo from the raws)", 0.9)
+                # a newer detail-layer recipe is applied to the cached merge
+                # here (0.23.11). build_layers also builds the partial-
+                # convolution masks when they are on, so the block below then
+                # finds them fresh and does nothing.
+                _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv,
+                                earthshine=earthshine)
             # HILL MASKS FROM A CACHED STACK. Everything they need -- the merged
             # luminance, the geometry, the prominence mask -- is already on
             # disk, so a folder stacked before 0.22.64 gains the layer for the
