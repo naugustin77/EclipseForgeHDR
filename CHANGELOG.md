@@ -5,6 +5,32 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.23.10
+
+**New export option: prominence layer (RGBA TIFF).** Tick "Also export
+prominence layer" and the export writes `<name>_prominences_16bit.tif` beside
+the composite: same grid, size (full/50 %) and orientation, the prominences in
+colour and their mask in the alpha channel, for blending in Photoshop (Nico:
+Normal + Blend If). Composite view only. Why a layer: every attempt to merge
+the sharp prominence stack into the composite failed on the picture (clipped
+cores, flat red blobs). How it is built (promlayer.py), each step measured on
+the 600 mm set:
+- WHERE: the merge's red excess (corona R/G per 2° sector as reference), 2–3×
+  less noise than the short stack.
+- The chromosphere band (25–50 px deep on one side, 5–12 px elsewhere) is removed
+  as light smooth ALONG the limb (polar, 30th percentile over ±2.5°); a height
+  cut took the small prominences with it. Prominences rising > 45 px (scaled
+  with R) keep their full profile down to the limb.
+- EDGE: relative to each prominence's own peak (0.12–0.35) in the sharp stack; the
+  merge-only mask was 2.5–5× the prominence's own area.
+- SHARP STACK (new, built during the run): all tiers ≤ 1/50 s, each aligned onto
+  the merge by sector-wise red-excess registration and a similarity fit (the
+  stack was off by up to 5 px in different directions around the limb, so one
+  shift cannot do it), weighted by exposure and unclipped pixels,
+  Richardson–Lucy 10 iterations with the PSF sigma measured on the lunar limb.
+  Saved as `prom_stack.npy` (disc crop only). Caches from before get a layer
+  from the merge alone, with a note in the export log.
+
 ## 0.23.9
 
 Colour-plane alignment, and a cache fix that stops needless re-stacks. This

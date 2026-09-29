@@ -313,6 +313,7 @@ button:disabled{opacity:.45;cursor:default}
         <label class="radio"><input type="radio" name="fmt" value="png"> PNG · 16-bit</label>
         <label class="radio"><input type="radio" name="fmt" value="jpg"> JPG (lossy)</label>
         <label class="radio"><input type="checkbox" id="exphalf"> Export at 50 % size (2×2 binned, cleaner)</label>
+        <label class="radio" title="EXPERIMENTAL. Writes the prominences as a separate 16-bit RGBA TIFF (name_prominences_16bit.tif) on exactly the same grid, size and orientation as the composite export, with the mask already in its alpha channel. Place it on top of the composite in Photoshop and blend it yourself - Normal with Blend If, Screen, opacity. Composite view only. Built from the merge (where the prominences are) and the fast tiers' deconvolved stack (their sharp edges); a cache stacked by an earlier version still gets a layer, from the merge alone. Tested on one bracket so far."><input type="checkbox" id="expprom"> Also export prominence layer (RGBA TIFF, experimental)</label>
         <label class="radio" title="Turn the finished picture. Applied last, to the view and to the export, so it costs no re-run and changes nothing in the report — a corona is the same corona whichever way up it is. FITS has no orientation keyword at all (ROWORDER describes row order, not which way the camera was held), so a portrait-shot FITS bracket arrives on its side and nothing in the data can tell you so.">
           Orientation
           <select id="orient" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
@@ -1667,7 +1668,7 @@ $("export").addEventListener("click", async () => {
   $("export").disabled = true;
   const r = await fetch("/api/export", {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({format: fmt, params: P, name: $("expname").value, view: VIEW, orient: ORIENT, size: $("exphalf").checked ? "half" : "full"})});
+    body: JSON.stringify({format: fmt, params: P, name: $("expname").value, view: VIEW, orient: ORIENT, size: $("exphalf").checked ? "half" : "full", promLayer: $("expprom").checked})});
   const j = await r.json();
   if (j.ok){ $("status").textContent = "exporting → " + j.path; runStart(); pollExport(); }
   else { $("status").textContent = j.error; $("export").disabled = false; }

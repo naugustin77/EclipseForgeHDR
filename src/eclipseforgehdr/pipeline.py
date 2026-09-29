@@ -6857,6 +6857,44 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         pgeo = None
     del plum
     progress.log(f"prominence colour stack from {prom_tier:g}s tier", 0.93)
+
+    # --- sharp prominence stack for the prominence-layer export (promlayer.py) ---
+    # All fast tiers (<= 1/50 s), each aligned onto the merge by its own red
+    # excess (sector shifts -> similarity fit) and Richardson-Lucy deconvolved.
+    # Only a crop around the disc is kept (~50 MB); a failure here costs the
+    # export its sharp edges, never the run.
+    try:
+        from . import promlayer as _pl
+        _pl_tiers = [x for x in secs if x <= 0.0201] or [min(secs)]
+
+        def _pl_tier_box(s, box):
+            by0, by1, bx0, bx1 = box
+            oy, ox = crop_origin
+            ady, adx = abs_shift[s]; ady, adx = 2 * ady, 2 * adx
+            pad = int(np.ceil(max(abs(ady), abs(adx)))) + 8
+            Y0, Y1, X0, X1 = by0 + oy - pad, by1 + oy + pad, bx0 + ox - pad, bx1 + ox + pad
+            Y0c, Y1c, X0c, X1c = max(Y0, 0), min(Y1, H2), max(X0, 0), min(X1, W2)
+            rgb = _cp_apply(_demosaic(stacks_bayer[s], demosaic_method), _cp)
+            sub = np.zeros((Y1 - Y0, X1 - X0, 3), np.float32)
+            sub[Y0c - Y0:Y1c - Y0, X0c - X0:X1c - X0] = rgb[Y0c:Y1c, X0c:X1c]
+            del rgb
+            cm = _cp_clip(cfa_clip_max(stacks_bayer[s]), _cp)
+            csub = np.full((Y1 - Y0, X1 - X0), np.float32(sat_level), np.float32)
+            csub[Y0c - Y0:Y1c - Y0, X0c - X0:X1c - X0] = cm[Y0c:Y1c, X0c:X1c]
+            del cm
+            sub *= wb[None, None, :]
+            sub = (sub.reshape(-1, 3) @ cam2rgb.T).reshape(sub.shape).astype(np.float32)
+            sub /= np.float32(s * cal[s])
+            for c in range(3):
+                sub[:, :, c] = ndimage.shift(sub[:, :, c], (ady, adx), order=3, mode="nearest")
+            valid = ndimage.shift((csub <= 0.9 * sat_level).astype(np.float32), (ady, adx),
+                                  order=1, mode="constant", cval=0)
+            return sub[pad:-pad, pad:-pad], valid[pad:-pad, pad:-pad]
+
+        _pl.build_stack(wd, _pl_tiers, _pl_tier_box, cyf, cxf, R,
+                        lum.shape[0], lum.shape[1], progress)
+    except Exception as _e:
+        progress.log(f"prominence stack for the layer export not built ({_e})", None)
     del stacks_bayer, stacks_half
 
     # --- detail layers ---

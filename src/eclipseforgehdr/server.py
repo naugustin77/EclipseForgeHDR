@@ -1165,6 +1165,7 @@ def do_export():
     fmt = data.get("format", "tif16")
     view = data.get("view", "composite")
     size = data.get("size", "full")
+    prom_layer = bool(data.get("promLayer", False))
     params = data.get("params", {})
     # Purely cosmetic and applied last, so it needs no re-run and no re-render
     # of anything cached -- see render.apply_orient.
@@ -1193,6 +1194,26 @@ def do_export():
             _notes = []
             export(ly, params, fmt, path, view=view, size=size, notes=_notes)
             json.dump(params, open(path + ".params.json", "w"), indent=1)
+            # the prominences as their own RGBA layer, on the same grid
+            if prom_layer and view == "composite":
+                try:
+                    from . import promlayer as _pl
+                    _wd = workdir(STATE["folder"])
+                    _geo = json.load(open(os.path.join(_wd, "geometry.json")))
+                    # render_16bit_30.tif -> render_prominences_16bit_30.tif (pairs by number)
+                    _st = os.path.splitext(path)[0]
+                    _pp = ("_prominences_16bit".join(_st.rsplit("_16bit", 1))
+                           if "_16bit" in os.path.basename(_st) else _st + "_prominences_16bit") + ".tif"
+                    prog.log("building the prominence layer ...", 0.8)
+                    _sharp = _pl.export_layer(_wd, _geo, _pp, orient=params.get("orient", ""),
+                                              size=size, log=lambda m: prog.log(m, None))
+                    prog.log(f"saved {_pp}", 0.95)
+                    if not _sharp:
+                        _notes.append("Prominence layer built from the merge only: this cache "
+                                      "has no prominence stack. Clear cache and re-run for "
+                                      "sharp prominence edges.")
+                except Exception as _e:
+                    _notes.append(f"Prominence layer not written ({_e})")
             try:
                 from . import report as _report
                 rp = os.path.join(workdir(STATE["folder"]), "report.json")

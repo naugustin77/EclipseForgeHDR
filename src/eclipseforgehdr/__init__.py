@@ -1,4 +1,4 @@
-__version__ = "0.23.9"
+__version__ = "0.23.10"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -316,6 +316,11 @@ CACHE_FAMILIES = (
     # 0.23.6 rebuilds only the partial-convolution masks (HILL_BUILD 7);
     # the stack is the same data. 0.23.7 likewise (HILL_BUILD 10).
     frozenset({"0.23.4", "0.23.5", "0.23.6", "0.23.7"}),
+    # 0.23.10 adds a file (prom_stack.npy, the deconvolved fast-tier stack for
+    # the prominence-layer export) and changes nothing else the run writes. A
+    # 0.23.9 cache lacks that file and the export says so (layer from the merge
+    # alone); the stack itself is the same data.
+    frozenset({"0.23.9", "0.23.10"}),
 
 )
 

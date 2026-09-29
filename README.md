@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.9
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.10
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
 
@@ -391,6 +391,19 @@ own cache.
 
 Intermediates live in `.eclipseforgehdr/` inside the raw folder; outputs land in
 `eclipseforge_output/` next to the raws.
+
+**Prominence layer (experimental, 0.23.10).** Tick *Also export prominence
+layer* and the composite export is accompanied by `<name>_prominences_16bit.tif`:
+the prominences alone, in colour, on exactly the same grid, size and
+orientation, with their mask in the alpha channel. Drop it on top of the
+composite in Photoshop and blend it yourself (Normal with *Blend If*, Screen,
+opacity, a clipped Curves or Hue/Saturation). Why a layer: the composite's own
+tone mapping clips or flattens bright H-alpha cores, and no in-app blend looked
+natural. Where the prominences are comes from the HDR merge's red excess
+(corona colour per sector as the reference, the chromosphere band removed along
+the limb); their sharp edges and cores come from a stack of the fast tiers,
+each registered onto the merge by its prominences and Richardson–Lucy
+deconvolved with the blur measured on the lunar limb. Tested on one bracket.
 
 ## Processing settings — what each one does, and when to change it
 
