@@ -193,7 +193,7 @@ def _calibration(folder, files, flat_dir, secs, progress, short_file=None):
                 info["flat_applied"] = True
                 info["flat"] = fi
         except Exception as e:
-            progress.log(f"flat correction skipped ({e})", None)
+            progress.log(f"[warn] flat correction skipped ({e})", None)
             info["flat_error"] = str(e)
     if bd or dd:
         try:
@@ -209,7 +209,7 @@ def _calibration(folder, files, flat_dir, secs, progress, short_file=None):
                 info["dark_applied"] = True
             info["calib"] = ci
         except Exception as e:
-            progress.log(f"bias/dark correction skipped ({e})", None)
+            progress.log(f"[warn] bias/dark correction skipped ({e})", None)
             info["calib_error"] = str(e)
     # A flat with no bias master: the black level has to come off before the
     # division (see _load). rawpy raws already have it off; a FITS that
@@ -227,12 +227,11 @@ def _calibration(folder, files, flat_dir, secs, progress, short_file=None):
                     b[-cy:, :cx].ravel(), b[-cy:, -cx:].ravel()])))
                 out["black"] = blk
                 info["black_pre_flat"] = blk
-                progress.log("  black level %.1f ADU from the shortest tier's "
-                             "raw corners, subtracted before the flat (this "
-                             "file reports none and there is no bias master)"
+                progress.log("  pre-flat black level %.1f ADU from "
+                             "shortest-tier raw corners (no bias master)"
                              % blk, None)
         except Exception as e:
-            progress.log(f"pre-flat black level not measured ({e})", None)
+            progress.log(f"[warn] pre-flat black level not measured ({e})", None)
     return (out or None), info
 
 
@@ -396,7 +395,7 @@ def _weight(v, sat):
 
 # -------------------------------------------------------------------- run ---
 
-def run(folder, progress, denoise="fine", demosaic_method="mhc",
+def run(folder, progress, denoise="off", demosaic_method="mhc",
         fnrgf_preset="ours", flat_dir="", partialconv=True):
     """Stack `folder` and build every layer the renderer needs."""
     from .raw import list_raws, read_exif
@@ -439,13 +438,12 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
                      + ", ".join(k for k in ("bias", "rate", "flat") if k in calib)
                      .replace("rate", "dark"), None)
     is_planes = _planes_direct(files[0]) is not None
-    progress.log("SIMPLE STACK -- the fallback path", None)
-    progress.log("3-plane FITS read as planes, used as written" if is_planes else
-                 "Bayer raw: demosaic, camera white balance and colour matrix "
-                 "per frame, as the full pipeline does", None)
-    progress.log("no hot-pixel repair, no ladder solve, no LDIC, no feather; "
-                 "the exposure ratios are measured from the pixels and the sky "
-                 "is left in for the render to decide about", None)
+    progress.log("simple stack (fallback path)", None)
+    progress.log("3-plane FITS, used as written" if is_planes else
+                 "Bayer raw: demosaic, camera WB and colour matrix "
+                 "per frame", None)
+    progress.log("no hot-pixel repair, ladder solve, LDIC or feather; "
+                 "ratios from pixels; sky left in", None)
 
     black = None
     ref_feat = None
@@ -467,8 +465,8 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
                 # ONE black level for the whole set, from the exposure where
                 # the sky contributes least. See the module docstring.
                 black = _pedestal(f)
-                progress.log("  black level from the shortest tier's first "
-                             "frame: R %.1f  G %.1f  B %.1f" % tuple(black), None)
+                progress.log("  black level (shortest tier, frame 1): "
+                             "R %.1f  G %.1f  B %.1f" % tuple(black), None)
             f -= black[:, None, None]
             # the alignment feature must be finite: a saturated pixel is NaN
             # by now, and reads as the saturation level for this purpose,
@@ -501,9 +499,8 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
             r, npx = _ratio(prev_g, st[1], sat)
             if not np.isfinite(r):
                 r = s / secs[i - 1]
-                progress.log(f"  {secs[i-1]:.5g}s -> {s:.5g}s: too few shared "
-                             f"pixels to measure the ratio; falling back to the "
-                             f"headers' {r:.4f}", None)
+                progress.log(f"[warn] {secs[i-1]:.5g}s -> {s:.5g}s: too few shared "
+                             f"pixels; header ratio {r:.4f} used", None)
             rel *= r
             ladder.append({"from": secs[i - 1], "to": s,
                            "header": s / secs[i - 1], "measured": r, "px": npx})
@@ -541,8 +538,8 @@ def run(folder, progress, denoise="fine", demosaic_method="mhc",
     del hdr
     short = (short_acc / max(short_n, 1)).astype(np.float32) if short_acc is not None else None
 
-    progress.log("exposure ladder, measured from the pixels: header says "
-                 "1 .. %.4g, the pixels say 1 .. %.4g"
+    progress.log("exposure ladder: header 1 .. %.4g, "
+                 "measured 1 .. %.4g"
                  % (secs[-1] / secs[0], rel), None)
     for L in ladder:
         progress.log("  %10.5g -> %-10.5g header %8.4f   measured %8.4f"

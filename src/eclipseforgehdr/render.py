@@ -3,7 +3,14 @@ from __future__ import annotations
 import os, sys, json
 import numpy as np
 from scipy import ndimage
+from scipy.special import erf
 from PIL import Image
+
+# NAFE REMOVED (2026-10-08, Nico). With Denoise Off as the default the rank
+# equaliser turned unsmoothed noise near the limb into 4-sd blobs (18 between
+# 1.02 and 1.47 R on the 600 mm set) and added nothing measurable to the
+# streamers. The layer is no longer built, loaded or mixed; True brings it back.
+NAFE_ENABLED = False
 
 # Starting points, not truths. These are the settings the reference bracket was
 # worked to by eye once the layers were behaving (0.12.0); every one of them is
@@ -29,8 +36,8 @@ DEFAULTS = {
     "hillBase": 0.0,
     "hill0": 0.0, "hill1": 1.0, "hill2": 0.6, "hill3": 0.2, "hill4": 0.1,
     "radialFlatten": 0.5, "mgnContrast": 0.15, "fnCompress": 0.9,
-    "clarity": 0.39, "smoothing": 0.25, "pelGain": 0.15,
-    "nafeMix": 0.15, "innerMix": 0.31, "innerDenoise": 0.4, "innerDim": 0.05, "promGain": 0.4,
+    "structure": 0.0, "clarity": 0.39, "smoothing": 0.25, "pelGain": 0.15,
+    "nafeMix": 0.0, "innerMix": 0.31, "innerDenoise": 0.4, "innerDim": 0.05, "promGain": 0.4,
     # How much of the detail inside the prominence gate comes from the
     # prominence's own layer rather than from the corona filters. 0 reproduces
     # every build before 0.18 exactly. See detail.prominence_detail.
@@ -41,7 +48,7 @@ DEFAULTS = {
     # Hill's 1:0.6:0.2:0.1 amplification ladder, and the difference is slabs
     # against filaments.
     #
-    # DEFAULT 1.0 -- chosen by a tester from a blind-ish four-way contact sheet at
+    # DEFAULT 1.0 -- chosen by Nico from a blind-ish four-way contact sheet at
     # matched contrast, against my metric, which rates it 44% WORSE at the limb.
     # amp*coh cannot see "delicate": it rewards radially coherent structure and
     # the coarse scales carry plenty. Drag to 0 for the old look.
@@ -53,12 +60,22 @@ DEFAULTS = {
     # the other way (dense material goes deeper red), which is the direction
     # worth trying before this is called a dead end.
     "promChroma": 0.0,
+    # THE 0.24 PROMINENCE LAYER (promlayer.py). Used when the work directory has
+    # one; the three prominence controls above are then inactive, because the
+    # corona they acted on no longer contains the prominences.
+    #   promLayer   strength of the layer (opacity scale); 0 = no prominences
+    #   promStretch the layer's own curve (lower = faint parts brighter)
+    #   promRim     the chromosphere rim along the limb, 0..1
+    #   promSat     the layer's colour saturation
+    #   promFade    how far the corona's Hill detail is eased out under the
+    #               layer (1 = fully where the layer covers it)
+    "promLayer": 1.0, "promStretch": 0.5, "promRim": 1.0, "promSat": 1.3, "promFade": 1.0,
     # RAW-PATH WHITE BALANCE, SOLVED RATHER THAN EYEBALLED.
     #
     # These were 0.9 / 1.205, a by-eye correction from 0.12.0, and tint at 1.205
     # is a straight 20% GREEN MULTIPLY. After the unit-luminance renormalisation
     # below (green carries 0.7152 of luminance) the net is green +5% and red and
-    # blue -13% relative -- the green-grey sky a tester reported, and the same cast
+    # blue -13% relative -- the green-grey sky Nico reported, and the same cast
     # the IMPORT_DEFAULTS note below had already measured and fixed for imports
     # while the raw path was left alone. Half a fix for two years.
     #
@@ -68,7 +85,7 @@ DEFAULTS = {
     # So the rendered sky chroma is just (temp, tint, 1/temp) renormalised, and
     #     R/G = temp/tint        B/G = 1/(temp*tint)
     #
-    # the reference set's own PixInsight version -- "lowered the green curve a bit and raised
+    # Nico's own PixInsight version -- "lowered the green curve a bit and raised
     # the blue curve a little" -- measured off his JPEG, linearised, normalised
     # to green: sky R/G 1.064, B/G 1.884. Inverting the two expressions gives
     # temp 0.752, tint 0.706, which reproduces that sky exactly.
@@ -81,7 +98,7 @@ DEFAULTS = {
     # as numbers. It cools the corona too, which is why `satur` is the other half
     # of what he did: he pushed saturation to restore the warm/cool separation.
     #
-    # BOTH BACK TO 1.0 IN 0.22.23, at the reference set's request, and the derivation above
+    # BOTH BACK TO 1.0 IN 0.22.23, at Nico's request, and the derivation above
     # deserves the correction rather than quiet deletion.
     #
     # It rests on "the far sky is neutral before these are applied". Measured on
@@ -89,11 +106,11 @@ DEFAULTS = {
     # five do not agree with each other:
     #
     #     set                    far sky R/G   B/G
-    #     the tester 2024 560mm         1.244    0.908
-    #     a second tester 2026 360mm         1.206    0.880
-    #     a second tester 2026 250mm         1.116    0.757
-    #     a tester Lumix 600mm           0.992    0.647
-    #     a tester Sony                  0.553    1.328
+    #     Clifton 2024 560mm         1.244    0.908
+    #     Clifton 2026 360mm         1.206    0.880
+    #     Clifton 2026 250mm         1.116    0.757
+    #     Nico Lumix 600mm           0.992    0.647
+    #     Nico Sony                  0.553    1.328
     #
     # So a pair of numbers solved against one photographer's rendering of one
     # eclipse cannot transfer: they landed near his target on his set because
@@ -110,8 +127,32 @@ DEFAULTS = {
     # not this change.
     "temp": 1.0, "tint": 1.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.0, "hlDesat": 0.0,
     "outGamma": 1.0, "bgBlack": 0.02,
+    # Final sharpening (lab, Oct 2026): Nimmervoll's Photoshop finish with a
+    # noise gate. All off by default -- it is a finish, not a default look.
+    "finalMid": 0.0, "finalDark": 0.0, "finalLight": 0.0, "finalNoise": 3.0,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
+    # block 3a: zoned Hill gains, tone curve, contained whites, disc edge
+    "hillZone": 0.0, "hillZoneR": 1.8,
+    "toneCurve": [[0.0, 0.0], [1.0, 1.0]], "containWhites": 1.0,
+    "discSoft": 12.0,
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
+    # the look controls (lab 0.24), all off -- see look()
+    "coronaLevel": 0.0, "skyLevel": 0.0, "skyColour": 0.0, "moonColour": 0.0,
+    # THE MOON GROUP (lab 0.24): the Moon's own tone curve -- the main curve no
+    # longer reaches the disc -- and the colour its tint heads towards, picked
+    # on the page (display RGB; the default is the look's blue, LOOK_BLUE).
+    "moonCurve": [[0.0, 0.0], [1.0, 1.0]],
+    "moonHueR": 0.579, "moonHueG": 0.756, "moonHueB": 1.0,
+    # the sky lift's colour (lab 2026-10-08): the colour the lift heads towards
+    # at Sky lift colour 1, picked as for the Moon; the default is the old blue
+    # axis exactly, so every look before it renders unchanged
+    "skyHueR": 0.579, "skyHueG": 0.756, "skyHueB": 1.0,
+    # COLOUR MODE (lab 2026-10-08): 0 = colour from the data (as before),
+    # 1 = monochrome (no colour anywhere; the composite exports as one
+    # channel), 2 = mono + tints (grey corona; sky, Moon and prominences take
+    # the picked colours). promHue*: the prominence colour used in mode 2.
+    # promPeak: the prominences' brightest channel is held to this (1 = off).
+    "colourMode": 0, "promHueR": 1.0, "promHueG": 0.70, "promHueB": 0.75, "promPeak": 1.0,
 }
 
 # An IMPORTED image has already been through somebody's colour management --
@@ -266,6 +307,12 @@ def _fill_disc(a, cy, cx, Rm):
     return out
 
 
+# Amplification slider reference: see Layers.hill_ref. The ratio, on the 600 mm
+# reference stack, between the 32 px mask's spread at Rmask-1.5 R and the old
+# normaliser (0.25 x the 2 px mask's spread over the frame).
+HILL_REF_C = 6.25
+
+
 class Layers:
     """Cached full-res layers, plus a decimated copy for interactive previews."""
 
@@ -284,6 +331,18 @@ class Layers:
         self.limb_prof = geo.get("limb_prof")
         self.limb_margin = float(geo.get("limb_margin", self.Rmask - self.R))
         lum = np.load(os.path.join(wd, "hdr_lum.npy"))
+        # THE 0.24 PROMINENCE LAYER: the picture is built on the corona without
+        # its prominence light -- but its WHITE POINT stays the merge's, so taking
+        # the brightest thing in the frame out does not re-stretch the corona.
+        from . import promlayer as _plm
+        self.has_promlayer = False
+        _cl = os.path.join(wd, _plm.CORONA_LUM)
+        _use_corona = (_plm.layer_mode() and os.path.exists(_cl)
+                       and os.path.exists(os.path.join(wd, _plm.CORONA_RGB))
+                       and os.path.exists(os.path.join(wd, _plm.LIGHT_FILE)))
+        _hi_merge = float(np.percentile(lum, 99.97))
+        if _use_corona:
+            lum = np.load(_cl)
         self.shape = lum.shape
         H, W = lum.shape
         yy = np.arange(H, dtype=np.float32)[:, None] - self.cy
@@ -312,7 +371,7 @@ class Layers:
         # (corner and mid-edge both exactly 0.1200), so radial flattening did
         # nothing out there. After the fix it reads 0.165-0.170 and works.
         # Net through both: 1.332 -> 1.013, against 1.030 in the data.
-        hi = float(np.percentile(lum, 99.97))
+        hi = _hi_merge
         _far = r > 2.5 * max(float(self.R), 1.0)
         lo = float(np.percentile(lum, 2))
         if _far.sum() > 20000:
@@ -325,7 +384,7 @@ class Layers:
                 lo = min(_sm - 5.0 * _ss, float(np.percentile(lum, 1)))
         del _far
         if not np.isfinite(lo) or hi <= lo:
-            lo = float(np.percentile(lum, 2)); hi = float(np.percentile(lum, 99.97))
+            lo = float(np.percentile(lum, 2)); hi = _hi_merge
         self.black_point = lo
         xn = np.clip((lum - lo) / (hi - lo), 0, 1)
         Bg = xn ** (1 / 3.0)
@@ -391,20 +450,27 @@ class Layers:
         # the local contrast out of the picture, with the slider still moving
         # and nothing in the log. Leaving the key out makes the blend below skip
         # it, the same way a missing promdet is handled.
-        self.has_nafe = os.path.exists(nfp)
+        self.has_nafe = NAFE_ENABLED and os.path.exists(nfp)
         nfl = np.load(nfp) if self.has_nafe else None
         fnl = np.clip(D / 8.0 + 0.5, 0, 1)     # raw sigma units, ±4σ window
         del D
         inner = np.load(os.path.join(wd, "inner.npy"))
         inner0 = np.load(os.path.join(wd, "inner0.npy"))
-        ep = os.path.join(wd, "earth.npy")
+        # THE MOON LAYER (moonlayer.py, lab 0.24) when the work directory has
+        # one; the old Earthshine-option layer otherwise
+        _mlp = os.path.join(wd, "moon_layer.npy")
+        ep = _mlp if os.path.exists(_mlp) else os.path.join(wd, "earth.npy")
         self.has_earth = os.path.exists(ep)
-        earth = np.load(ep) if self.has_earth else np.full(lum.shape, 0.5, np.float32)
+        earth = (np.load(ep).astype(np.float32) if self.has_earth
+                 else np.full(lum.shape, 0.5, np.float32))
+        if earth.shape != lum.shape:
+            self.has_earth = False
+            earth = np.full(lum.shape, 0.5, np.float32)
         gate = np.load(os.path.join(wd, "prom.npy"))
         pelp = os.path.join(wd, "pellett.npy")
         pel = np.load(pelp) if os.path.exists(pelp) else np.full(lum.shape, 0.5, np.float32)
         from .pipeline import load_big
-        hdr = load_big(os.path.join(wd, "hdr_rgb.npy"))
+        hdr = load_big(os.path.join(wd, _plm.CORONA_RGB if _use_corona else "hdr_rgb.npy"))
         Ls = ndimage.gaussian_filter(lum, 6)
         # Colour is only meaningful where something was actually detected.
         #
@@ -428,7 +494,7 @@ class Layers:
         #
         # In the far field the luminance falls slowly with radius, so four
         # sigmas of it occupy a narrow annulus, and a chroma that is fading in a
-        # straight line and then stops dead draws a RING there. a tester found it by
+        # straight line and then stops dead draws a RING there. Nico found it by
         # setting the white balance to None, which puts a strong green inside
         # against the exactly-neutral far field and makes the boundary obvious;
         # it is present at every white balance, just quieter. His check is the
@@ -442,11 +508,35 @@ class Layers:
         _t = np.clip((Ls - _floor) / (8.0 * _nz), 0.0, 1.0)
         _conf = (_t * _t * (3.0 - 2.0 * _t)).astype(np.float32)
         del _t
+        # WHERE THE FADE GOES WHEN THE SKY WAS SUBTRACTED (lab 0.24). With the
+        # sky in the merge, the far field's colour IS the sky's and fading it to
+        # neutral is harmless. With the sky subtracted it is the corona's own
+        # colour (and a floor in that colour) all the way out -- on Nico's 600 mm
+        # set R:G:B 1.59 : 0.88 : 0.44 of luminance, a low Sun's reddened
+        # corona -- and fading THAT to neutral put a hue edge around the whole
+        # corona at 3-4.5 R: a brown ring against grey under the camera's
+        # balance, a grey ring against blue under the corona white. So when the
+        # pipeline reports the sky subtracted, the fade goes to the far field's
+        # measured colour instead, and the colour is continuous through the edge.
+        _fade_to = np.ones(3, np.float32)
+        try:
+            _ssub = (json.load(open(os.path.join(wd, "report.json"))).get("sky_sub") or {})
+        except Exception:
+            _ssub = {}
+        if _ssub.get("applied"):
+            _fm = r > 0.72 * float(r.max())
+            if _fm.sum() > 10000:
+                _fc = np.median(np.asarray(hdr[::4, ::4], np.float32)[_fm[::4, ::4]].reshape(-1, 3), axis=0)
+                _fl = 0.2126 * _fc[0] + 0.7152 * _fc[1] + 0.0722 * _fc[2]
+                if np.isfinite(_fc).all() and _fc.min() > 0 and _fl > 0:
+                    _fade_to = np.clip(_fc / _fl, 0.2, 3.0).astype(np.float32)
+            del _fm
+        self.colour_fade_to = _fade_to
         ratio = np.empty(lum.shape + (3,), np.float32)
         for c in range(3):
             rc = ndimage.gaussian_filter(
                 np.ascontiguousarray(hdr[:, :, c]), 6) / np.maximum(Ls, _floor)
-            ratio[:, :, c] = 1.0 + _conf * (rc - 1.0)
+            ratio[:, :, c] = _fade_to[c] + _conf * (rc - _fade_to[c])
             del rc
         self.colour_floor = float(_floor)
         self.colour_conf_frac = float((_conf > 0.5).mean())
@@ -532,6 +622,12 @@ class Layers:
             bc = np.ones(3, np.float32)
         bl = 0.2126 * bc[0] + 0.7152 * bc[1] + 0.0722 * bc[2]
         self.bg_chroma = np.clip(bc / max(float(bl), 1e-6), 0.3, 3.0).astype(np.float32)
+        # No sky cast is left to neutralise once the sky was subtracted: the far
+        # field is the corona's own colour (see _fade_to above). Dividing by it
+        # whitened the corona where the colour is trusted and not beyond, which
+        # is the same hue edge the other way round (lab 0.24).
+        if bool((_ssub or {}).get("applied")):
+            self.bg_chroma = np.ones(3, np.float32)
         # The prominence detail layer is optional: a workdir built before 0.18
         # does not have one, and a run whose gate found nothing does not write
         # one. When it is missing the key is ABSENT, not filled with 0.5 --
@@ -591,6 +687,32 @@ class Layers:
                 self.hill_resp = [float(x) for x in _hj.get("resp", [])]
             except Exception:
                 self.hill_logk = 6.0
+            # THE AMPLIFICATION SLIDER'S REFERENCE (0.23.9): the spread of the
+            # COARSEST mask just outside the limb, Rmask to 1.5 R. Measured on
+            # the 600 mm reference stack that shell of the 32 px mask is 99%
+            # structure, while the figure used before (rms_struct[0], the 2 px
+            # mask over the whole frame) was a fixed 25% of a spread made of
+            # far-field noise -- the photon model reads 13-24% high at 1.5-4 R,
+            # so total^2 - noise^2 went negative on every scale and every
+            # scale sat on the floor. HILL_REF_C = 6.25 is that stack's ratio
+            # between the two, so any slider value gives the picture it gave
+            # before on the reference set; other stacks now get the same
+            # amount of STRUCTURE per slider unit, not the same amount of noise.
+            # Computed here from hill.npy, so no mask rebuild is needed.
+            self.hill_ref = 0.0
+            try:
+                _top = self.n_hill - 1
+                _q = 4
+                _mt = np.asarray(_hm[_top, ::_q, ::_q], np.float32)
+                _ry = (np.arange(_mt.shape[0], dtype=np.float32) * _q - self.cy)[:, None]
+                _rx = (np.arange(_mt.shape[1], dtype=np.float32) * _q - self.cx)[None, :]
+                _rq = np.sqrt(_ry * _ry + _rx * _rx)
+                _sh = (_rq > self.Rmask) & (_rq < 1.5 * float(self.R)) & (_mt != 0) & np.isfinite(_mt)
+                if _sh.sum() > 1000:
+                    self.hill_ref = float(np.std(_mt[_sh]))
+                del _mt, _ry, _rx, _rq, _sh
+            except Exception:
+                self.hill_ref = 0.0
             # the per-pixel sigma of im_log; absent on masks built before
             # 0.22.74, in which case the noise threshold is simply unavailable
             _hs = os.path.join(wd, "hill_sigma.npy")
@@ -632,6 +754,38 @@ class Layers:
             self.prev[key + "_sm"] = ndimage.gaussian_filter(f, 0.6)
             del f
         self.prev_decim = q
+        # THE 0.24 PROMINENCE LAYER: its maps on the disc box at full resolution
+        # (the full-frame arrays would cost ~0.7 GB), and full-frame at preview
+        # scale, area-averaged on the same q grid as everything else.
+        self.pl_box, self.pl_full = None, None
+        if _use_corona:
+            try:
+                _r = _plm.display_maps(wd, geo)
+                if _r is not None:
+                    self.pl_box, self.pl_full = _r
+                    self.has_promlayer = True
+                    y0, y1, x0, x1 = self.pl_box
+                    Y0, X0 = y0 // q * q, x0 // q * q
+                    Y1, X1 = min(-(-y1 // q) * q, H), min(-(-x1 // q) * q, W)
+                    hp_, wp_ = self.prev["bg"].shape
+                    for _k, _v in self.pl_full.items():
+                        _sh = (Y1 - Y0, X1 - X0) + _v.shape[2:]
+                        _tmp = np.zeros(_sh, np.float32)
+                        if _k == "C":
+                            _tmp[...] = 1.0
+                        _tmp[y0 - Y0:y1 - Y0, x0 - X0:x1 - X0] = _v
+                        _d = _decim(_tmp, q)
+                        _full = np.zeros((hp_, wp_) + _v.shape[2:], np.float32)
+                        if _k == "C":
+                            _full[...] = 1.0
+                        _ty, _tx = Y0 // q, X0 // q
+                        _hh = min(_d.shape[0], hp_ - _ty); _ww = min(_d.shape[1], wp_ - _tx)
+                        _full[_ty:_ty + _hh, _tx:_tx + _ww] = _d[:_hh, :_ww]
+                        self.prev["pl_" + _k] = _full
+                    del _tmp, _d, _full
+            except Exception as _e:
+                print(f"prominence layer maps not loaded ({_e})")
+                self.has_promlayer = False
         # HOW MUCH OF EACH MASK THE PREVIEW'S AREA AVERAGE REMOVES.
         #
         # Averaging 4x4 is the honest way to shrink a picture, and for every
@@ -795,7 +949,14 @@ def _variant(src, key, kind, preview):
     return ndimage.gaussian_filter(src[key], sigma)
 
 
-def _detail_layers(src, P, preview=True):
+# THE MGN VIEW shows the MGN layer itself, stretched for inspection (2026-10-07):
+# it used to show the composite's MGN term -- the layer times MGN contrast
+# (0.15 by default) with the NAFE mix blended in -- which left about one display
+# level of MGN in the outer corona and read as a posterised, blotchy layer.
+VIEW_MGN_STRETCH = 2.0
+
+
+def _detail_layers(src, P, preview=True, views=False):
     """Runtime-transformed detail layers (shared by composite render and layer views)."""
     # Detail balance: blend the all-scale layer with the fine-only one. Because
     # an MGN layer is a weighted mean of its per-scale terms, this IS a ladder
@@ -824,6 +985,7 @@ def _detail_layers(src, P, preview=True):
     D = (fnr - 0.5) * 8.0                     # back to sigma units
     s_hi = 2.5 / max(P["fnCompress"], 1e-4)   # 0 = FNRGF off (flat 0.5)
     fn = (np.where(D >= 0, np.tanh(D / s_hi), np.tanh(D / (1.5 * s_hi))) + 1) / 2
+    fn0 = fn
     # NAFE-VN rides with the other two rather than replacing them: it sees the
     # faint outer structure they flatten away, and because it needs no disc
     # geometry it stays clean at the limb where they are most fragile.
@@ -835,7 +997,7 @@ def _detail_layers(src, P, preview=True):
     # is the bottom third; past that the rank field starts to overwhelm the
     # envelope's own falloff.
     nf_ = src.get("nafe")
-    if nf_ is not None and P.get("nafeMix", 0.0) > 0:
+    if NAFE_ENABLED and nf_ is not None and P.get("nafeMix", 0.0) > 0:
         a = float(np.clip(P["nafeMix"], 0.0, 1.0))
         nfd = nf_
         if P["clarity"] > 0:
@@ -846,20 +1008,437 @@ def _detail_layers(src, P, preview=True):
         mg = np.clip((1 - a) * mg + a * nfd, 0, 1)
         fn = np.clip((1 - a) * fn + a * nfd, 0, 1)
     inner_eff = (1 - P["innerDenoise"]) * src["inner0"] + P["innerDenoise"] * src["inner"]
+    if views:
+        return mg, fn, inner_eff, mgr, fn0
     return mg, fn, inner_eff
 
 
+# FINAL SHARPENING (lab, Oct 2026). Nico's Photoshop finish, read out of the
+# action file "Nimmervoll's Aktionen V1.2" and reproduced here, plus a noise
+# gate Photoshop cannot have.
+#
+# The action: five copies of the finished image, High Pass at 1.5 / 3 / 6 /
+# 12 / 24 px, all in Soft Light; the five stacked into a smart object and
+# combined three ways -- the MEDIAN across the scales ("Mittel Toene", 80 %),
+# the MINIMUM ("Tiefen", 60 %: only the darkening excursions) and the MAXIMUM
+# ("Lichter", 40 %: only the brightening ones) -- grouped and pasted back.
+# Soft light of a 0.5-grey high pass is unsharp masking that eases off in the
+# shadows and highlights; the min/max split lets the dark and the bright side
+# of every edge be weighted separately.
+#
+# What is different here, and why:
+#   * The radii follow the solar radius (1.5 px at R = 620, the 600 mm
+#     reference bracket), so the same angular scales are sharpened on any
+#     camera. Hill's ladder is fixed in pixels; this one is not.
+#   * A noise gate. Measured on the reference set at full resolution the
+#     action raises the 1 px band by x1.7, the 2 px band by x1.5 and the
+#     8-16 px structure by x1.1-1.2: most of what it adds is grain. The
+#     gate takes each scale's high pass through erf(|d| / (k sigma_s)) --
+#     the WOW attenuation (Auchere et al. 2023) -- where sigma_s is the
+#     expected noise amplitude of that high pass. sigma_s comes from the
+#     picture itself: the robust spread of the finest band in 32 px tiles
+#     (the finest band of a finished render is noise -- the set resolves to
+#     1.4 px), carried to the other scales by each filter's measured white-
+#     noise response. No model, no camera table; k is the "Noise gate"
+#     slider, 0 switches it off and gives exactly the Photoshop result.
+#   * Applied to the FINISHED display image, after tone and colour, before
+#     the ring overlay -- where the action runs in Photoshop.
+#   * Row bands with a margin of three times the widest radius, so a 44 Mpx
+#     export does not hold five full-size high-pass planes at once.
+
+
+# ---- block 3a: tone curve, contained whites, zoned Hill gains ---------------
+def tone_lut_pts(pts, n=1024):
+    """Monotone cubic (Fritsch-Carlson) through the user's points [[in, out],
+    ...] on 0..1, as a LUT. Points are sorted by `in`; duplicate or reversed
+    `out` values are clamped so the curve never turns back on itself."""
+    P = sorted((float(x), float(y)) for x, y in pts)
+    if not P or P[0][0] > 1e-6:
+        P.insert(0, (0.0, 0.0))
+    if P[-1][0] < 1 - 1e-6:
+        P.append((1.0, 1.0))
+    xs = np.array([p[0] for p in P]); ys = np.array([p[1] for p in P])
+    keep = np.concatenate([[True], np.diff(xs) > 1e-4]); xs, ys = xs[keep], ys[keep]
+    ys = np.maximum.accumulate(np.clip(ys, 0, 1))
+    k = xs.size
+    t = np.linspace(0, 1, n)
+    if k < 2:
+        return t.astype(np.float32)
+    h = np.diff(xs); d = np.diff(ys) / h
+    m = np.zeros(k); m[0] = d[0]; m[-1] = d[-1]
+    for i in range(1, k - 1):
+        m[i] = 0.0 if d[i - 1] * d[i] <= 0 else 2.0 / (1.0 / d[i - 1] + 1.0 / d[i])
+    out = np.empty(n)
+    for i in range(k - 1):
+        sel = (t >= xs[i]) & (t <= xs[i + 1]); u = (t[sel] - xs[i]) / h[i]
+        h00 = 2 * u ** 3 - 3 * u ** 2 + 1; h10 = u ** 3 - 2 * u ** 2 + u
+        h01 = -2 * u ** 3 + 3 * u ** 2; h11 = u ** 3 - u ** 2
+        out[sel] = h00 * ys[i] + h10 * h[i] * m[i] + h01 * ys[i + 1] + h11 * h[i] * m[i + 1]
+    return np.clip(out, 0, 1).astype(np.float32)
+
+
+def curve_is_identity(pts):
+    try:
+        return all(abs(float(x) - float(y)) < 1e-6 for x, y in pts)
+    except Exception:
+        return True
+
+
+def _lut_apply(rgb, pts):
+    lut = tone_lut_pts(pts)
+    idx = np.clip(rgb * (lut.size - 1), 0, lut.size - 1)
+    lo = np.floor(idx).astype(np.int32); fr = (idx - lo).astype(np.float32)
+    hi_i = np.minimum(lo + 1, lut.size - 1)
+    return (lut[lo] * (1 - fr) + lut[hi_i] * fr).astype(np.float32)
+
+
+def apply_tone(rgb, pts, ceiling, moon_pts=None, eg=None):
+    """The tone curve (user points) on every channel, then 'contain whites':
+    the picture is scaled down so the 99.99th percentile of its luminance
+    sits at `ceiling` (1.0 = off). Never scales up.
+
+    THE MOON HAS ITS OWN CURVE (lab 0.24, Nico): the disc sits low on the
+    display scale (Moon disc level ~0.1), exactly where a mid-tone lift bites
+    hardest, so the main curve moved the Moon a lot and the corona hardly at
+    all. With `eg` (1 outside the Moon, 0 on the disc, the disc's soft edge in
+    between) the main curve acts outside the Moon and `moon_pts` on it."""
+    g_on = bool(pts) and not curve_is_identity(pts)
+    m_on = eg is not None and bool(moon_pts) and not curve_is_identity(moon_pts)
+    if eg is None:
+        if g_on:
+            rgb = _lut_apply(rgb, pts)
+    elif g_on or m_on:
+        G = _lut_apply(rgb, pts) if g_on else rgb
+        M = _lut_apply(rgb, moon_pts) if m_on else rgb
+        e = np.asarray(eg, np.float32)[:, :, None]
+        rgb = (G * e + M * (1 - e)).astype(np.float32)
+        del G, M, e
+    if ceiling < 0.999:
+        Y = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+        p = float(np.percentile(Y[::4, ::4], 99.99))
+        if p > ceiling:
+            rgb = (rgb * np.float32(ceiling / p)).astype(np.float32)
+    return rgb
+
+
+# THE LOOK CONTROLS (lab 0.24). Four controls that act on the finished picture
+# and set what a viewer reads as the "look" of a published eclipse, measured off
+# Druckmüller, Lefaudeux and Project Helion renders (looks/refs.json):
+#   coronaLevel  the median display brightness of the inner corona, 1.05-1.15 R.
+#                Helion and Lefaudeux sit at 0.53-0.69, i.e. the corona is NOT
+#                white there; ours was 0.9+. 0 = off (picture left as it is).
+#   skyLevel     a screen lift of everything outside the Moon towards the sky
+#                colour: the sky becomes ~skyLevel, the white corona is untouched.
+#   skyColour    the lift's hue on one axis: 0 neutral grey, 1 Helion's sky blue
+#                (R/G 0.766, B/G 1.323), 2 Druckmüller's deeper blue.
+#   moonColour   the Moon disc's hue on the same axis (0 = neutral grey).
+# All four off by default, so every render before them is unchanged.
+LOOK_BLUE = np.array([0.766, 1.0, 1.323])
+
+
+def look_chroma(t, base=None):
+    b = LOOK_BLUE if base is None else np.asarray(base, np.float64)
+    c = b ** float(t)
+    return (c / (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])).astype(np.float32)
+
+
+def sky_base(P):
+    """The sky lift's direction from the picked colour (display RGB), green as
+    the reference channel; the default pick is LOOK_BLUE / 1.323, the old axis."""
+    h = np.array([float(P.get("skyHueR", 0.579)), float(P.get("skyHueG", 0.756)),
+                  float(P.get("skyHueB", 1.0))], np.float64)
+    h = np.clip(h, 0.02, 1.0)
+    return h / h[1]
+
+
+def moon_base(P):
+    """The Moon tint's direction from the picked colour (display RGB), with
+    green as the reference channel as LOOK_BLUE has it -- so the default pick
+    (LOOK_BLUE / 1.323) gives exactly the old blue axis."""
+    h = np.array([float(P.get("moonHueR", 0.579)), float(P.get("moonHueG", 0.756)),
+                  float(P.get("moonHueB", 1.0))], np.float64)
+    h = np.clip(h, 0.02, 1.0)
+    return h / h[1]
+
+
+def corona_white(layers, P, lo=1.05, hi=1.6):
+    """Temperature and Tint that render the 1.05-1.6 R ring neutral -- the
+    page's solveWhite over that ring, same chain (ratio, sky cast, corona gain)."""
+    src = layers.prev if layers.prev is not None else layers.full
+    decim = layers.prev_decim if layers.prev is not None else 1
+    cy, cx, R = layers.geometry(decim)
+    H, W = src["bg"].shape
+    yy = np.arange(H, dtype=np.float32)[:, None] - cy
+    xx = np.arange(W, dtype=np.float32)[None, :] - cx
+    rr = np.sqrt(yy * yy + xx * xx)
+    Rm = max(layers.mask_radius(decim), lo * R)
+    m = (rr >= Rm) & (rr < hi * R)
+    a = np.clip(np.asarray(src["ratio"], np.float32)[m], 0.2, 3.0)
+    if P.get("bgNeutral", 0) > 0:
+        a = a / (1.0 + np.asarray(src["cconf"], np.float32)[m][:, None]
+                 * (layers.bg_chroma[None, :] ** P["bgNeutral"] - 1.0))
+    if P.get("coronaNeutral", 0) > 0:
+        a = a * layers.corona_gain[None, :] ** P["coronaNeutral"]
+    m0, m1, m2 = (float(np.median(a[:, k])) for k in range(3))
+    temp = float(np.sqrt(m2 / max(m0, 1e-6)))
+    return temp, float(m0 * temp / max(m1, 1e-6))
+
+
+def look(rgb, P, r, R, eg):
+    cl = float(P.get("coronaLevel", 0) or 0)
+    sl = float(P.get("skyLevel", 0) or 0)
+    mc = float(P.get("moonColour", 0) or 0)
+    if cl <= 0 and sl <= 0 and mc == 0:
+        return rgb
+    rgb = np.asarray(rgb, np.float32)
+    if cl > 0:
+        m = (r >= 1.05 * R) & (r < 1.15 * R) & (eg > 0.999)
+        if m.sum() > 50:
+            v = rgb[m]
+            med = float(np.median(0.2126 * v[:, 0] + 0.7152 * v[:, 1] + 0.0722 * v[:, 2]))
+            if med > 1e-4:
+                k = np.float32(cl / med)
+                # outside the Moon only: the disc keeps the level Moon disc level gives it
+                rgb = rgb * (1 + (k - 1) * eg)[:, :, None]
+                _hc = float(P.get("hlCompress", 0.0) or 0.0)
+                if k > 1 or _hc > 0:     # hue-preserving shoulder, as the main knee
+                    # HIGHLIGHT COMPRESSION ACTS HERE (2026-10-08). The main
+                    # knee sits before this level step, on a picture that is
+                    # still too dark to reach it; the step then lifted
+                    # everything back, so the slider did nothing in any look
+                    # that sets an inner corona level (all of them). The knee
+                    # is now this shoulder's: 0.9 at 0 (unchanged), 0.55 at 1.
+                    kn = np.float32(0.9 - 0.35 * _hc)
+                    mx = rgb.max(axis=2)
+                    ms = np.where(mx <= kn, mx, kn + (1 - kn) * np.tanh((mx - kn) / (1 - kn)))
+                    rgb *= np.where(mx > 1e-6, ms / np.maximum(mx, 1e-6), 1.0)[:, :, None]
+        # CONTAIN WHITES after the level step too, for the same reason:
+        # applied before it, the step scaled it straight back out.
+        cw = float(P.get("containWhites", 1.0) or 1.0)
+        if cw < 0.999:
+            Yc = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
+            pc = float(np.percentile(Yc[::4, ::4], 99.99))
+            del Yc
+            if pc > cw:
+                rgb = (rgb * np.float32(cw / pc)).astype(np.float32)
+    if sl > 0:
+        lift = np.clip(sl * look_chroma(P.get("skyColour", 0) or 0, sky_base(P))[None, None, :]
+                       * eg[:, :, None], 0, 0.95)
+        rgb = 1 - (1 - np.clip(rgb, 0, 1)) * (1 - lift)
+    if mc != 0:
+        # the tint is the DISC's own level times the hue shift, so the bright limb
+        # inside the edge ramp is not multiplied into a coloured ring
+        dm = eg <= 0
+        if dm.sum() > 20:
+            v = rgb[dm]
+            yd = float(np.median(0.2126 * v[:, 0] + 0.7152 * v[:, 1] + 0.0722 * v[:, 2]))
+            # per pixel (the maria keep their tint in proportion), capped at
+            # twice the disc's level so the bright limb in the edge ramp is not
+            # multiplied into a coloured ring
+            ypx = np.minimum(0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2], 2.0 * yd)
+            rgb = rgb + ((1 - eg) * ypx)[:, :, None] * (look_chroma(mc, moon_base(P))[None, None, :] - 1)
+    return np.clip(rgb, 0, 1).astype(np.float32)
+
+
+# Zoned Hill gains: a radial emphasis per mask scale, fine scales inside the
+# zone radius, coarse ones outside, with a 0.4 R feather. zone 0 = as before.
+HILL_ZONE_SIGN = (1.0, 1.0, 0.0, -1.0, -1.0)      # 2, 4, 8, 16, 32 px
+HILL_ZONE_FEATHER_R = 0.4
+
+
+def hill_zone_t(r, R, zone_r):
+    t = np.clip((r - zone_r * R) / (HILL_ZONE_FEATHER_R * R) + 0.5, 0, 1)
+    return (t * t * (3 - 2 * t)).astype(np.float32)        # 0 inside, 1 outside
+
+
+FINAL_RADII = (1.5, 3.0, 6.0, 12.0, 24.0)     # px at R = 620
+FINAL_REF_R = 620.0
+# the gate per scale, relative to the slider: the finest scale is nearly all
+# noise and gets the full k, the coarse ones carry structure and little noise
+# (WOW uses n_s = 5, 3, 1 on its first three scales and nothing beyond)
+FINAL_GATE = (1.0, 0.6, 0.35, 0.2, 0.1)
+
+
+def _soft_light(a, b):
+    """Photoshop soft light, a = base, b = blend, both in 0..1"""
+    d = np.where(a <= 0.25, ((16 * a - 12) * a + 4) * a, np.sqrt(np.clip(a, 0, None)))
+    return np.where(b <= 0.5, a - (1 - 2 * b) * a * (1 - a), a + (2 * b - 1) * (d - a))
+
+
+def _noise_response(radii):
+    """rms of each BAND (finest: n - G_r0 n; then G_r(i-1) n - G_ri n) for unit
+    white noise n -- the factor that carries a sigma measured on the finest
+    band to the other bands"""
+    rng = np.random.default_rng(7)
+    n = rng.standard_normal((256, 256)).astype(np.float32)
+    g = [ndimage.gaussian_filter(n, s) for s in radii]
+    out = [float((n - g[0]).std())]
+    for i in range(1, len(radii)):
+        out.append(float((g[i - 1] - g[i]).std()))
+    return np.array(out)
+
+
+def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_rows=768):
+    """rgb: finished display image, float32 in 0..1, (H, W, 3). R: solar radius
+    on THIS grid (already divided by the preview decimation).
+
+    The five Photoshop high passes are rebuilt from BANDS: b0 = I - G_1.5 I,
+    b_i = G_r(i-1) I - G_ri I, and HP_i = b0 + ... + b_i. With the gate off the
+    sums are exactly the high passes. With it on, each band is attenuated
+    against its own noise level, so the pixel noise that every high pass
+    carries (the 24 px one as much as the 1.5 px one) is taken out at the
+    source instead of being let through wherever a coarse plane is strong."""
+    if max(mid, dark, light) <= 1e-6:
+        return rgb
+    H, W = rgb.shape[:2]
+    radii = [max(0.6, s * (float(R) / FINAL_REF_R)) for s in FINAL_RADII]
+    resp = _noise_response(radii); resp = resp / max(resp[0], 1e-9)
+    Y = (0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]).astype(np.float32)
+    # the noise amplitude of the finest band, per tile, smoothed, back on the grid
+    sig = None
+    if k > 0:
+        b1 = Y - ndimage.gaussian_filter(Y, radii[0])
+        ty, tx = max(H // tile, 1), max(W // tile, 1)
+        bt = b1[:ty * tile, :tx * tile].reshape(ty, tile, tx, tile)
+        s = 1.4826 * np.median(np.abs(bt), axis=(1, 3)).astype(np.float32)
+        del b1, bt
+        s = ndimage.gaussian_filter(s, 1.0)
+        sig = ndimage.zoom(s, (H / s.shape[0], W / s.shape[1]), order=1).astype(np.float32)
+        sig = sig[:H, :W]
+        if sig.shape != (H, W):
+            sig = np.pad(sig, ((0, H - sig.shape[0]), (0, W - sig.shape[1])), mode="edge")
+    margin = int(np.ceil(3 * radii[-1])) + 2
+    out = np.empty_like(rgb)
+    for y0 in range(0, H, band_rows):
+        y1 = min(H, y0 + band_rows)
+        a0, a1 = max(0, y0 - margin), min(H, y1 + margin)
+        blk = rgb[a0:a1]; Yb = Y[a0:a1]
+        gates = None
+        if sig is not None:
+            gates = []
+            prev = Yb
+            for i, s in enumerate(radii):
+                cur = ndimage.gaussian_filter(Yb, s)
+                gates.append(erf(np.abs(prev - cur) / np.maximum(k * FINAL_GATE[i] * resp[i] * sig[a0:a1], 1e-6)).astype(np.float32))
+                prev = cur
+            del prev, cur
+        hp = np.empty((len(radii),) + blk.shape, np.float32)
+        for c in range(3):
+            prev = blk[:, :, c]; acc = np.zeros(prev.shape, np.float32)
+            for i, s in enumerate(radii):
+                cur = ndimage.gaussian_filter(blk[:, :, c], s)
+                band = prev - cur
+                if gates is not None:
+                    band = band * gates[i]
+                acc = acc + band
+                hp[i, :, :, c] = acc + 0.5
+                prev = cur
+        med = np.median(hp, axis=0); mn = hp.min(axis=0); mx = hp.max(axis=0)
+        del hp, gates
+        o = blk.astype(np.float32)
+        if mid > 0:
+            o = o + mid * (_soft_light(o, np.clip(med, 0, 1)) - o)
+        if dark > 0:
+            o = o + dark * (_soft_light(o, np.clip(mn, 0, 1)) - o)
+        if light > 0:
+            o = o + light * (_soft_light(o, np.clip(mx, 0, 1)) - o)
+        out[y0:y1] = np.clip(o[y0 - a0:y1 - a0], 0, 1)
+        del med, mn, mx, o
+    return out
+
+
+# STRUCTURE (2026-10-08, Nico: "Clarity does nothing, a Structure slider would
+# be cool"). Local contrast on the FINISHED picture's brightness, between
+# 0.01 R and 0.08 R (6-50 px on the 600 mm set) -- the width of the streamers
+# and the gaps between them. Clarity works on the MGN/FNRGF layers only, which
+# the looks mix in at 0.1-0.2, so it barely shows; this acts on everything.
+#  * band = NC(ln Y, 0.01 R) - NC(ln Y, 0.08 R), normalized convolution with
+#    the Moon left out, so the disc's black does not leak into the averages;
+#  * the band's mean per 1 px ring is taken out, so the corona's steep radial
+#    falloff is not turned into a bright or dark ring at the limb;
+#  * weight: midtones (4Y(1-Y)), 0 on the Moon, ramping in over 1.01-1.04 R;
+#  * applied as a brightness ratio, so the colour is kept.
+# 0 = off and the picture is untouched. Page (structureBoost) and export share it.
+STRUCT_R = (0.01, 0.08)
+STRUCT_K = 1.5
+STRUCT_LIMB = (1.01, 1.04)
+
+
+def structure_boost(rgb, cy, cx, R, s):
+    if s <= 1e-6:
+        return rgb
+    H, W = rgb.shape[:2]
+    yy = np.arange(H, dtype=np.float32)[:, None] - np.float32(cy)
+    xx = np.arange(W, dtype=np.float32)[None, :] - np.float32(cx)
+    rp = np.sqrt(yy * yy + xx * xx)
+    del yy, xx
+    Y = (0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]).astype(np.float32)
+    l = np.log(np.maximum(Y, 1e-4)).astype(np.float32)
+    m = (rp > STRUCT_LIMB[0] * R).astype(np.float32)
+    lm = l * m
+    del l
+    s1, s2 = max(STRUCT_R[0] * R, 0.5), max(STRUCT_R[1] * R, 1.0)
+    band = (ndimage.gaussian_filter(lm, s1) / np.maximum(ndimage.gaussian_filter(m, s1), 1e-4)).astype(np.float32)
+    # the wide blur on a block-averaged copy (sigma 49 px at full size), then
+    # back up: the same field to ~1e-3, a fraction of the time and memory
+    q = int(s2 // 6) if s2 > 12 else 1
+    if q > 1:
+        H2, W2 = -(-H // q), -(-W // q)
+        def _dn(a):
+            p = np.pad(a, ((0, H2 * q - H), (0, W2 * q - W)), mode="edge")
+            return p.reshape(H2, q, W2, q).mean((1, 3)).astype(np.float32)
+        lo = ndimage.gaussian_filter(_dn(lm), s2 / q) / np.maximum(ndimage.gaussian_filter(_dn(m), s2 / q), 1e-4)
+        yi = (np.arange(H, dtype=np.float32) + 0.5) / q - 0.5
+        xi = (np.arange(W, dtype=np.float32) + 0.5) / q - 0.5
+        for y0 in range(0, H, 1024):
+            y1 = min(H, y0 + 1024)
+            YY, XX = np.meshgrid(yi[y0:y1], xi, indexing="ij")
+            band[y0:y1] -= ndimage.map_coordinates(lo, [YY, XX], order=1, mode="nearest")
+        del lo, YY, XX
+    else:
+        band -= (ndimage.gaussian_filter(lm, s2) / np.maximum(ndimage.gaussian_filter(m, s2), 1e-4))
+    del lm
+    rb = rp.astype(np.int32)
+    sel = m > 0
+    n_ = np.bincount(rb[sel], minlength=int(rb.max()) + 1)
+    s_ = np.bincount(rb[sel], weights=band[sel].astype(np.float64), minlength=int(rb.max()) + 1)
+    prof = np.where(n_ > 0, s_ / np.maximum(n_, 1), 0.0).astype(np.float32)
+    band -= prof[rb]
+    del rb, sel
+    w = np.clip(4.0 * Y * (1.0 - Y), 0.0, 1.0) * np.clip(
+        (rp / R - STRUCT_LIMB[0]) / (STRUCT_LIMB[1] - STRUCT_LIMB[0]), 0.0, 1.0)
+    g = np.exp(np.float32(s * STRUCT_K) * band * w).astype(np.float32)
+    return np.clip(rgb * g[:, :, None], 0, 1).astype(np.float32)
+
+
+def colour_mode(P, params=None):
+    """Apply the Colour mode to a parameter set (in place, returned). Monochrome
+    zeroes every colour control; mono + tints zeroes the corona's own colour and
+    keeps the sky, Moon and prominence tints. Mode 0 changes nothing."""
+    P.update(params or {})
+    m = int(P.get("colourMode", 0) or 0)
+    if m == 1:
+        P.update(satur=0.0, skyColour=0.0, moonColour=0.0, promSat=0.0)
+    elif m == 2:
+        P["satur"] = 0.0
+    return P
+
+
 def render(layers: Layers, params, preview=False, view="composite"):
-    P = dict(defaults_for(getattr(layers, "mode", None))); P.update(params or {})
+    P = colour_mode(dict(defaults_for(getattr(layers, "mode", None))), params)
+    if getattr(layers, "has_promlayer", False):
+        # THE 0.24 PROMINENCE LAYER: the corona no longer holds the prominences,
+        # so the gate's three terms would only act on the corona where they were
+        P["promGain"] = 0.0; P["promDetail"] = 0.0; P["promChroma"] = 0.0
     src = layers.prev if preview else layers.full
     decim = layers.prev_decim if preview else 1
     cy, cx, R = layers.geometry(decim)
     H, W = src["bg"].shape
+    if view in ("mgn", "fnrgf"):
+        _, _, _, mgr, fn0 = _detail_layers(src, P, preview=preview, views=True)
+        v = np.clip(0.5 + (mgr - 0.5) * VIEW_MGN_STRETCH, 0, 1) if view == "mgn" else fn0
+        return np.repeat(np.asarray(v, np.float32)[:, :, None], 3, axis=2)
     mg, fn, inner_eff = _detail_layers(src, P, preview=preview)
-    if view == "mgn":
-        return np.repeat(mg[:, :, None], 3, axis=2)
-    if view == "fnrgf":
-        return np.repeat(fn[:, :, None], 3, axis=2)
     if view == "inner":
         return np.repeat(inner_eff[:, :, None], 3, axis=2)
     if view == "prom":
@@ -878,7 +1457,9 @@ def render(layers: Layers, params, preview=False, view="composite"):
     xx = np.arange(W, dtype=np.float32)[None, :] - cx
     r = np.sqrt(yy * yy + xx * xx)
     Re = layers.mask_radius_map((H, W), decim) + P["discTrim"] / decim
-    edge = np.clip((r - (Re - 10 / decim)) / (12.0 / decim), 0, 1)
+    # the edge ramp ends 2 px outside the mask radius; its width is a slider
+    _dsw = max(float(P.get("discSoft", 12.0)), 1.0) / decim
+    edge = np.clip((r - (Re + 2.0 / decim - _dsw)) / _dsw, 0, 1)
     def _ss(x):
         x = np.clip(x, 0, 1)
         return x * x * (3 - 2 * x)
@@ -910,7 +1491,9 @@ def render(layers: Layers, params, preview=False, view="composite"):
     # OFF BY DEFAULT and exactly the old curve at 0. The control is log10(k);
     # Hill's own value is 6. Turn radial flatten down as this goes up -- they do
     # the same job from opposite ends and both at once inverts the picture.
-    _lk = float(P.get("logK", 0.0))
+    # REMOVED 2026-10-08 (Nico): at Hill's 6 his picture went white and no look
+    # used it; old settings that carry logK render as 0.
+    _lk = 0.0
     if _lk > 0:
         _K = np.float32(10.0 ** _lk)
         _env = (np.log1p(_K * np.clip(src["bg"], 0, 1) ** 3)
@@ -1032,6 +1615,9 @@ def render(layers: Layers, params, preview=False, view="composite"):
                if len(getattr(layers, "hill_rms_struct", [])) == layers.n_hill
                else layers.hill_rms)
         _r0 = float(_rl[0]) if _rl else 1.0
+        if (os.environ.get("ECLIPSEFORGE_HILL_OLDNORM") != "1"
+                and getattr(layers, "hill_ref", 0.0) > 0.0):
+            _r0 = layers.hill_ref / HILL_REF_C
         _k = float(P.get("hillGain", 0.06)) * _mscale / max(_r0, 1e-9)
         # SOFT THRESHOLD AGAINST THE PIXEL'S OWN EXPECTED NOISE.
         #
@@ -1061,10 +1647,15 @@ def render(layers: Layers, params, preview=False, view="composite"):
                 len(getattr(layers, "hill_prev_att", [])) == layers.n_hill)
                 else None)
         _E = np.zeros_like(Y)
+        _zs = float(P.get("hillZone", 0.0))
+        _zt = hill_zone_t(r, R, float(P.get("hillZoneR", 1.8))) if _zs > 1e-6 else None
         for i in range(_n):
             if not _hg[i]:
                 continue
             _mi = np.asarray(src["hill%d" % i], np.float32)
+            if _zt is not None and i < len(HILL_ZONE_SIGN) and HILL_ZONE_SIGN[i]:
+                # fine masks weigh 1+zone inside and 1-zone outside, coarse the reverse
+                _mi = _mi * (1.0 + np.float32(_zs * HILL_ZONE_SIGN[i]) * (1.0 - 2.0 * _zt))
             if _sig is not None and i < len(layers.hill_resp):
                 _t = np.float32(_hth * layers.hill_resp[i]
                                 * (_att[i] if _att else 1.0)) * _sig
@@ -1146,6 +1737,16 @@ def render(layers: Layers, params, preview=False, view="composite"):
         # 0: 0.5 + 0.75 k E. So the view shows the layer, and the slider is
         # its opacity.
         _d = np.clip(np.float32(_hmix * _HILL_HEADROOM) * _E, -0.5, 0.5)
+        # THE 0.24 PROMINENCE LAYER: under the layer the corona's Hill detail is
+        # eased out, so the trace the colour removal leaves at a prominence's
+        # foot does not show through the layer's soft edge
+        if getattr(layers, "has_promlayer", False) and float(P.get("promFade", 1.0)) > 0:
+            _f = float(P.get("promFade", 1.0))
+            if preview:
+                _d *= (1.0 - np.float32(_f) * src["pl_F"][:_d.shape[0], :_d.shape[1]])
+            else:
+                _y0, _y1, _x0, _x1 = layers.pl_box
+                _d[_y0:_y1, _x0:_x1] *= (1.0 - np.float32(_f) * layers.pl_full["F"])
         _lo = Y < 0.5
         Y = np.where(_lo, Y * (1.0 + 2.0 * _d),
                      1.0 - (1.0 - Y) * (1.0 - 2.0 * _d)).astype(np.float32)
@@ -1272,6 +1873,37 @@ def render(layers: Layers, params, preview=False, view="composite"):
     del m, ms, scale, t
     rgb = np.clip(rgb, 0, 1) ** (1 / P["outGamma"])
     rgb = np.clip((rgb - P["bgBlack"]) / (1 - P["bgBlack"]), 0, 1)
+    _eg = np.clip((r - (Re + 2.0 / decim - _dsw)) / _dsw, 0, 1)
+    # with an inner corona level, contain whites moves into look() (see there)
+    rgb = apply_tone(np.ascontiguousarray(rgb, np.float32), P.get("toneCurve") or [],
+                     1.0 if float(P.get("coronaLevel", 0) or 0) > 0 else float(P.get("containWhites", 1.0)),
+                     moon_pts=P.get("moonCurve") or [], eg=_eg)
+    # the look controls -- see look()
+    rgb = look(rgb, P, r, R, _eg)
+    del _eg
+    # STRUCTURE, then FINAL SHARPENING, on the finished picture, before the ring overlay.
+    if view in ("composite", "moon") and float(P.get("structure", 0.0)) > 1e-6:
+        rgb = structure_boost(np.ascontiguousarray(rgb, np.float32), cy, cx, R,
+                              float(P["structure"]))
+    if max(float(P.get("finalMid", 0)), float(P.get("finalDark", 0)),
+           float(P.get("finalLight", 0))) > 1e-6:
+        rgb = final_sharpen(np.ascontiguousarray(rgb, np.float32), R,
+                            float(P["finalMid"]), float(P["finalDark"]),
+                            float(P["finalLight"]), float(P.get("finalNoise", 0)))
+    # THE 0.24 PROMINENCE LAYER, over the finished picture (after the final
+    # sharpening, so its soft edge is not sharpened into a line)
+    if view == "composite" and getattr(layers, "has_promlayer", False):
+        from .promlayer import overlay as _pov
+        if preview:
+            _m = {k: src["pl_" + k] for k in ("L", "C", "W1", "W2", "F")}
+            _hh, _ww = rgb.shape[:2]
+            _m = {k: v[:_hh, :_ww] for k, v in _m.items()}
+            _pov(rgb, _m, P)
+        else:
+            _y0, _y1, _x0, _x1 = layers.pl_box
+            _sub = np.ascontiguousarray(rgb[_y0:_y1, _x0:_x1])
+            _pov(_sub, layers.pl_full, P)
+            rgb[_y0:_y1, _x0:_x1] = _sub
     if P["ringBlend"] > 0 and "contact" in src:
         c = src["contact"]
         sc = P["ringScale"]
@@ -1286,7 +1918,50 @@ def render(layers: Layers, params, preview=False, view="composite"):
                     c[:, :, ch], mat, offset=off, order=1, mode="constant", cval=0)
             c = ct
         rgb = 1 - (1 - rgb) * (1 - P["ringBlend"] * c)
+    # THE MOON VIEW (lab 0.24): the finished Moon on its own -- the composite's
+    # disc (level, earthshine, colour, its own curve), black outside it, the
+    # disc's soft edge as the fade. What the Moon-layer export carries.
+    if view == "moon":
+        rgb = rgb * (1.0 - moon_alpha(layers, P, decim, rgb.shape[:2]))[:, :, None]
     return rgb
+
+
+def moon_alpha(layers, P, decim, shape):
+    """1 on the Moon's disc, 0 outside, the disc's soft edge between -- the
+    same ramp the render uses to put the disc in (1 - edge)."""
+    H, W = shape
+    cy, cx, R = layers.geometry(decim)
+    yy = np.arange(H, dtype=np.float32)[:, None] - cy
+    xx = np.arange(W, dtype=np.float32)[None, :] - cx
+    r = np.sqrt(yy * yy + xx * xx)
+    Re = layers.mask_radius_map((H, W), decim) + float(P.get("discTrim", 0.0)) / decim
+    _dsw = max(float(P.get("discSoft", 12.0)), 1.0) / decim
+    return (1.0 - np.clip((r - (Re + 2.0 / decim - _dsw)) / _dsw, 0, 1)).astype(np.float32)
+
+
+def export_moon_layer(layers, params, out_path, composite, size="full"):
+    """THE MOON AS ITS OWN LAYER (lab 0.24, Nico): a 16-bit RGBA TIFF on the
+    export's grid -- the composite's own disc pixels, alpha = the disc with its
+    soft edge. Laid over the composite (Normal) it changes nothing; it is there
+    to be edited on its own."""
+    import tifffile
+    from . import icc
+    P = dict(defaults_for(getattr(layers, "mode", None))); P.update(params or {})
+    a = moon_alpha(layers, P, 1, composite.shape[:2])
+    full = np.concatenate([np.asarray(composite, np.float32) * (a[:, :, None] > 0),
+                           a[:, :, None]], -1)
+    full = apply_orient(full, P.get("orient", ""))
+    if size == "half":
+        h2, w2 = full.shape[0] // 2 * 2, full.shape[1] // 2 * 2
+        f = full[:h2, :w2].reshape(h2 // 2, 2, w2 // 2, 2, 4)
+        aa = f[..., 3].mean(axis=(1, 3))
+        c = (f[..., :3] * f[..., 3:4]).sum(axis=(1, 3)) / np.maximum(
+            f[..., 3].sum(axis=(1, 3)), 1e-9)[..., None]
+        full = np.concatenate([c, aa[..., None]], -1)
+    prof = icc.srgb_profile()
+    tifffile.imwrite(out_path, (np.clip(full, 0, 1) * 65535 + 0.5).astype(np.uint16),
+                     photometric="rgb", extrasamples=[2], compression="zlib",
+                     extratags=[(34675, 1, len(prof), prof, False)])
 
 
 def _range_note(a, gray):
@@ -1332,8 +2007,24 @@ def _png_add_iccp(path, prof):
         pass                                     # a missing tag is not fatal
 
 
+def thumbnail(arr, path, width=480):
+    """A small sRGB JPEG of a finished picture (float 0..1, HxW or HxWx3) for
+    the Versions strip: box-binned to about `width` px wide, so a 44 Mpx
+    export costs a few hundred ms and 30 kB."""
+    a = np.asarray(arr, np.float32)
+    if a.ndim == 2:
+        a = np.repeat(a[:, :, None], 3, axis=2)
+    f = max(1, int(round(a.shape[1] / float(width))))
+    H2, W2 = a.shape[0] // f * f, a.shape[1] // f * f
+    if f > 1:
+        a = a[:H2, :W2].reshape(H2 // f, f, W2 // f, f, 3).mean(axis=(1, 3))
+    Image.fromarray((np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8)).save(
+        path, quality=86, optimize=True)
+    return path
+
+
 def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
-           notes=None):
+           notes=None, thumb=None, keep=None):
     """fmt: tif16 | tif8 | png (16-bit when OpenCV present, else 8-bit) | jpg.
     notes: an optional list the caller passes in to collect warnings about the
     file that was just written -- see the black-point check below.
@@ -1341,6 +2032,8 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
     partialconv | flat (detail views export grayscale).
     size: full | half (half = 2x2 binned, ~2x better SNR)."""
     rgb = render(layers, params, preview=False, view=view)
+    if keep is not None:          # the rendered picture, for the prominence-layer export
+        keep["rgb"] = rgb
     # THE BLACK POINT CLIPS EACH CHANNEL ON ITS OWN, and used to say nothing
     # when it did. Where green and blue fall under it and red does not, the
     # outer field prints as flat saturated red with the structure still visible
@@ -1374,8 +2067,12 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
         if rgb.shape[-1] == 1:
             rgb = rgb[:, :, 0]
         rgb = np.ascontiguousarray(rgb)
-    gray = view != "composite"
+    gray = view not in ("composite", "moon")
     arr16 = (rgb[:, :, 0] if gray else rgb)
+    # MONOCHROME composite: one channel, the picture's luminance
+    if view == "composite" and int((params or {}).get("colourMode", 0) or 0) == 1 and rgb.ndim == 3:
+        gray = True
+        arr16 = np.ascontiguousarray(0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2])
     # Tag the file. The render is already in display encoding (the browser
     # preview shows these exact bytes as sRGB), so sRGB is what it IS -- but it
     # was going out untagged, leaving every host to guess. Photoshop guessed
@@ -1415,4 +2112,9 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
             icc_profile=(None if gray else _prof))
     else:
         raise ValueError(fmt)
+    if thumb:
+        try:
+            thumbnail(arr16, thumb)
+        except Exception:
+            pass
     return out_path

@@ -114,13 +114,13 @@ def _icc_gamma(icc):
 def _linearise(a, kind, g, progress):
     log = (progress.log if progress is not None else (lambda *x, **k: None))
     if kind == "linear":
-        log("import: the file declares a linear tone curve — used as it is", None)
+        log("import: linear tone curve, used as is", None)
         return a
     if kind == "srgb":
-        log("import: the file declares the sRGB transfer function — inverting it", None)
+        log("import: sRGB transfer curve, inverted", None)
         return np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
     if kind == "gamma":
-        log(f"import: the file declares gamma {g:.3f} — inverting it", None)
+        log(f"import: gamma {g:.3f}, inverted", None)
         return np.power(np.maximum(a, 0.0), g)
     raise ImportError_(
         "this image carries no colour profile, so whether it is scene-linear "
@@ -143,7 +143,7 @@ def read_image(path, progress=None, assume=None):
         a, _hdr = read_fits(path)
         a = np.asarray(a, np.float32)
         kind, g = "linear", 1.0            # FITS is linear by construction
-        log("import: FITS — linear by construction", None)
+        log("import: FITS, linear", None)
     else:
         import tifffile
         with tifffile.TiffFile(path) as tf:
@@ -196,8 +196,8 @@ def read_image(path, progress=None, assume=None):
             _mx = float(np.nanmax(a)) if a.size else 1.0
             if np.isfinite(_mx) and _mx > 1.001:
                 a = a / _mx
-                log(f"import: floating-point data ran to {_mx:.3f}; scaled by "
-                    f"its own maximum, not by a bit depth", None)
+                log(f"[odd] import: float data max {_mx:.3f}; scaled by "
+                    f"its own maximum", None)
         else:
             _full = float((1 << int(bits)) - 1) if bits else 65535.0
             a = a / max(_full, 1.0)
@@ -205,14 +205,14 @@ def read_image(path, progress=None, assume=None):
         if icc is not None:
             kind, g = _icc_gamma(icc)
             if kind:
-                log("import: colour profile found in the file", None)
+                log("import: colour profile found", None)
     if assume:
         try:
             g2 = float(assume)
             kind, g = "gamma", g2
         except (TypeError, ValueError):
             kind, g = str(assume).lower(), None
-        log(f"import: tone curve overridden by the caller ({assume})", None)
+        log(f"import: tone curve override ({assume})", None)
     elif kind is None and ("linear" in os.path.basename(path).lower()
                            or os.environ.get("ECLIPSEFORGE_TIFF_LINEAR") == "1"):
         kind, g = "linear", 1.0
@@ -240,7 +240,7 @@ def read_image(path, progress=None, assume=None):
 
 # ---------- the run ----------
 
-def run(folder, image_path, progress, denoise="fine", assume=None,
+def run(folder, image_path, progress, denoise="off", assume=None,
         fnrgf_preset="ours", partialconv=True):
     """Build every cached product the renderer needs, from one image."""
     from .pipeline import (workdir, find_disc, fit_limb_rays, remove_sky_gradient,
@@ -272,7 +272,7 @@ def run(folder, image_path, progress, denoise="fine", assume=None,
               "partialconv": bool(partialconv)})
 
 
-def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
+def build_from_rgb(folder, rgb, progress, denoise="off", stats=None,
                    opts=None, short_lum=None, fnrgf_preset="ours",
                    partialconv=True):
     """Every cached product the renderer needs, from one scene-linear HxWx3.
@@ -297,7 +297,7 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
     H, W, _ = rgb.shape
     progress.log(f"{W}x{H}, scene-linear, "
                  f"{np.log2(float(np.percentile(rgb, 99.99)) / max(float(np.percentile(rgb, 1)), 1e-6)):.1f} EV "
-                 f"between the 1st and 99.99th percentile", 0.15)
+                 f"(p1 to p99.99)", 0.15)
 
     lum = (0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1]
            + 0.0722 * rgb[:, :, 2]).astype(np.float32)
@@ -309,8 +309,8 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
             "could not find the lunar limb in this image. It has to be a "
             "totality frame with the Moon fully inside the field.")
     cy, cx, R, rms, nk, nt, prof = fit
-    progress.log(f"lunar limb: centre ({cy:.1f},{cx:.1f}) R={R:.1f}px, "
-                 f"rms {rms:.2f}px over {nk}/{nt} rays", 0.25)
+    progress.log(f"[ok] lunar limb: centre ({cy:.1f},{cx:.1f}) R={R:.1f}px, "
+                 f"rms {rms:.2f}px, {nk}/{nt} rays", 0.25)
 
     _st = {"version": __version__, "folder": folder, "W": W, "H": H,
            # fnrgf_preset belongs here, not only in opts.json: the report reads
@@ -357,7 +357,7 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
     #
     # An import has a better limb than a stack, not a worse one -- somebody
     # already registered and merged it -- so the blind rule was backwards.
-    # Measured on a third tester's stack (R = 523.8 px, fit rms 2.34 px): the
+    # Measured on Val Italo's stack (R = 523.8 px, fit rms 2.34 px): the
     # transition is 11.0 px wide at the 90th percentile, so the measured rule
     # asks for 9.9 px and the blind one took 22.0. Those extra 12 px are a ring
     # right where prominences live, at 1.83 arcsec/px about 22 arcsec of it.
@@ -373,16 +373,16 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
         if _lw:
             ramp = 2.0 * float(_lw["limb_width_p90"])
     except Exception as _e:
-        progress.log(f"limb ramp not measurable ({_e}); disc mask falls back to "
-                     f"a fraction of the radius", None)
+        progress.log(f"[warn] limb ramp not measurable ({_e}); "
+                     f"disc mask from radius", None)
     if ramp > 0:
         margin = float(np.clip(max(0.8 * rms, 0.9 * ramp), 4.0, 0.08 * R))
-        progress.log(f"limb 20-80% transition {ramp:.0f}px (p90) -> disc mask "
+        progress.log(f"limb 20-80% ramp {ramp:.0f}px (p90): disc mask "
                      f"margin {margin:.1f}px", None)
     else:
         margin = max(4.0, 0.042 * R)
-        progress.log(f"limb ramp not measurable; disc mask margin "
-                     f"{margin:.1f}px from the radius", None)
+        progress.log(f"[warn] limb ramp not measurable; disc mask margin "
+                     f"{margin:.1f}px from radius", None)
     stats["geometry"]["Rmask"] = float(R + margin)
     stats["geometry"]["limb_margin"] = float(margin)
     stats["geometry"]["limb_ramp_px"] = float(ramp) or None
@@ -405,9 +405,9 @@ def build_from_rgb(folder, rgb, progress, denoise="fine", stats=None,
         stats.update(st)
         remove_sky_gradient(wd, cy, cx, R, st.get("corona_extent_R"), stats, progress)
     except Exception as e:
-        progress.log(f"sky gradient not removed ({e})", None)
+        progress.log(f"[warn] sky gradient not removed ({e})", None)
 
-    progress.log("building the detail layers ...", 0.45)
+    progress.log("building detail layers ...", 0.45)
     lstats = detail.build_layers(wd, progress, denoise=denoise, earthshine=False,
                                  fnrgf_preset=fnrgf_preset,
                                  partialconv=partialconv)

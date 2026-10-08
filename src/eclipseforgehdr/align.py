@@ -266,7 +266,7 @@ def stack_variance(tiers_aligned, cy, cx, R):
     # what makes the number mean anything, and leaving it out produced a false
     # alarm that stood for three releases.
     #
-    # the 250 mm test set reported cov_limb 0.793 against 0.037 on his 360 mm
+    # Clifton's 250 mm set reported cov_limb 0.793 against 0.037 on his 360 mm
     # set of the same eclipse, and that 20x gap was read as veiling glare --
     # written into the report, the changelog and the backlog. Rebuilding the
     # same statistic from that run's OWN exported tiers gives **0.021**. The

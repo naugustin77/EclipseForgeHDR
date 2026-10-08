@@ -298,7 +298,7 @@ class FitsFrame:
         # so in the card's own comment: `OFFSET = 0 / Sensor gain offset`.
         # Reading it as a black level told the rest of the pipeline that the
         # black level was KNOWN and equal to zero, when in fact it was unknown
-        # and, on a third tester's set, 142 ADU. Everything downstream is sized for a
+        # and, on Val Italo's set, 142 ADU. Everything downstream is sized for a
         # few ADU of residue (_PEDESTAL_MAX caps the shared fit at 0.002 of
         # saturation, 131 ADU there), so a full black level cannot be recovered
         # by the fit that is supposed to mop up what this missed. See TODO 22.

@@ -304,7 +304,7 @@ def build_master(flat_dir, shape=None, progress=None, target=NOISE_TARGET):
         del b
 
     for name, why in rejected:
-        log(f"flat rejected: {name} {why}", None)
+        log(f"[warn] flat rejected: {name} {why.split(' — ')[0]}", None)
     info["n_used"] = len(used)
     info["rejected"] = [{"file": n, "why": w} for n, w in rejected]
     n = len(used)
@@ -419,32 +419,28 @@ def describe(info):
     """One-line-per-fact summary of a build, for the run log and the report."""
     out = []
     if info.get("error"):
-        out.append(f"flat: {info['error']}")
+        out.append(f"[warn] flat not applied: {info['error']}")
         return out
-    out.append(f"flat: {info.get('combine', '')} from "
+    out.append(f"[ok] master flat: {info.get('combine', '')} from "
                f"{os.path.basename(info.get('dir') or '')}/")
     if "noise_raw" in info:
         if not info.get("median3") and not info.get("sigma_px"):
             out.append(f"flat: per-pixel noise {100 * info['noise_raw']:.3f}% "
-                       f"— already under the {100 * NOISE_TARGET:.1f}% target, "
-                       f"so it is used at full resolution, unsmoothed")
+                       f"(target {100 * NOISE_TARGET:.1f}%), unsmoothed")
         else:
             out.append(f"flat: per-pixel noise {100 * info['noise_raw']:.3f}% "
                        f"-> {100 * info.get('noise_master', float('nan')):.3f}% "
-                       f"after a 3x3 median and a "
-                       f"{info.get('sigma_px', 0):.1f} px smooth "
-                       f"(target {100 * NOISE_TARGET:.1f}%)")
-    out.append(f"flat: corrects a {100 * (info.get('vignette', 1) - 1):.1f}% "
-               f"falloff — the dimmest part of the field sits at "
-               f"{info.get('corner', 1):.3f} of the brightest")
+                       f"(3x3 median + {info.get('sigma_px', 0):.1f} px smooth, "
+                       f"target {100 * NOISE_TARGET:.1f}%)")
+    out.append(f"flat: {100 * (info.get('vignette', 1) - 1):.1f}% falloff corrected "
+               f"(dimmest field {info.get('corner', 1):.3f} of brightest)")
     if any(info.get("border_fixed") or []):
         _b = info["border_fixed"]
-        out.append(f"flat: {_b[0]}/{_b[1]} top/bottom and {_b[2]}/{_b[3]} "
-                   f"left/right edge line(s) replaced — the decoder handed back "
-                   f"masked photosites there, not optics")
+        out.append(f"flat: {_b[0]}/{_b[1]} top/bottom, {_b[2]}/{_b[3]} "
+                   f"left/right edge line(s) replaced (masked photosites)")
     if info.get("clipped"):
-        out.append(f"flat: {info['clipped']} photosite(s) clipped to the "
-                   f"[0.2, 5.0] safety range")
+        out.append(f"flat: {info['clipped']} photosite(s) clipped to "
+                   f"[0.2, 5.0]")
     return out
 
 
@@ -504,5 +500,5 @@ def load_or_build(folder, flat_dir, shape, progress=None, workdir=None):
             np.save(npy, master)
             json.dump({"key": key, "info": info}, open(js, "w"), indent=1)
         except Exception as e:
-            log(f"flat: could not cache the master ({e})", None)
+            log(f"[warn] flat: master not cached ({e})", None)
     return master, info

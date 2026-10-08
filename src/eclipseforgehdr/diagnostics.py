@@ -158,9 +158,8 @@ def write_bundle(wd, folder, stats=None, progress=None):
     if progress is not None:
         try:
             mb = os.path.getsize(path) / 1e6
-            progress.log("diagnostics bundle: %d layers, %.1f MB -> "
-                         "%s/eclipseforge_diagnostics.zip "
-                         "(profiles + 512px thumbnails, no raw data)"
+            progress.log("[ok] diagnostics bundle: %d layers, %.1f MB -> "
+                         "%s/eclipseforge_diagnostics.zip"
                          % (n_layers, mb, OUTPUT_NAME), None)
         except Exception:
             pass

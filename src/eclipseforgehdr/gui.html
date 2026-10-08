@@ -14,20 +14,73 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-ap
 body{overflow:hidden}
 .app{display:flex;height:100vh;overflow:hidden}
 .stage{flex:1;display:flex;flex-direction:column;min-width:0;height:100vh}
-.topbar{display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.topbar h1{font-size:16px;font-weight:600;margin:0 12px 0 0;color:var(--gold)}
-.topbar input[type=text]{flex:1;min-width:260px;background:#0e1013;color:var(--text);
+/* ---- top area: a fixed source row, a collapsible options grid, a status line.
+   The old single flex-wrap row of ~20 controls reflowed on every resize; the
+   grid moves whole columns instead of single fields. */
+.top{border-bottom:1px solid var(--line);flex:none}
+body{display:flex;flex-direction:column;height:100vh}
+.app{flex:1;min-height:0;height:auto}
+.stage{height:auto;min-height:0}
+.srcrow button,.runbtns button{white-space:nowrap}
+.srcrow{display:flex;gap:10px;align-items:center;padding:8px 16px;flex-wrap:nowrap;min-width:0}
+.srcrow h1{font-size:16px;font-weight:600;margin:0 6px 0 0;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:60px;flex:0 1 auto}
+.srcraw,.srcimp{display:flex;gap:8px;align-items:center;flex:1;min-width:0}
+.srcrow input[type=text]{flex:1;min-width:120px;background:#0e1013;color:var(--text);
   border:1px solid var(--line);border-radius:4px;padding:7px 10px;font:13px ui-monospace,monospace}
-.topbar .status{color:var(--muted);font:12px ui-monospace,monospace;width:100%}
-.canvaswrap{flex:1;display:flex;align-items:center;justify-content:center;padding:14px;background:#07080a;overflow:hidden}
-canvas{max-width:100%;max-height:calc(100vh - 130px);display:block;box-shadow:0 0 40px rgba(0,0,0,.8);cursor:grab}
-.rail{width:330px;flex:none;background:var(--panel);border-left:1px solid var(--line);height:100vh;overflow-y:auto}
+.srcraw #folder{flex:3}
+.srcraw #flatDir{flex:1.2}
+.runbtns{display:flex;gap:8px;align-items:center;flex:none;margin-left:auto}
+.runbtns button{padding:5px 12px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;flex:none}
+.segbtn{border:0;border-radius:0;background:transparent;color:var(--muted);padding:7px 11px;font-size:12px}
+.segbtn+.segbtn{border-left:1px solid var(--line)}
+.segbtn.on{background:var(--panel2);color:var(--text)}
+button.ghost{background:transparent;color:var(--muted)}
+button.ghost .chev{display:inline-block;transition:transform .15s}
+.optpanel{padding:4px 16px 10px;border-top:1px solid var(--line);background:var(--panel)}
+.optpanel.closed{display:none}
+.optgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:8px 14px;align-items:end}
+label.opt,div.opt{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.optflat{grid-column:span 2}
+.inrow{display:flex;gap:6px;align-items:center}
+.inrow input[type=text]{flex:1;min-width:0;background:#0e1013;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:5px 8px;font:12px ui-monospace,monospace}
+.inrow .brw{padding:5px 8px}
+label.opt .optname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+label.optchk{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);padding:6px 0 7px;white-space:nowrap}
+select.sel{width:100%;background:#0e1013;color:var(--text);border:1px solid var(--line);
+  border-radius:4px;padding:5px 6px;font:12px system-ui;min-width:0}
+.statusrow{padding:3px 16px 5px;display:flex;align-items:center;gap:12px}
+.statusrow .status{flex:1;min-width:0;color:var(--muted);font:12px ui-monospace,monospace;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#optsToggle{padding:3px 8px;font-size:12px;white-space:nowrap}
+.canvaswrap{flex:1;min-height:0;position:relative;background:#07080a;overflow:hidden}
+/* absolutely placed and centred: percentages against the wrapper are then definite, so the
+   picture fills whatever height the rows above leave it, without a hard-coded calc() */
+canvas{position:absolute;inset:12px;margin:auto;max-width:calc(100% - 24px);max-height:calc(100% - 24px);display:block;box-shadow:0 0 40px rgba(0,0,0,.8);cursor:grab}
+/* the view switch lives under the picture, in one fixed place, with the zoom
+   readout on the left and the credit on the right */
+.viewbar{flex:none;display:flex;align-items:center;gap:8px;padding:6px 16px;border-top:1px solid var(--line);min-height:38px}
+.viewbar #views{display:none;gap:4px;margin:0 auto}
+.viewbar .vbtn{padding:5px 10px;font-size:12px;white-space:nowrap}
+.viewbar .zoompct,.viewbar .credit{color:#8b93a0;font:11px ui-monospace,monospace;opacity:.85;white-space:nowrap}
+.viewbar .zoompct{min-width:90px}
+.viewbar .credit{margin-left:auto;text-align:right;overflow:hidden;text-overflow:ellipsis}
+/* the rail: user-sized (drag its left edge), remembered */
+:root{--rail:360px;--logh:140px}
+.rail{width:var(--rail);min-width:280px;max-width:70vw;flex:none;background:var(--panel);border-left:1px solid var(--line);height:auto;min-height:0;overflow-y:auto;position:relative}
+.railgrip{position:fixed;top:0;bottom:0;width:7px;cursor:col-resize;z-index:30;right:calc(var(--rail) - 3px)}
+.railgrip:hover,.railgrip.on{background:rgba(232,163,61,.25)}
 .railinner{padding:8px 18px 18px}
 .group{padding:12px 0 6px;border-bottom:1px solid var(--line)}
 .group h2{margin:0 0 8px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--gold)}
 .ctl label{font-size:13px;display:flex;justify-content:space-between;margin-top:6px;
   -webkit-user-select:none;user-select:none}   /* so a double-click resets rather than selects */
-.ctl label .val{font:12px ui-monospace,monospace;color:var(--muted)}
+.ctl label .val{font:12px ui-monospace,monospace;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.ctl .ieye{display:none;padding:0 2px;border:0;background:none;color:var(--muted);cursor:pointer;line-height:0}
+.ctl .ieye svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5}
+.ctl:hover .ieye{display:inline-flex}
+.ctl.ihid .ieye{display:inline-flex;color:var(--gold)}
+.ctl.ihid .ieye svg{opacity:.5}
+.ctl.ihid label>span:first-child,.ctl.ihid input[type=range]{opacity:.45}
 input[type=range]{width:100%;appearance:none;height:4px;border-radius:2px;background:#2a303a;outline:none}
 input[type=range]::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;
   background:var(--text);border:2px solid var(--gold);cursor:pointer}
@@ -36,7 +89,58 @@ button{font:13px system-ui;font-weight:500;padding:8px 12px;border-radius:4px;
 button.primary{background:var(--gold);border-color:var(--gold);color:#151006}
 button:disabled{opacity:.45;cursor:default}
 .log{background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:8px;
-  font:11px ui-monospace,monospace;color:var(--muted);height:110px;overflow-y:auto;white-space:pre-wrap;margin-top:8px}
+  font:11px ui-monospace,monospace;color:var(--muted);height:var(--logh);min-height:60px;resize:vertical;overflow:auto;white-space:pre-wrap;margin-top:8px}
+.log .lv-ok{color:#72d48f}.log .lv-warn{color:#f0a640}.log .lv-fail{color:#ff6161;font-weight:600}
+.log .lv-odd{color:#ff82d0}.log .lv-step{color:#9ec4ff}
+.runline .left{color:var(--muted)}
+.log.big{position:fixed;left:16px;right:calc(var(--rail) + 16px);top:16px;bottom:16px;height:auto;z-index:40;font-size:12px;resize:none;box-shadow:0 20px 60px rgba(0,0,0,.7)}
+.grouphead{display:flex;align-items:center;gap:8px;cursor:pointer;-webkit-user-select:none;user-select:none}
+.grouphead h2{flex:1;margin:0}
+.grouphead .tog{color:var(--muted);font-size:11px;transition:transform .15s}
+.group.closed .grouphead .tog{transform:rotate(-90deg)}
+.group.closed > :not(.grouphead){display:none}
+.group .grouphead{margin-bottom:8px}
+button.mini{padding:2px 7px;font-size:11px;border-radius:3px}
+.curvebox{margin:8px 0 2px;-webkit-user-select:none;user-select:none}
+.curvebox .clabel{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+.curvebox .cinfo{font:11px ui-monospace,monospace;color:var(--muted)}
+.curvebox svg{width:100%;max-width:240px;display:block;margin:0 auto;touch-action:none}
+.curvebox .cbg{fill:#0e1013;stroke:var(--line)}
+.curvebox .cgrid{stroke:#262b33;stroke-width:1;fill:none}
+.curvebox .cdiag{stroke:#3a414c;stroke-width:1;stroke-dasharray:3 3;fill:none}
+.curvebox .ccurve{stroke:var(--text);stroke-width:1.6;fill:none}
+.curvebox .ccurve.nd{stroke:var(--gold)}
+.curvebox .chit{cursor:copy}
+.curvebox .cknot{fill:#1a1e24;stroke:var(--muted);stroke-width:1.5;cursor:move}
+.curvebox .cknot.end{cursor:ns-resize}
+.curvebox .cknot.nd{stroke:var(--gold);fill:#3a2f10}
+.curvebox .cknot.on,.curvebox .cknot:hover{fill:var(--gold);stroke:var(--gold)}
+.curvebox .clab{fill:var(--muted);font-size:9px}
+.ctl.curvehide{display:none}
+.grouphead .eye{padding:1px 5px;line-height:1;color:var(--muted)}
+.grouphead .eye svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5}
+.group.hidden .grouphead .eye{color:var(--gold)}
+.group.hidden .grouphead .eye svg{opacity:.45}
+.group.hidden > :not(.grouphead){opacity:.45}
+#hiddennote{color:#d8a13a;font:12px ui-monospace,monospace;white-space:nowrap}
+/* ---- block 2: status dot, changed-option marks, group icons, non-default marks */
+.sdot{width:9px;height:9px;border-radius:50%;background:#555c66;flex:none;box-shadow:0 0 0 2px rgba(255,255,255,.04)}
+.sdot.ok{background:#4caf7d}
+.sdot.restack{background:#d8a13a}
+.sdot.run{background:var(--gold);animation:pulse 1.2s ease-in-out infinite}
+.sdot.err{background:#d9534f}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.sdot.run{animation:none}}
+label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed .optname::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#d8a13a;margin-right:6px;vertical-align:1px}
+#start{min-width:150px}
+#start .sub{display:block;font:11px ui-monospace,monospace;font-weight:400;opacity:.8;line-height:1.1;margin-top:1px}
+.grouphead .gico{width:14px;height:14px;flex:none;color:var(--muted);opacity:.9}
+.grouphead .gico svg{width:14px;height:14px;display:block;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.group.nd .grouphead .gico{color:var(--gold)}
+.grouphead .reset{display:none;margin-left:auto}
+.group.nd .grouphead:hover .reset{display:inline-block}
+.ctl.nd label .val::before{content:"\25CF";color:var(--gold);font-size:8px;margin-right:6px;vertical-align:2px}
+.viewbar .vbtn.primary{box-shadow:0 0 0 1px var(--gold) inset}
 .bar{height:5px;background:#2a303a;border-radius:3px;margin-top:8px;overflow:hidden}
 .bar>div{height:100%;background:var(--gold);width:0%;transition:width .4s linear}
 /* While a run is live the bar carries moving stripes. The bar can sit at one
@@ -53,6 +157,13 @@ button:disabled{opacity:.45;cursor:default}
 .runline .stale{color:#d8a13a}
 @media (prefers-reduced-motion:reduce){.bar.run>div{animation:none}}
 .export{display:flex;flex-direction:column;gap:6px}
+.versions{display:flex;gap:8px;overflow-x:auto;padding:2px 0 6px;scrollbar-width:thin}
+.vcard{flex:none;width:150px;display:flex;flex-direction:column;gap:3px;background:#0e1013;border:1px solid var(--line);border-radius:5px;padding:6px}
+.vcard img{width:100%;aspect-ratio:3/2;object-fit:cover;border-radius:3px;background:#000;display:block}
+.vcard .vname{font:11px ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vcard .vwhen{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vcard .vnote{background:#15181c;color:var(--text);border:1px solid var(--line);border-radius:3px;padding:3px 5px;font-size:11px;width:100%;box-sizing:border-box}
+.vcard button.mini{align-self:flex-start}
 .export label.radio{display:flex;gap:8px;align-items:center;font-size:13px}
 .export input[type=text]{background:#0e1013;color:var(--text);border:1px solid var(--line);
   border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace}
@@ -99,206 +210,244 @@ button:disabled{opacity:.45;cursor:default}
 </div>
 <div class="app">
   <div class="stage">
-    <div class="topbar">
+    <div class="top">
+      <div class="srcrow">
       <h1 title="High-Dynamic-Range Solar Eclipse Image Processing">EclipseForgeHDR</h1>
+        <div class="seg" id="srcmode" title="Source: a folder of bracketed raw frames to stack, or one finished HDR image to run the detail layers on.">
+          <button class="segbtn on" data-mode="raw">Raw bracket</button>
+          <button class="segbtn" data-mode="import">Import HDR</button>
+        </div>
+        <div class="srcraw" id="srcraw">
       <input type="text" id="folder" placeholder="/path/to/folder/with/RAWs" spellcheck="false">
       <button id="brwFolder" class="brw" title="Pick the folder of raw frames">Browse…</button>
       <button id="load">Load folder</button>
-      <input type="text" id="flatDir" spellcheck="false" style="width:190px"
-        placeholder="flats: auto"
-        title="Folder of flat-field frames. Left empty, a subfolder of the raw folder called flats/ is used if there is one, and no flat correction is applied if there is not. Type a path to use flats from somewhere else, or 'off' to ignore them. A master flat divides out lens vignetting, dust shadows and per-photosite sensitivity; it is smoothed only as much as its own measured noise requires, and the numbers are printed in the log.">
-      <button id="brwFlat" class="brw" title="Pick the folder of flat frames">Browse…</button>
-      <input type="text" id="importPath" spellcheck="false" style="width:210px"
-        placeholder="or import one HDR"
-        title="Skip stacking entirely and run the enhancement layers on one finished HDR image you already have - from Siril, PixInsight, Photoshop, or this app's own aligned tier TIFFs. 16-bit TIFF or FITS. The tone curve is read from the file's embedded colour profile, so an sRGB export is linearised correctly; a file with no profile must say 'linear' in its name. What you give up: the inner-corona layer is no longer an independent source, the prominence gate is weaker, and there is no alignment or photometry section in the report.">
+        </div>
+        <div class="srcimp" id="srcimp" style="display:none">
+      <input type="text" id="importPath" spellcheck="false"
+        placeholder="/path/to/one/finished_hdr.tif (16-bit TIFF or FITS)"
+        title="Runs the detail layers on one finished HDR image (16-bit TIFF or FITS) instead of stacking. A file without an embedded colour profile must have 'linear' in its name.">
       <button id="brwImport" class="brw" title="Pick one finished HDR image">Browse…</button>
-      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="THE FALLBACK. Align the frames, average each exposure group, measure the exposure ratios from the pixels themselves, and merge. Nothing else: no dark, no flat, no hot-pixel repair, no photometric ladder, no LDIC, no feather. Every stage that can fail on an awkward bracket is simply absent, so a set the normal path cannot handle still gives a clean stack. Since 0.23.5 it applies the same per-frame calibration as the normal path (bias, dark, flat, camera white balance, colour matrix), subtracts ONE black level measured on the shortest tier, and leaves the sky in. Its limit: nothing feathers across exposure groups, so on a bracket with few, widely spaced tiers the group boundaries can print as rings - which is why it is the fallback and not the merge. Judge it by eye.">
+        </div>
+      </div>
+      <div class="optpanel" id="optpanel">
+        <div class="optgrid">
+          <div class="opt optflat"><span class="optname">Flats folder</span>
+            <div class="inrow">
+      <input type="text" id="flatDir" spellcheck="false"
+        placeholder="flats: auto"
+        title="Folder of flat frames. Empty: a flats/ subfolder of the raw folder is used if present. 'off': no flat correction. The raw folder itself is refused.">
+      <button id="brwFlat" class="brw" title="Pick the folder of flat frames">Browse…</button>
+            </div></div>
+      <label class="optchk"
+        title="Fallback merge: align, average each exposure group, merge on measured ratios; no ladder, LDIC or feathering. Use it when the normal stack fails. Widely spaced brackets can show rings.">
         <input type="checkbox" id="simpleStack"> Simple stack
       </label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)">
-        Denoise
-        <select id="denoise" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
-          <option value="off">Off</option>
-          <option value="fine" selected>Fine</option>
+      <label class="opt">
+        <span class="optname">Denoise</span>
+        <select id="denoise" class="sel">
+          <option value="off" selected>Off</option>
+          <option value="fine">Fine</option>
           <option value="medium">Fine + medium</option>
           <option value="strong">Strong</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How the merge weight behaves at each tier&#39;s clipping boundary, which is a trade with no right answer. Blended edge blurs the weight across that boundary: the tiers join without a seam and a ring artifact just outside the limb is suppressed, but weight leaks from clipped pixels into unclipped ones and the corona reads low there - on some brackets a little, on others a factor (the leak is achromatic since 0.23.8; it used to print as a magenta rim because the channels clip at different depths). Exact edge keeps the weight exact at the boundary: radiometrically correct, rings visible. The log prints what the trade would cost on YOUR data, measured, so you can decide.">
-        Merge weight
-        <select id="feather" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
-          <option value="plain" selected>Blended edge</option>
-          <option value="taper">Exact edge</option>
+      <label class="opt"
+        title="Merge weight at each tier's clipping edge. Blended edge hides the ring outside the limb but reads the corona low there; Exact edge is radiometrically correct but can show rings.">
+        <span class="optname">Merge weight</span>
+        <select id="feather" class="sel">
+          <option value="plain">Blended edge</option>
+          <option value="taper" selected>Exact edge</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Which white balance is applied to the raw channels before the camera matrix. Camera (as shot) uses the multipliers your own setting produced. Daylight uses LibRaw's daylight value, which for a body it has no table entry for is DERIVED from the colour matrix rather than measured - on the Panasonic S1R II that is 39% less blue than the camera's own Fine Weather preset, which renders the corona too orange. None leaves the sensor channels alone. Changing this re-stacks.">
-        White balance
-        <select id="wb" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="White balance applied to the raw channels. Camera (as shot): the camera's multipliers. Daylight: LibRaw's value, inaccurate for some bodies. None: channels unchanged. Re-stacks.">
+        <span class="optname">White balance</span>
+        <select id="wb" class="sel">
           <option value="camera" selected>Camera (as shot)</option>
           <option value="daylight">Daylight</option>
           <option value="none">None (1:1:1)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How each exposure is put on a common brightness scale. Per-channel fits a slope and an offset between neighbouring exposures separately in R, G and B, after PixInsight's LinearFit as used in Jonathan Hill's HDR eclipse workflow - it can correct a colour difference between tiers that one number cannot. Single scale factor is one number per tier fitted on luminance, which is what the app did before 0.22.86. Changing this re-stacks.">
-        Photometry
-        <select id="photometry" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="How exposures are matched in brightness. Per-channel fits slope and offset in R, G and B and can correct colour differences between tiers; Single scale uses one factor per tier. Re-stacks.">
+        <span class="optname">Photometry</span>
+        <select id="photometry" class="sel">
           <option value="linfit" selected>Per-channel (linear fit)</option>
           <option value="scalar">Single scale factor</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How the per-tier brightness factors are combined once each neighbouring pair has been measured. Chain walks out from the middle tier adding one measured link at a time, so a link that is off by 3% moves every tier beyond it by 3% and the errors compound down the ladder. Network also measures each tier against the one two steps away and solves all the links together by least squares, so a single bad link is outvoted instead of propagated. Where no two-step link is measurable the two are the same computation and the app says so. Chain is the default because it is what every released build has done; Network has to earn it on real brackets. Changing this re-stacks.">
-        Photometric solve
-        <select id="photoSolve" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
-          <option value="chain" selected>Chain (from the middle tier)</option>
-          <option value="network">Network (least squares)</option>
+      <label class="opt"
+        title="How the per-tier brightness factors are solved. Chain links neighbours one by one; Network adds two-step links and solves all together, so one bad link does less harm. Re-stacks.">
+        <span class="optname">Photometric solve</span>
+        <select id="photoSolve" class="sel">
+          <option value="chain">Chain (from the middle tier)</option>
+          <option value="network" selected>Network (least squares)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="What counts as one exposure tier. By shutter speed groups every frame that claims the same shutter speed and averages them, which is a free sqrt(N) gain in signal-to-noise and is right whenever the metadata is right. Per frame groups nothing: each frame is calibrated on its own and enters the merge on its own, as in Druckmuller, Rusin and Minarovjech (2006). Choose that when the exposure times cannot be trusted - typed in by hand, recovered from video, or rewritten by a converter - because grouping is the one step that believes the header instead of measuring. It costs run time roughly in proportion to the frame count, and the azimuthal fit gets less data per fit. Changing this re-stacks.">
-        Tiers
-        <select id="tierMode" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="What counts as one tier. By shutter speed averages frames with the same exposure time; Per frame keeps every frame separate, for metadata that cannot be trusted. Re-stacks.">
+        <span class="optname">Tiers</span>
+        <select id="tierMode" class="sel">
           <option value="exposure" selected>By shutter speed</option>
           <option value="frame">Per frame (ignore grouping)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="What the subs INSIDE one exposure tier are aligned on, which is a different question from the tier-to-tier links below. Corona Align ignores the Moon entirely: the disc is filled with the corona&#39;s smooth continuation and the per-radius mean about it removed, so the lunar edge and the radial gradient - the two features Druckmullerova names as hijacking a corona registration - are gone before the correlation. That matters when a bracket is shot as whole brackets one after another, because then the frames of one tier span the whole sequence and the Moon drifts several pixels against the corona between them; locking on the Moon there stacks a sharp Moon and a smeared corona. Measured on synthetic pairs: the Moon lock is up to 12 px wrong about the corona, the corona lock within 1.4 px. Moon Align is the pre-0.23.8 estimator, for an A/B or for a set where the corona is too thin to trust. Mixed splits the two: the corona where the pair&#39;s common corona covers at least a quarter of the window, the Moon elsewhere. The criterion is MEASURED coverage rather than the shutter speed itself, which on any real bracket comes out as the fast subs on the Moon and the long ones on the corona, and correctly keeps a fast sub of a bright corona on the corona. Offered for experiment, NOT measured, and it gives up the corona on exactly the subs that carry the inner corona. Whatever is chosen, a window with almost no corona falls back to the lunar edge on its own and the log says so per tier. Changing this re-stacks.">
-        Intra-tier lock
-        <select id="intraLock" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="Alignment of frames within a tier. Corona Align ignores the Moon; use it when a tier's frames are spread over totality (the Moon drifts). Moon Align locks on the lunar limb; Mixed chooses per frame by corona coverage. Re-stacks.">
+        <span class="optname">Intra-tier lock</span>
+        <select id="intraLock" class="sel">
           <option value="corona" selected>Corona Align</option>
           <option value="moon">Moon Align</option>
           <option value="mixed">Mixed (fast subs Moon, long subs Corona)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Near the horizon the atmosphere acts as a weak prism: blue is lifted more than red, so the three colour images of every exposure land a few pixels apart along one direction. White balance cannot fix that - it changes how bright a colour is, not where it is. Align to green measures the offset of the red and blue channels on the lunar limb in the shortest exposures and moves them onto green in every exposure before the merge. On a 600 mm set shot at a low Sun it measured 4.5 px between blue and red. If the offset is below 0.2 px, or the short exposures disagree by more than 1 px, nothing is moved and the log says so. Changing this re-stacks.">
-        Colour planes
-        <select id="colourPlanes" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="Moves the red and blue channels onto green by the offset measured on the lunar limb (atmospheric dispersion at low Sun). Offsets below 0.2 px are left alone. Re-stacks.">
+        <span class="optname">Colour planes</span>
+        <select id="colourPlanes" class="sel">
           <option value="auto" selected>Align to green (measured)</option>
           <option value="off">As recorded</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How the shift between two exposures is found. Cross-correlation is what every build up to 0.23.1 used: it keeps each frequency's amplitude, so bright structure dominates. Semi-phase correlation divides by the amplitude spectra plus a small constant (Druckmullerova, master's thesis Def. 3.25), which flattens the spectrum so faint structure counts too, while the constant stops it lifting frequencies that carry only noise. Full whitening is the same with that constant removed - it gives a nearly signal-free short tier the same weight as a well exposed one, which is why it is not the default. On tiers built from a real bracket, semi cut the error on a known shift by 22% and cut the pull toward zero shift - the sensor's own dust and fixed pattern dragging the answer - by 80%. Changing this re-stacks.">
-        Correlation
-        <select id="alignCorr" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="How the shift between exposures is measured. Semi-phase gives faint structure more weight than cross-correlation without lifting noise; Full whitening can over-weight noisy short tiers. Re-stacks.">
+        <span class="optname">Correlation</span>
+        <select id="alignCorr" class="sel">
           <option value="semi" selected>Semi-phase (amplitude floor)</option>
           <option value="cross">Cross-correlation</option>
           <option value="phase">Full phase (whitened)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="What the frames are filtered with before they are correlated. Isotropic high-pass keeps structure of a given size in every direction. Tangential keeps only structure that varies AROUND the Sun and removes everything that runs radially - which is what the lunar edge and the edge of the saturated region both are, and the second of those moves with exposure time, so it is a different feature in every tier. That is Druckmullerova's T-sigma filter (thesis eq. 4.14), and it is the reason her pipeline can whiten without locking onto the Moon. Worth 12% on the shift error with plain cross-correlation and about 2% once semi-phase is on, so it is here for datasets where those edges dominate rather than as a default. Slower. Changing this re-stacks.">
-        Align filter
-        <select id="alignFilter" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="Filter applied before correlation. Isotropic high-pass is the default; Tangential ignores radial edges (lunar limb, saturation edge) and is slower. Re-stacks.">
+        <span class="optname">Align filter</span>
+        <select id="alignFilter" class="sel">
           <option value="isotropic" selected>Isotropic high-pass</option>
           <option value="tangential">Tangential (radial removed)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How the frames inside one tier are combined. Mean is what every build up to 0.23.1 did: every frame that passes the sharpness check is averaged, with no per-pixel rejection at all, so a cosmic ray or an uncaught hot pixel in one frame of six survives at a sixth of its strength and can then be amplified by the detail filters. Clipped mean rejects pixels more than three standard deviations from the median of the frames and averages the rest. Note it is not a median: a median would leave the quantisation steps in place, and those show as contour rings on short tiers. Needs every frame of a tier in memory at once, so it uses more of it. Changing this re-stacks.">
-        Tier combine
-        <select id="stackCombine" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
-          <option value="mean" selected>Mean (no rejection)</option>
-          <option value="clip">Clipped mean (kappa-sigma)</option>
+      <label class="opt"
+        title="How frames within a tier are combined. Mean averages all frames; Clipped mean rejects pixels beyond 3 sigma (hot pixels, cosmic rays) and needs more memory. Re-stacks.">
+        <span class="optname">Tier combine</span>
+        <select id="stackCombine" class="sel">
+          <option value="mean">Mean (no rejection)</option>
+          <option value="clip" selected>Clipped mean (kappa-sigma)</option>
         </select></label>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="How hard the FNRGF detail layer follows structure around the Sun. EFHDR fits six harmonics per ring with a hard cutoff above that. Published is Druckmullerova's own recommended setting - thirty harmonics, each one attenuated a little more than the last - which she describes as the setting that always works without producing artifacts. Higher order follows finer detail around the limb and treats more of it as background; lower order leaves more of it in the picture. Neither is more correct, and this only changes the FNRGF layer, so it re-runs the detail stage but does not re-stack.">
-        FNRGF
-        <select id="fnrgfPreset" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
-          <option value="ours" selected>EFHDR (order 6, hard cutoff)</option>
-          <option value="published">Published (order 30, attenuated)</option>
+      <label class="opt"
+        title="Harmonics of the FNRGF layer. EFHDR: 6 per ring, hard cutoff. Published: 30, progressively attenuated. Rebuilds the detail layers, no re-stack.">
+        <span class="optname">FNRGF</span>
+        <select id="fnrgfPreset" class="sel">
+          <option value="ours">EFHDR (order 6, hard cutoff)</option>
+          <option value="published" selected>Published (order 30, attenuated)</option>
         </select></label>
-      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Off by default: earthshine needs long tiers with real headroom over the scattered glare, which most totality brackets do not have.">
-        <input type="checkbox" id="earthshine"> Earthshine</label>
-      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Map hot/dead photosites on the shortest tier and repair them in every frame.">
-        <input type="checkbox" id="despeckle" checked> Fix hot pixels</label>
-      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Build the partial-convolution layer. It is the most expensive step in the run - roughly half the wall clock on a 24 Mpx merge, because the polar blur is taken in radial bands - and nothing else depends on it. Off gives the same composite as leaving the Partial convolution sliders at zero, just sooner: use it while you are finding the rest of the settings, then turn it on for the final render. Turning it back on does NOT re-stack; it costs the mask build alone. While it is off its sliders and its view button are hidden, and any masks from an earlier run are deleted, because they were built on a different merge.">
-        <input type="checkbox" id="partialConv" checked> Partial convolution layer</label>
-      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Also write each aligned exposure tier as a 16-bit TIFF into eclipseforge_output/aligned_tiers/, for blending or HDR combining in PixInsight, Photoshop or Affinity. Aligned and demosaiced but not merged or tone mapped; each tier sits at its own real signal level, so the exposure relationship between tiers is preserved. An ICC profile is embedded so no host has to guess.">
-        <input type="checkbox" id="exportTiers"> Export aligned tier TIFFs</label>
-      <label style="display:flex;gap:5px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Write the tier TIFFs scene-linear (gamma 1.0) with a linear ICC profile instead of sRGB-encoded. Choose this for PixInsight or for your own HDR combine; leave it off for Photoshop and Affinity, where sRGB-encoded files open looking correct.">
-        <input type="checkbox" id="tierLinear"> &nbsp;&#8627; scene-linear</label>
-
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)"
-        title="Averaging all frames of a tier gains sqrt(N) in signal-to-noise; using only the sharpest keeps maximum detail. Check the sharpness spread printed per tier: near 1.0 means the frames are equally sharp and averaging is nearly free.">
-        Frames
-        <select id="frames" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-          border-radius:4px;padding:5px 6px;font:12px system-ui">
+      <label class="opt"
+        title="All frames averages each tier for signal-to-noise; Sharpest uses the best frame only. If the per-tier sharpness spread in the log is near 1.0, averaging costs no detail.">
+        <span class="optname">Frames</span>
+        <select id="frames" class="sel">
           <option value="all" selected>All (best SNR)</option>
           <option value="best50">Best half</option>
           <option value="best">Best only (max detail)</option>
         </select></label>
-      <button class="primary" id="start" disabled>Start</button>
-      <button id="clearcache" disabled
-        title="Delete everything the app has computed for this folder (its .eclipseforgehdr subfolder) so the next Start redoes the whole pipeline from the raw files. Your raws, flats and exports are not touched. Needed after changing something the cache key does not cover, or when a run ended badly.">Clear cache</button>
+      <label class="optchk"
+        title="Maps hot and dead photosites on the shortest tier and repairs them in every frame.">
+        <input type="checkbox" id="despeckle" checked> Fix hot pixels</label>
+      <label class="optchk"
+        title="Builds the partial-convolution layer, the slowest step (about half the run time). Turn it off while setting up; turning it back on rebuilds only the masks.">
+        <input type="checkbox" id="partialConv" checked> Partial convolution layer</label>
+      <label class="optchk"
+        title="Also writes each aligned tier as a 16-bit TIFF to eclipseforge_output/aligned_tiers/ for external HDR combining. Not merged or tone mapped.">
+        <input type="checkbox" id="exportTiers"> Export aligned tier TIFFs</label>
+      <label class="optchk"
+        title="Writes the tier TIFFs scene-linear with a linear ICC profile. On for PixInsight, off for Photoshop and Affinity.">
+        <input type="checkbox" id="tierLinear"> &nbsp;&#8627; scene-linear</label>
+
+        </div>
+      </div>
+      <div class="statusrow">
+        <span class="sdot" id="sdot" title="Grey: no folder. Green: Start loads the cache. Amber: an option changed, Start re-stacks. Gold: running. Red: failed."></span>
+        <button id="optsToggle" class="ghost" title="Show or hide the processing options used by the next Start."><span class="chev">&#9662;</span> Processing options</button>
+        <span id="hiddennote"></span>
       <span class="status" id="status">choose a folder containing the bracketed raw files · scroll = zoom · drag = pan · double-click = reset</span>
+        <div class="runbtns">
+      <button class="primary" id="start" disabled>Start</button>
+      <button id="cancelrun" style="display:none"
+        title="Stops the running job at its next step. A cancelled stack leaves no cache; the next Start runs it again.">Cancel</button>
+      <button id="clearcache" disabled
+        title="Deletes this folder's cache so the next Start reprocesses from the raw files. Raws, flats and exports are not touched.">Clear cache</button>
+        </div>
+      </div>
+    </div>
+    <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas></div>
+    <div class="viewbar">
+    <div id="zoompct" class="zoompct"></div>
       <span id="views" style="display:none;gap:6px">
         <button data-view="composite" class="vbtn primary">Composite</button>
         <button data-view="mgn" class="vbtn">MGN</button>
         <button data-view="fnrgf" class="vbtn">FNRGF</button>
-        <button data-view="nafe" class="vbtn">NAFE</button>
         <button data-view="inner" class="vbtn">Inner</button>
         <button data-view="tangential" class="vbtn"
-                title="The tangential (rotational) unsharp layer on its own — blurred only around the disc centre, so it shows structure that runs radially and suppresses everything that runs with the limb.">Tangential</button>
+                title="Tangential unsharp layer alone: enhances radial structure, suppresses structure parallel to the limb.">Tangential</button>
         <button data-view="prom" class="vbtn">Prom gate</button>
+        <button data-view="moon" class="vbtn" title="The finished Moon alone, black outside. Exporting in this view writes it as a colour picture.">Moon</button>
         <button data-view="partialconv" class="vbtn" id="pconvBtn" style="display:none"
-                title="The partial-convolution result on its own: monochrome, driven by the Partial convolution sliders, and exportable as a 16-bit TIFF.">Partial conv</button>
+                title="Partial-convolution result alone, monochrome. Exportable as a 16-bit TIFF.">Partial conv</button>
         <button data-view="flat" class="vbtn" id="flatBtn" style="display:none"
-          title="The master flat itself, cut to the same frame as the other layers and stretched to its own 0.5-99.5 percentile so the falloff and any dust are visible. This is a quality check on your flats, not a layer that goes into the composite.">Flat</button>
+          title="The master flat, stretched to show falloff and dust. A check on the flats; not part of the composite.">Flat</button>
       </span>
+    <div id="credit" class="credit"></div>
     </div>
-    <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas></div>
-    <div id="credit" style="position:fixed;right:346px;bottom:8px;color:#8b93a0;
-      font:11px ui-monospace,monospace;opacity:.8;pointer-events:none"></div>
-    <div id="zoompct" style="position:fixed;left:18px;bottom:8px;color:#8b93a0;
-      font:11px ui-monospace,monospace;opacity:.85;cursor:default"></div>
   </div>
+  <div class="railgrip" id="railgrip" title="Drag to resize the panel"></div>
   <aside class="rail"><div class="railinner">
-    <div class="group"><h2>Pipeline</h2>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Pipeline</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><button class="mini" id="logbig" title="Show the log large over the picture (Esc closes it).">&#x2922; log</button><span class="tog">&#9662;</span></div>
       <div class="bar" id="pbarwrap"><div id="pbar"></div></div>
       <div class="runline" id="runline" style="display:none">
         <span class="spin" id="spin">&#9696;</span>
         <span class="clock" id="clock">0:00</span>
         <span id="stepnote"></span>
       </div>
-      <div class="log" id="log">idle</div>
+      <div class="log" id="log" title="Green: done. Orange: warning, the run goes on. Red: failure. Pink: unusual, check it. Blue: stage start.">idle</div>
     </div>
-    <div class="group"><h2>Structure</h2><div id="g-structure"></div></div>
-    <div class="group" id="grp-hill"><h2>Partial convolution</h2>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Structure</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-structure"></div></div>
+    <div class="group" id="grp-hill"><div class="grouphead"><span class="gico"></span><h2>Partial convolution</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">Unsharp masks of the log-stretched image at
-        2 to 32 px, ADDED back with their own weights. The blur behind each mask is partial
-        &mdash; it is taken in polar coordinates, so it averages along a streamer and not across
-        it, and the Moon and the prominences are left out of it entirely rather than smeared
-        into the corona. Additive and linear, where MGN and NAFE are multiplicative and
-        locally normalised: faint structure stays faint instead of being lifted to the same
-        texture everywhere. Weights 1 / 0.6 / 0.2 / 0.1 are the published starting point.
-        After Jonathan Hill, &ldquo;Advanced Solar Eclipse Photography&rdquo;.</div>
+        2&ndash;32 px, added back with their own weights. Each blur runs in polar coordinates, along
+        a streamer rather than across it, and leaves the Moon and the prominences out. Additive,
+        where MGN and NAFE are locally normalised: faint structure stays faint.
+        After Jonathan Hill.</div>
       <div class="hint" id="hillNote" style="display:none;color:var(--gold)">
         The masks are not in this work directory &mdash; press Clear cache and Start to
         build them (adds a few minutes to the stack).</div>
       <div class="hint" id="hillScales"></div>
       <div id="g-hill"></div></div>
-    <div class="group"><h2>Inner corona</h2><div id="g-inner"></div></div>
-    <div class="group"><h2>Prominences</h2><div id="g-prom"></div></div>
-    <div class="group"><h2>Color</h2>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Inner corona</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-inner"></div></div>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Prominences</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-prom"></div></div>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Color</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <button id="pickwb" style="margin:2px 0 8px 0"
-        title="Set the white point from a spot you choose. Press this, then drag a box on the preview (or click for a 5x5 patch). The median colour inside the box is made neutral by setting Warmth and Tint - the same two sliders, so the export matches the preview exactly. Neutralise corona does the same thing automatically from a fixed ring at 1.05-1.6 R; this is the targeted version. Esc cancels.">Pick white point…</button>
+        title="Press, then drag a box on the preview (or click a point): its median colour is made neutral by setting Warmth and Tint. Esc cancels.">Pick white point…</button>
+      <label class="opt" style="margin:0 0 8px 0"
+        title="Sets all look controls to a starting look. EFHDR as loaded: the picture as it first appeared after stacking, in the camera's colours.">
+        <span class="optname">Look preset</span>
+        <select id="lookpreset" class="sel">
+          <option value="" selected>(choose a starting look)</option>
+          <option value="asloaded">EFHDR as loaded</option>
+          <option value="lefaudeux">Natural balanced blue</option>
+          <option value="helion">Bright desaturated streamers</option>
+          <option value="druckmuller">Calm blue</option>
+          <option value="sunset">Sunset</option>
+          <option value="darkmoody">Dark moody</option>
+          <option value="purple">Deep purple</option>
+        </select></label>
+      <label class="opt" title="Monochrome removes all colour; the composite then exports as a single channel. Mono + tints is a stylized rendering that discards the corona's measured color and replaces it with a chosen tint.">
+        <span class="optname">Colour</span>
+        <select id="colourmode" class="sel">
+          <option value="0" selected>From the data</option>
+          <option value="1">Monochrome</option>
+          <option value="2">Mono + tints</option>
+        </select></label>
       <div id="g-color"></div></div>
-    <div class="group"><h2>Tone</h2><div id="g-tone"></div></div>
-    <div class="group"><h2>Diamond ring</h2>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Tone</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-tone"></div></div>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Moon</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+      <div class="hint" style="margin-bottom:6px">The lunar disc on its own: its level, the earthshine (maria) contrast, its colour and its own tone curve. The Tone group's curve no longer reaches the disc.</div>
+      <div id="g-moon"></div></div>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Final sharpening</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+      <div class="hint" style="margin-bottom:6px">Last step, on the finished picture. High passes
+        at 1.5&ndash;24 px (scaled with the solar radius), combined across the scales as median,
+        minimum and maximum, each blended in soft light at its own strength. The noise gate holds
+        each band back where it is no stronger than the picture&rsquo;s own grain; 0 = off.
+        The preview follows a moment after the slider.</div>
+      <div id="g-final"></div></div>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Diamond ring</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <input type="text" id="ringpath" placeholder="/path/to/contact_frame.RW2" spellcheck="false"
         style="width:100%;background:#0e1013;color:var(--text);border:1px solid var(--line);
         border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace">
@@ -306,15 +455,16 @@ button:disabled{opacity:.45;cursor:default}
       <button id="ringload" style="margin-top:6px" disabled>Load contact frame</button>
       <div id="g-ring"></div>
     </div>
-    <div class="group"><h2>Export</h2>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Export</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="export">
         <label class="radio"><input type="radio" name="fmt" value="tif16" checked> TIFF · 16-bit (recommended)</label>
         <label class="radio"><input type="radio" name="fmt" value="tif8"> TIFF · 8-bit</label>
         <label class="radio"><input type="radio" name="fmt" value="png"> PNG · 16-bit</label>
         <label class="radio"><input type="radio" name="fmt" value="jpg"> JPG (lossy)</label>
         <label class="radio"><input type="checkbox" id="exphalf"> Export at 50 % size (2×2 binned, cleaner)</label>
-        <label class="radio" title="EXPERIMENTAL. Writes the prominences as a separate 16-bit RGBA TIFF (name_prominences_16bit.tif) on exactly the same grid, size and orientation as the composite export, with the mask already in its alpha channel. Place it on top of the composite in Photoshop and blend it yourself - Normal with Blend If, Screen, opacity. Composite view only. Built from the merge (where the prominences are) and the fast tiers' deconvolved stack (their sharp edges); a cache stacked by an earlier version still gets a layer, from the merge alone. Tested on one bracket so far."><input type="checkbox" id="expprom"> Also export prominence layer (RGBA TIFF, experimental)</label>
-        <label class="radio" title="Turn the finished picture. Applied last, to the view and to the export, so it costs no re-run and changes nothing in the report — a corona is the same corona whichever way up it is. FITS has no orientation keyword at all (ROWORDER describes row order, not which way the camera was held), so a portrait-shot FITS bracket arrives on its side and nothing in the data can tell you so.">
+        <label class="radio" title="Also writes the prominences as a 16-bit RGBA TIFF (name_prominences_16bit.tif) and the corona without them (name_corona_16bit.tif), for layering in Photoshop. Composite view only."><input type="checkbox" id="expprom"> Also export prominence layer (RGBA TIFF)</label>
+        <label class="radio" title="Also writes the Moon disc as a 16-bit RGBA TIFF (name_moon_16bit.tif) on the same grid, its soft edge as transparency. Composite view only."><input type="checkbox" id="expmoon"> Also export Moon layer (RGBA TIFF)</label>
+        <label class="radio" title="Rotates or flips the finished picture in the view and the export. No re-run. FITS has no orientation keyword, so portrait FITS sets need this.">
           Orientation
           <select id="orient" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
             border-radius:5px;padding:3px 6px;font-size:13px;margin-left:6px">
@@ -332,21 +482,26 @@ button:disabled{opacity:.45;cursor:default}
       </div>
     </div>
 
-    <div class="group"><h2>Settings</h2>
+    <div class="group" id="grp-versions"><div class="grouphead"><span class="gico"></span><h2>Versions</h2><button class="mini" id="versrefresh" title="Re-read the output folder">&#8635;</button><span class="tog">&#9662;</span></div>
+      <span class="hint" style="margin-bottom:6px">The exports in <code>eclipseforge_output/</code>, newest first. A note
+        stays with the file; Load puts that export&rsquo;s settings back on the sliders.</span>
+      <div id="versions" class="versions"><span class="hint">no folder loaded</span></div>
+    </div>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Settings</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="export">
         <span class="hint" style="margin-bottom:6px">Carry a look to another bracket, or send one to
         somebody else. Settings that describe THIS image rather than the look &mdash; the disc radius and
         margin, the black point, the diamond ring &mdash; are written to the file but only applied when it
         is loaded back into the folder it came from.</span>
         <input type="text" id="setname" value="my_settings" spellcheck="false"
-          title="Saved as this name plus .efsettings.json, in eclipseforge_output/ inside the raw folder.">
+          title="Saved as this name plus .efsettings.json in eclipseforge_output/.">
         <button id="setsave" disabled>Save settings</button>
         <input type="text" id="settingsPath" spellcheck="false" style="display:none">
         <button id="setload">Load settings&hellip;</button>
         <span class="hint" id="sethint"></span>
       </div>
     </div>
-    <div class="group"><h2>Processing recipe</h2>
+    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Processing recipe</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="export">
         <span class="hint" style="margin-bottom:6px">The settings that decide how the data is
         STACKED &mdash; correlation, align filter, tier combine, FNRGF, photometric solve, tiers,
@@ -355,7 +510,7 @@ button:disabled{opacity:.45;cursor:default}
         anything at the next Start. Saved from what the run actually used, not from where the
         controls happen to be sitting.</span>
         <input type="text" id="procname" value="my_recipe" spellcheck="false"
-          title="Saved as this name plus .efprocess.json, in eclipseforge_output/ inside the raw folder.">
+          title="Saved as this name plus .efprocess.json in eclipseforge_output/.">
         <button id="procsave">Save recipe</button>
         <input type="text" id="processingPath" spellcheck="false" style="display:none">
         <button id="procload">Load recipe&hellip;</button>
@@ -371,14 +526,13 @@ const DEFS = [
  ["mgnContrast","MGN contrast (0 = off)",0,2,0.01,"structure"],
  ["detailScale","Detail balance (fine \u2192)",0,1,0.01,"structure"],
  ["fnCompress","FNRGF strength (0 = off)",0,2.5,0.01,"structure"],
- ["nafeMix","NAFE mix (0 = off)",0,1,0.01,"structure"],
  ["clarity","Clarity",0,1,0.01,"structure"],
+ ["structure","Structure",0,1,0.01,"structure"],
  ["smoothing","Grain smoothing",0,1,0.01,"structure"],
  ["pelGain","Tangential (radial features only)",0,1.2,0.01,"structure"],
  ["detailGain","Detail gain",0.3,2,0.01,"structure"],
  ["baseLift","Base lift",0,0.5,0.005,"structure"],
  ["envGamma","Envelope gamma",0.6,1.8,0.01,"structure"],
- ["logK","Log stretch",0,7,0.1,"structure"],
  ["hillMix","Blend into image (0 = off)",0,1,0.01,"hill"],
  ["hillLogK","Base stretch",1,7,0.05,"hill"],
  ["hillGain","Amplification",0,0.2,0.001,"hill"],
@@ -389,23 +543,41 @@ const DEFS = [
  ["hill2","  8 px",0,2,0.01,"hill"],
  ["hill3"," 16 px",0,2,0.01,"hill"],
  ["hill4"," 32 px",0,2,0.01,"hill"],
+ ["hillZone","Zone split (fine inside, coarse outside)",0,1,0.01,"hill"],
+ ["hillZoneR","Zone radius (R)",1.2,3.0,0.05,"hill"],
  ["innerMix","Short-exposure detail",0,1,0.01,"inner"],
  ["innerDenoise","Detail denoise",0,1,0.01,"inner"],
  ["innerDim","Glare dim",0,0.7,0.01,"inner"],
  ["promGain","Prominence contrast",0,2,0.01,"prom"],
  ["promDetail","Prominence detail",0,1,0.01,"prom"],
  ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
+ ["promLayer","Prominences (layer strength, 0 = off)",0,2,0.01,"prom"],
+ ["promStretch","Prominence curve (lower = faint parts brighter)",0.25,1,0.01,"prom"],
+ ["promRim","Chromosphere rim",0,1,0.01,"prom"],
+ ["promSat","Prominence saturation",0,2,0.01,"prom"],
+ ["promPeak","Prominence peak (1 = off)",0.6,1,0.005,"prom"],
+ ["promFade","Calm the corona detail under prominences",0,1,0.01,"prom"],
  ["temp","Temperature (blue ← → yellow)",0.30,1.84,0.001,"color"],
  ["tint","Tint (green ← → magenta)",0.544,1.84,0.001,"color"],
  ["bgNeutral","Neutralise sky cast",0,1.2,0.01,"color"],
  ["satur","Saturation",0,2,0.001,"color"],
  ["hlCompress","Highlight compression",0,1,0.01,"color"],
  ["hlDesat","Highlight desaturation",0,0.8,0.01,"color"],
+ ["skyLevel","Sky lift (0 = off)",0,0.4,0.005,"color"],
+ ["skyColour","Sky lift colour (-1 warm, 0 grey, 1 blue, 2 deep blue)",-1.5,2.5,0.01,"color"],
  ["outGamma","Output gamma",0.8,1.8,0.01,"tone"],
  ["bgBlack","Black point",0,0.12,0.001,"tone"],
- ["discLevel","Moon disc level",0,0.2,0.002,"tone"],
- ["discTrim","Disc mask trim (px)",-40,40,0.5,"tone"],
- ["earthShine","Earthshine",0,1.5,0.01,"tone"],
+ ["coronaLevel","Inner corona level, 1.05-1.15 R (0 = off)",0,0.9,0.005,"tone"],
+ ["containWhites","Contain whites (ceiling, 1 = off)",0.80,1.0,0.005,"tone"],
+ ["discLevel","Moon disc level",0,0.6,0.002,"moon"],
+ ["earthShine","Earthshine (maria contrast)",0,1.5,0.01,"moon"],
+ ["moonColour","Moon colour strength (0 grey, 1 = the picked colour)",0,2.5,0.01,"moon"],
+ ["discTrim","Disc mask trim (px)",-40,40,0.5,"moon"],
+ ["discSoft","Disc edge softness (px)",2,60,1,"moon"],
+ ["finalMid","Midtones (median of the scales)",0,1,0.01,"final"],
+ ["finalDark","Shadows (minimum)",0,1,0.01,"final"],
+ ["finalLight","Highlights (maximum)",0,1,0.01,"final"],
+ ["finalNoise","Noise gate (0 = off)",0,8,0.1,"final"],
  ["ringBlend","Ring blend (screen)",0,1,0.01,"ring"],
  ["ringScale","Ring disc size",0.80,1.25,0.001,"ring"],
  ["ringDX","Ring offset X (px)",-200,200,0.5,"ring"],
@@ -471,11 +643,11 @@ function buildSliders(defaults){
     const off = need && GEO && !GEO[need[0]];
     if (off) P[k] = 0;                     // never render with a weight we cannot honour
     const div = document.createElement("div"); div.className = "ctl";
-    div.title = "Double-click to reset to the default";
+    div.title = "Double-click to reset";
     const D = DISPLAY[k];
     const smin = D ? D.min : min, smax = D ? D.max : max, sstep = D ? D.step : step;
     const sval = off ? 0 : dispTo(k, defaults[k]);
-    div.innerHTML = `<label${off?' style="opacity:.45"':''}>${label}${off?' \u2014 '+need[1]:''}<span class="val" id="v_${k}">${off?"n/a":dispText(k, sval)}</span></label>
+    div.innerHTML = `<label${off?' style="opacity:.45"':''}><span>${label}${off?' \u2014 '+need[1]:''}</span><span class="val"><button class="ieye" type="button" title="Render this control at its off value for a before/after look (the slider keeps its value)."><svg viewBox="0 0 16 16"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg></button><span id="v_${k}">${off?"n/a":dispText(k, sval)}</span></span></label>
       <input type="range" id="s_${k}" min="${smin}" max="${smax}" step="${sstep}" value="${sval}"${off?' disabled':''}>`;
     // A slider naming a group that does not exist used to throw here, and the
     // throw happened during init -- so ONE bad group id in the table above left
@@ -485,10 +657,20 @@ function buildSliders(defaults){
     const _grp = $("g-"+grp);
     if (!_grp){ console.warn("no slider group g-"+grp+" for "+k+" -- skipped"); continue; }
     _grp.appendChild(div);
+    // CLARITY HIDDEN (2026-10-08): it only sharpens the MGN/FNRGF layers, which
+    // the looks mix in at 0.1-0.2, so moving it showed almost nothing. It stays
+    // a parameter (the looks and Natural keep their values, pixel for pixel);
+    // Structure, on the finished picture, is the control now.
+    if (k === "clarity") div.style.display = "none";
+    if (k === "structure") div.title = "Local contrast of the finished picture at the width of the streamers (0.01\u20130.08 R); the preview follows a moment after the slider. Double-click to reset.";
     const el = div.querySelector("input");
+    { const ie = div.querySelector(".ieye");
+      if (off) ie.style.display = "none";
+      ie.addEventListener("click", e => { e.stopPropagation(); e.preventDefault(); toggleItem(k); });
+      ie.addEventListener("dblclick", e => e.stopPropagation()); }
     el.addEventListener("input", () => {
       P[k] = dispFrom(k, parseFloat(el.value)); $("v_"+k).textContent = dispText(k, el.value);
-      scheduleRender();
+      noteInput(); scheduleRender();
     });
     // DOUBLE-CLICK PUTS A CONTROL BACK TO ITS DEFAULT, the way a plugin knob
     // does. On the row as a whole, not just the track: the label and the
@@ -505,6 +687,7 @@ function buildSliders(defaults){
       scheduleRender();
     });
   }
+  setupCurve();
 }
 
 async function loadFolder(){
@@ -527,10 +710,15 @@ async function loadFolder(){
                 : "") +
     (j.dark_dir ? ` · ${j.dark_count} darks in ${j.dark_dir.split("/").pop()}/`
                 : "") +
+    // the short-exposure subfolder feeds the prominence layer only
+    (j.short_dir ? ` · ${j.short_count} short exposures in ${j.short_dir.split("/").pop()}/ (prominences only)`
+                 : "") +
     (j.cached ? " · cached pipeline products found (Start reuses them)" : "");
   $("start").disabled = false;
   $("clearcache").disabled = false;
   ready = false; $("export").disabled = true;
+  refreshCache();
+  loadVersions();
 }
 
 /* ---- clear cache -----------------------------------------------------
@@ -579,7 +767,7 @@ $("importPath").addEventListener("input", syncStart);
    stack is ticked (the values are kept, and come back when it is unticked). */
 const SIMPLE_IGNORES = ["importPath", "brwImport", "feather", "wb", "photometry",
   "photoSolve", "tierMode", "intraLock", "colourPlanes", "alignCorr", "alignFilter",
-  "stackCombine", "earthshine", "despeckle", "exportTiers", "tierLinear", "frames"];
+  "stackCombine", "despeckle", "exportTiers", "tierLinear", "frames"];
 const SIMPLE_NOTE = "Not used by the simple stack. Untick Simple stack to use it.";
 function syncSimple(){
   const on = $("simpleStack").checked;
@@ -635,7 +823,6 @@ async function startRun(){
                           alignFilter: $("alignFilter").value,
                           stackCombine: $("stackCombine").value,
                           fnrgfPreset: $("fnrgfPreset").value,
-                          earthshine: $("earthshine").checked,
                           despeckle: $("despeckle").checked,
                           exportTiers: $("exportTiers").checked,
                           tierLinear: $("tierLinear").checked,
@@ -648,7 +835,7 @@ async function startRun(){
   if (!_r.ok || (_j && _j.ok === false)){
     const msg = (_j && _j.error) || ("the run could not be started (HTTP " + _r.status + ")");
     $("status").textContent = msg;
-    $("log").textContent += "\n" + msg;
+    appendLog(msg, "fail");
     syncStart(); $("clearcache").disabled = false;
     return;
   }
@@ -675,8 +862,54 @@ function fmtDur(s){
   const p = n => String(n).padStart(2,"0");
   return h ? `${h}:${p(m)}:${p(q)}` : `${m}:${p(q)}`;
 }
-function runStart(){
+// TIME LEFT (2026-10-07). The bar's own fraction is authored per stage and
+// drifts as stages change, so the estimate is taken from time instead: every
+// finished run stores when it reached each fraction (per folder and kind, and
+// as the latest of that kind for any folder). A new run compares when it
+// reached its current fraction with when the last one did, and scales that
+// run's total. With no history the fraction itself is extrapolated.
+let RUN_TL = null;
+function tlKey(kind, any){ return "efh.tl." + kind + (any ? "" : "." + ($("folder").value || "").trim()); }
+function tlLoad(kind){
+  for (const any of [false, true]){
+    try { const t = JSON.parse(localStorage.getItem(tlKey(kind, any)) || "null");
+          if (t && t.T > 5 && Array.isArray(t.s) && t.s.length > 1) return Object.assign(t, {same: !any}); } catch(e){}
+  }
+  return null;
+}
+function tlAt(t, f){                       // the stored run's time at fraction f, as a share of its total
+  const s = t.s; if (f <= s[0][0]) return s[0][1]/t.T;
+  for (let i=1;i<s.length;i++) if (s[i][0] >= f){
+    const a = s[i-1], b = s[i], w = (b[0]-a[0]) > 1e-9 ? (f-a[0])/(b[0]-a[0]) : 1;
+    return (a[1] + w*(b[1]-a[1]))/t.T; }
+  return 1;
+}
+function runEstimate(e){
+  if (!RUN_TL) return null;
+  const f = RUN_TL.f, tr = RUN_TL.tf, prev = RUN_TL.prev;
+  let T = null;
+  if (prev){
+    const sh = tlAt(prev, f);
+    const byShape = sh >= 0.08 ? tr/sh : null;
+    if (prev.same){
+      const w = byShape == null ? 0 : Math.min(1, (sh-0.08)/0.22);
+      T = (1-w)*prev.T + w*(byShape ?? prev.T);
+    } else T = byShape;
+  } else {
+    // no history: extrapolate the progress made since this run's first report
+    // (a layers-only run starts at about half the bar)
+    const f0 = RUN_TL.f0 ?? 0, t0 = RUN_TL.t0 ?? 0;
+    if (f - f0 > 0.03 && tr - t0 > 8) T = t0 + (tr - t0)*(1 - f0)/(f - f0);
+  }
+  if (T == null || !isFinite(T)) return null;
+  return {T, left: T - e};
+}
+function runStart(kind){
+  const cb = $("cancelrun"); if (cb){ cb.style.display = ""; cb.disabled = false; cb.textContent = "Cancel"; }
   RUN_BASE = {e:0, s:0, at:Date.now()/1000, step:""};
+  RUN_STARTED_KIND = kind || RUN_KIND;
+  RUN_TL = {kind: RUN_STARTED_KIND, s: [[0, 0]], f: 0, tf: 0, prev: RUN_STARTED_KIND ? tlLoad(RUN_STARTED_KIND) : null};
+  syncStartLabel();
   $("runline").style.display = "";
   $("pbarwrap").classList.add("run");
   if (RUNTICK) clearInterval(RUNTICK);
@@ -687,13 +920,24 @@ function runSync(j){
   if (!RUN_BASE) return;
   RUN_BASE = {e: j.elapsed || 0, s: j.since || 0, at: Date.now()/1000,
               step: (j.step || "").trim().slice(0, 64)};
+  if (RUN_TL && RUN_TL.f0 == null && typeof j.frac === "number" && j.frac > 0){ RUN_TL.f0 = j.frac; RUN_TL.t0 = j.elapsed || 0; }
+  if (RUN_TL && typeof j.frac === "number" && j.frac > RUN_TL.f + 1e-4){
+    RUN_TL.f = j.frac; RUN_TL.tf = j.elapsed || 0; RUN_TL.s.push([j.frac, RUN_TL.tf]);
+  }
+}
+function runBar(frac){
+  const est = RUN_BASE && runEstimate(RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at));
+  const w = est ? Math.min(0.99, Math.max(frac || 0, 1 - Math.max(0, est.left)/est.T)) : (frac || 0);
+  $("pbar").style.width = (w*100).toFixed(1) + "%";
 }
 function runTick(){
   SPIN_I = (SPIN_I + 1) % SPIN.length;
   $("spin").textContent = SPIN[SPIN_I];
   if (!RUN_BASE) return;
-  const d = Date.now()/1000 - RUN_BASE.at;
-  $("clock").textContent = fmtDur(RUN_BASE.e + d);
+  const d = Date.now()/1000 - RUN_BASE.at, el = RUN_BASE.e + d;
+  const est = runEstimate(el);
+  $("clock").innerHTML = fmtDur(el) + (est ? ' <span class="left">· ' + (est.left > 5 ? "~" + fmtDur(est.left) + " left" : "finishing") + '</span>' : "");
+  if (est) runBar(RUN_TL ? RUN_TL.f : 0);
   const since = RUN_BASE.s + d, note = $("stepnote");
   if (since > 45 && RUN_BASE.step){
     note.className = "stale";
@@ -703,11 +947,24 @@ function runTick(){
     note.textContent = RUN_BASE.step ? "· " + RUN_BASE.step : "";
   }
 }
+let RUN_STARTED_KIND = "";
 function runStop(mark, note){
+  const cb = $("cancelrun"); if (cb) cb.style.display = "none";
   if (RUNTICK) clearInterval(RUNTICK);
   RUNTICK = null;
   $("pbarwrap").classList.remove("run");
   const total = RUN_BASE ? fmtDur(RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at)) : "";
+  if (RUN_BASE && RUN_STARTED_KIND && mark === "\u2713" && note !== "export done"){
+    try { localStorage.setItem(durKey(RUN_STARTED_KIND), String(RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at))); } catch(e){}
+  }
+  if (RUN_BASE && RUN_TL && RUN_TL.kind && mark === "\u2713"){
+    const T = RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at);
+    let s = RUN_TL.s.concat([[1, T]]);
+    if (s.length > 120){ const k = Math.ceil(s.length/120); s = s.filter((_, i) => i % k === 0 || i === s.length-1); }
+    const t = JSON.stringify({T, s: s.map(([f, x]) => [+f.toFixed(4), +x.toFixed(1)])});
+    if (T > 5) try { localStorage.setItem(tlKey(RUN_TL.kind, false), t); localStorage.setItem(tlKey(RUN_TL.kind, true), t); } catch(e){}
+  }
+  RUN_TL = null;
   $("spin").textContent = mark;
   $("clock").textContent = total;
   $("stepnote").className = "";
@@ -723,7 +980,7 @@ function runStop(mark, note){
    looks stuck while the work behind it has finished.
    It bites hardest on export: this is Flask's single-threaded development
    server, and writing a 200 MB TIFF blocks it long enough for a poll to be
-   refused. a tester hit exactly that -- "stuck in exporting tif16 ... saved" --
+   refused. Nico hit exactly that -- "stuck in exporting tif16 ... saved" --
    with the file, its params and its report all complete on disk.
    pollAgain() is the whole fix: retry rather than die, and say so once the
    silence is long enough to be worth mentioning. */
@@ -741,22 +998,48 @@ function pollAgain(fn, ms, err){
   setTimeout(fn, ms);
 }
 
+// THE LOG, COLOURED BY LEVEL (2026-10-07): the server sends one level per
+// line (ok / warn / fail / odd / step / info, see pipeline.split_level).
+function setLog(lines, levels){
+  const el = $("log"); if (!el) return;
+  const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  const f = document.createDocumentFragment();
+  // counter lines ("... radial band 7/15") show as one line that counts up
+  const CNT = /\s\d+\/\d+\s*$/;
+  (lines || []).forEach((t, i) => {
+    const nx = lines[i + 1];
+    if (nx !== undefined && CNT.test(t) && CNT.test(nx) && t.replace(CNT, "") === nx.replace(CNT, "")) return;
+    const lv = levels && levels[i];
+    if (lv && lv !== "info"){ const sp = document.createElement("span"); sp.className = "lv-" + lv; sp.textContent = t; f.appendChild(sp); f.appendChild(document.createTextNode("\n")); }
+    else f.appendChild(document.createTextNode(t + "\n"));
+  });
+  if (!lines || !lines.length) f.appendChild(document.createTextNode("\u2026"));
+  el.replaceChildren(f);
+  if (atEnd || RUN_BASE) el.scrollTop = 1e9;
+}
+function appendLog(msg, lv){
+  const el = $("log"); if (!el) return;
+  const sp = document.createElement("span"); sp.className = "lv-" + (lv || "fail"); sp.textContent = "\n" + msg;
+  el.appendChild(sp); el.scrollTop = 1e9;
+}
 async function pollProgress(){
   let j;
   try {
     const r = await fetch("/api/progress"); j = await r.json();
-    $("log").textContent = j.lines.join("\n") || "…";
-    $("log").scrollTop = 1e9;
-    $("pbar").style.width = (j.frac*100).toFixed(1)+"%";
+    setLog(j.lines, j.levels);
+    runBar(j.frac);
     runSync(j);
   } catch (e){ return pollAgain(pollProgress, 800, e); }
   POLL_FAILS = 0;
-  if (j.error){ $("status").textContent = "error — see log"; $("log").textContent += "\n"+j.error;
+  if (j.error && j.cancelled){ $("status").textContent = j.error;
+    runStop("■", "cancelled"); $("start").disabled = false;
+    $("clearcache").disabled = false; await refreshCache(); return; }
+  if (j.error){ $("status").textContent = "error — see log"; appendLog(j.error, "fail");
     runStop("✕", "failed"); $("start").disabled = false;
-    $("clearcache").disabled = false; return; }
+    $("clearcache").disabled = false; await refreshCache(); $("sdot").className = "sdot err"; return; }
   if (j.done && j.ready){ runStop("✓", "done");
     await loadLayers(); $("start").disabled = false;
-    $("clearcache").disabled = false; return; }
+    $("clearcache").disabled = false; await refreshCache(); return; }
   pollAgain(pollProgress, 800);
 }
 
@@ -869,6 +1152,15 @@ async function loadLayers(){
   // draw a flat 0.5 and dilute the detail -- see render.py
   if (GEO.has_nafe !== false) names.push("nafe","nafe_lo","nafe_sm");
   if (GEO.has_promdet) names.push("promdet");
+  // THE 0.24 PROMINENCE LAYER: its maps, and only the controls that act. With
+  // the layer, the corona no longer holds the prominences, so the three gate
+  // controls are hidden; without it (an older cache) the layer's are.
+  if (GEO.hasPromLayer) names.push("pl_L","pl_C","pl_W1","pl_W2","pl_F");
+  for (const k of ["promGain","promDetail","promChroma"]){
+    const el = $("s_"+k), row = el && el.closest(".ctl"); if (row) row.style.display = GEO.hasPromLayer ? "none" : ""; }
+  for (const k of ["promLayer","promStretch","promRim","promSat","promPeak","promFade"]){
+    const el = $("s_"+k), row = el && el.closest(".ctl"); if (row) row.style.display = GEO.hasPromLayer ? "" : "none"; }
+  { const hc = document.querySelector(".promhuectl"); if (hc) hc.style.display = GEO.hasPromLayer ? "" : "none"; }
   if (GEO.hasHill){ names.push("hilllog");
     if (GEO.hasHillSigma) names.push("hillsigma");
     for (let i=0;i<GEO.nHill;i++) names.push("hill"+i); }
@@ -882,19 +1174,16 @@ async function loadLayers(){
       fb.style.display = "";
       const fr = GEO.flat_range || [];
       if (fr.length === 4)
-        fb.title = `The master flat itself, cut to the same frame as the other `
-          + `layers and stretched to its own 0.5-99.5 percentile so the falloff `
-          + `and any dust are visible. Actual values: min ${fr[0].toFixed(3)}, `
-          + `max ${fr[1].toFixed(3)}; the stretch spans ${fr[2].toFixed(3)} to `
-          + `${fr[3].toFixed(3)}. This is a quality check on your flats, not a `
-          + `layer that goes into the composite.`;
+        fb.title = `The master flat, stretched to show falloff and dust (values `
+          + `${fr[0].toFixed(3)}-${fr[1].toFixed(3)}, shown ${fr[2].toFixed(3)}-${fr[3].toFixed(3)}). `
+          + `A check on the flats; not part of the composite.`;
     }
   } else {
     const fb = $("flatBtn"); if (fb) fb.style.display = "none";
     // A missing button used to be the only symptom of a broken flat preview,
     // which is how it shipped unnoticed. Say why it is missing.
     if (GEO.flat_error)
-      $("log").textContent += "\nmaster-flat preview unavailable: " + GEO.flat_error;
+      appendLog("master-flat preview unavailable: " + GEO.flat_error, "warn");
   }
   // hide the Earthshine slider unless the layer was actually built
   const esc = $("s_earthShine");
@@ -932,7 +1221,7 @@ async function loadLayers(){
   $("setsave").disabled = false;
   $("views").style.display = "inline-flex";
   $("status").textContent = "ready — adjust and export";
-  renderNow();
+  renderNow(); markDefaults();
 }
 
 const cv = $("cv"), ctx = cv.getContext("2d");
@@ -998,11 +1287,8 @@ function updateZoom(){
   const fmt = v => v < 10 ? v.toFixed(1) : String(Math.round(v));
   el.textContent = "zoom " + fmt(pct) + "%";
   el.style.color = pct > native + 0.05 ? "var(--gold)" : "#8b93a0";
-  el.title = "Percent of the full-resolution image — the size the export "
-           + "writes. The preview itself is " + fmt(native) + "% of full "
-           + "resolution, so above that the view is interpolated and grain "
-           + "cannot be judged on it. Scroll to zoom, drag to pan, "
-           + "double-click the image to fit.";
+  el.title = "Zoom relative to the full-resolution export. The preview is " + fmt(native)
+           + "% of full size; above that it is interpolated. Scroll to zoom, drag to pan, double-click to fit.";
 }
 addEventListener("resize", updateZoom);
 let ORIENT = "";
@@ -1014,12 +1300,66 @@ function setOrient(v){
   draw();
 }
 let nafeMed = 0.5;
+let PEFF = null;   // the params of the render in progress (sliders with hidden items bypassed)
+// The detail mix at one pixel, with everything that does not depend on the
+// pixel hoisted out (2026-10-07: detailAt() unpacked the parameters and built
+// an array for every pixel). Writes into DA. Same arithmetic as detailAt().
+const DA = {mg: 0, fn: 0, inn: 0, mgr: 0.5, fn0: 0.5};
+const VIEW_MGN_STRETCH = 2.0;   // render.py: the MGN view is the layer itself, stretched
+function makeDetail(Q){
+  const {mgnContrast,fnCompress,innerDenoise,clarity,smoothing,nafeMix} = Q;
+  const ds = (L.mgn_fine && Q.detailScale>0) ? Q.detailScale : 0;
+  const Lm = L.mgn, Lmf = L.mgn_fine, Llo = L.mgn_lo, Lflo = L.mgn_fine_lo,
+        Lsm = L.mgn_sm, Lfsm = L.mgn_fine_sm, Lfn = L.fnrgf, Lfnlo = L.fnrgf_lo,
+        Lfnsm = L.fnrgf_sm, Lna = L.nafe, Lnalo = L.nafe_lo, Lnasm = L.nafe_sm,
+        Li0 = L.inner0, Li = L.inner;
+  const sHi = 2.5/Math.max(fnCompress,1e-4), nmed = nafeMed, useN = nafeMix>0 && !!Lna;
+  return function(j){
+    let mgr = ds>0 ? (1-ds)*(Lm[j]/255) + ds*(Lmf[j]/255) : Lm[j]/255;
+    if (clarity>0) mgr += clarity*(mgr - (ds>0 ? (1-ds)*(Llo[j]/255) + ds*(Lflo[j]/255) : Llo[j]/255));
+    if (smoothing>0) mgr = (1-smoothing)*mgr + smoothing*(ds>0 ? (1-ds)*(Lsm[j]/255) + ds*(Lfsm[j]/255) : Lsm[j]/255);
+    DA.mgr = mgr;
+    let mg = 0.5 + (mgr - 0.5)*mgnContrast; mg = mg<0?0:mg>1?1:mg;
+    let fnr = Lfn[j]/255;
+    if (clarity>0) fnr += clarity*(fnr - Lfnlo[j]/255);
+    if (smoothing>0) fnr = (1-smoothing)*fnr + smoothing*(Lfnsm[j]/255);
+    const D = (fnr - 0.5)*8;
+    let fn = (D>=0 ? Math.tanh(D/sHi) : Math.tanh(D/(1.5*sHi)))*0.5 + 0.5;
+    DA.fn0 = fn;
+    if (useN){
+      let nf = Lna[j]/255;
+      if (clarity>0) nf += clarity*(nf - Lnalo[j]/255);
+      if (smoothing>0) nf = (1-smoothing)*nf + smoothing*(Lnasm[j]/255);
+      nf = 0.5 + (nf - nmed);
+      nf = nf<0?0:nf>1?1:nf;
+      mg = (1-nafeMix)*mg + nafeMix*nf;
+      fn = (1-nafeMix)*fn + nafeMix*nf;
+    }
+    DA.mg = mg; DA.fn = fn;
+    DA.inn = (1-innerDenoise)*(Li0[j]/255) + innerDenoise*(Li[j]/255);
+  };
+}
+// Stage A of the render is cached by the parameters it reads. Everything not
+// in this list counts, so a new control is safe by default: it simply makes
+// stage A recompute.
+const STAGE_B_KEYS = new Set(["outGamma","bgBlack","toneCurve","moonCurve",
+  "ringBlend","ringScale","ringDX","ringDY","coronaLevel","skyLevel","skyColour",
+  "moonColour","moonHueR","moonHueG","moonHueB","skyHueR","skyHueG","skyHueB","finalMid","finalDark","finalLight","structure",
+  "finalNoise","containWhites","promLayer","promStretch","promRim","promSat"]);
+const RCACHE = {L: null, N: 0, key: "", draft: false};
+function stageKeyA(Q){
+  const o = {};
+  for (const k of Object.keys(Q).sort()) if (!STAGE_B_KEYS.has(k)) o[k] = Q[k];
+  return JSON.stringify(o);
+}
+let RENDER_DRAFT = false, RENDER_DRAFT_STEP = 2;
 function detailAt(j){
-  const {mgnContrast,fnCompress,innerDenoise,clarity,smoothing,nafeMix} = P;
+  const Q = PEFF || P;
+  const {mgnContrast,fnCompress,innerDenoise,clarity,smoothing,nafeMix} = Q;
   // Detail balance -- blend all-scale MGN with the fine-only layer. Mirrors
   // _detail_layers in render.py, variants included, or clarity would subtract
   // the blur of a layer that is no longer the one being sharpened.
-  const ds = (L.mgn_fine && P.detailScale>0) ? P.detailScale : 0;
+  const ds = (L.mgn_fine && Q.detailScale>0) ? Q.detailScale : 0;
   const _mgs = (a,b) => ds>0 ? (1-ds)*(a[j]/255) + ds*(b[j]/255) : a[j]/255;
   let mgr = _mgs(L.mgn, L.mgn_fine);
   if (clarity>0) mgr += clarity*(mgr - _mgs(L.mgn_lo, L.mgn_fine_lo));
@@ -1043,8 +1383,166 @@ function detailAt(j){
   const inEff = (1-innerDenoise)*(L.inner0[j]/255) + innerDenoise*(L.inner[j]/255);
   return [mg, fn, inEff];
 }
+// FINAL SHARPENING -- the preview's copy of render.final_sharpen. Same
+// recipe (Nimmervoll's Photoshop action: five high passes at 1.5-24 px scaled
+// to the solar radius, median / minimum / maximum across the scales in Soft
+// Light, a per-band noise gate), on the decimated preview, with box-blur
+// Gaussians so a slider stays interactive. The export is the Python one.
+const FINAL_RADII = [1.5, 3, 6, 12, 24], FINAL_REF_R = 620, FINAL_GATE = [1.0, 0.6, 0.35, 0.2, 0.1];
+function _boxesForGauss(sigma, n){
+  const wIdeal = Math.sqrt((12*sigma*sigma/n)+1);
+  let wl = Math.floor(wIdeal); if (wl%2===0) wl--;
+  const wu = wl+2, mIdeal = (12*sigma*sigma - n*wl*wl - 4*n*wl - 3*n)/(-4*wl - 4), m = Math.round(mIdeal);
+  const out = []; for (let i=0;i<n;i++) out.push(i<m ? wl : wu); return out;
+}
+function _boxBlurH(src, dst, W, H, r){
+  const iarr = 1/(r+r+1);
+  for (let i=0;i<H;i++){
+    let ti=i*W, li=ti, ri=ti+r, fv=src[ti], lv=src[ti+W-1], val=(r+1)*fv;
+    for (let j=0;j<r;j++) val += src[ti+j];
+    for (let j=0;j<=r;j++){ val += src[ri++]-fv; dst[ti++] = val*iarr; }
+    for (let j=r+1;j<W-r;j++){ val += src[ri++]-src[li++]; dst[ti++] = val*iarr; }
+    for (let j=W-r;j<W;j++){ val += lv-src[li++]; dst[ti++] = val*iarr; }
+  }
+}
+function _boxBlurV(src, dst, W, H, r){
+  const iarr = 1/(r+r+1);
+  for (let i=0;i<W;i++){
+    let ti=i, li=ti, ri=ti+r*W, fv=src[ti], lv=src[ti+W*(H-1)], val=(r+1)*fv;
+    for (let j=0;j<r;j++) val += src[ti+j*W];
+    for (let j=0;j<=r;j++){ val += src[ri]-fv; dst[ti] = val*iarr; ri+=W; ti+=W; }
+    for (let j=r+1;j<H-r;j++){ val += src[ri]-src[li]; dst[ti] = val*iarr; li+=W; ri+=W; ti+=W; }
+    for (let j=H-r;j<H;j++){ val += lv-src[li]; dst[ti] = val*iarr; li+=W; ti+=W; }
+  }
+}
+function _gauss(src, W, H, sigma){
+  // returns a NEW Float32Array with src blurred by a Gaussian of `sigma` px
+  const out = new Float32Array(src.length);
+  if (sigma < 1.0){
+    // three-tap separable kernel, exact enough below one pixel
+    const w1 = Math.exp(-0.5/(sigma*sigma)), s = 1+2*w1, a = w1/s, b = 1/s;
+    const tmp = new Float32Array(src.length);
+    for (let y=0;y<H;y++){ const o=y*W; for (let x=0;x<W;x++){ const l=src[o+(x>0?x-1:x)], r=src[o+(x<W-1?x+1:x)]; tmp[o+x]=a*l+b*src[o+x]+a*r; } }
+    for (let y=0;y<H;y++){ const o=y*W, u=(y>0?y-1:y)*W, d=(y<H-1?y+1:y)*W; for (let x=0;x<W;x++) out[o+x]=a*tmp[u+x]+b*tmp[o+x]+a*tmp[d+x]; }
+    return out;
+  }
+  const bxs = _boxesForGauss(sigma, 3); let a = Float32Array.from(src), b = out;
+  for (const bw of bxs){ const r=(bw-1)/2; _boxBlurH(a, b, W, H, r); _boxBlurV(b, a, W, H, r); }
+  return a;
+}
+function _softLight(a, b){
+  const d = a <= 0.25 ? ((16*a-12)*a+4)*a : Math.sqrt(a);
+  return b <= 0.5 ? a-(1-2*b)*a*(1-a) : a+(2*b-1)*(d-a);
+}
+const _ERF_LUT = (() => { const n=2048, t=new Float32Array(n+1); for (let i=0;i<=n;i++){ const x=4*i/n, u=1/(1+0.3275911*x); t[i]=1-(((((1.061405429*u-1.453152027)*u)+1.421413741)*u-0.284496736)*u+0.254829592)*u*Math.exp(-x*x); } return t; })();
+function _erf(x){ // x >= 0 here; table over 0..4, 1 beyond
+  if (x >= 4) return 1; const f = x*512, i = f|0; return _ERF_LUT[i] + (f-i)*(_ERF_LUT[i+1]-_ERF_LUT[i]);
+}
+// STRUCTURE -- the preview's copy of render.structure_boost: local contrast of
+// the finished brightness between 0.01 R and 0.08 R, Moon left out of the
+// averages, the mean per 1 px ring taken out (no limb ring), midtone-weighted,
+// applied as a brightness ratio so the colour is kept.
+const STRUCT_R = [0.01, 0.08], STRUCT_K = 1.5, STRUCT_LIMB = [1.01, 1.04];
+function structureBoost(d, W, H, cy, cx, Rgrid, s){
+  if (!(s > 0)) return;
+  const N = W*H, Y = new Float32Array(N), lm = new Float32Array(N), m = new Float32Array(N), rp = new Float32Array(N);
+  for (let y=0,i=0;y<H;y++) for (let x=0;x<W;x++,i++){
+    const j=4*i, yv=(0.2126*d[j]+0.7152*d[j+1]+0.0722*d[j+2])/255;
+    const r=Math.hypot(y-cy, x-cx); rp[i]=r; Y[i]=yv;
+    const mm = r > STRUCT_LIMB[0]*Rgrid ? 1 : 0; m[i]=mm; lm[i]=mm*Math.log(Math.max(yv,1e-4));
+  }
+  const s1=Math.max(STRUCT_R[0]*Rgrid,0.5), s2=Math.max(STRUCT_R[1]*Rgrid,1.0);
+  const a1=_gauss(lm,W,H,s1), m1=_gauss(m,W,H,s1), a2=_gauss(lm,W,H,s2), m2=_gauss(m,W,H,s2);
+  const band = new Float32Array(N); let rmax = 0;
+  for (let i=0;i<N;i++){ band[i]=a1[i]/Math.max(m1[i],1e-4)-a2[i]/Math.max(m2[i],1e-4); if (rp[i]>rmax) rmax=rp[i]; }
+  const nb=(rmax|0)+1, sum=new Float64Array(nb), cnt=new Float64Array(nb);
+  for (let i=0;i<N;i++) if (m[i]>0){ const b=rp[i]|0; sum[b]+=band[i]; cnt[b]++; }
+  for (let b=0;b<nb;b++) sum[b] = cnt[b]>0 ? sum[b]/cnt[b] : 0;
+  const kk = s*STRUCT_K, dl = STRUCT_LIMB[1]-STRUCT_LIMB[0];
+  for (let i=0;i<N;i++){
+    const yv=Y[i]; let w=Math.min(1,Math.max(0,4*yv*(1-yv)))*Math.min(1,Math.max(0,(rp[i]/Rgrid-STRUCT_LIMB[0])/dl));
+    if (w<=0) continue;
+    const g=Math.exp(kk*(band[i]-sum[rp[i]|0])*w), j=4*i;
+    d[j]=Math.min(255,d[j]*g); d[j+1]=Math.min(255,d[j+1]*g); d[j+2]=Math.min(255,d[j+2]*g);
+  }
+}
+function finalSharpen(d, W, H, Rgrid, mid, dark, light, k){
+  if (!(mid>0||dark>0||light>0)) return;
+  // d: the preview's RGBA bytes, edited in place. Rgrid: solar radius on this grid.
+  const N = W*H, radii = FINAL_RADII.map(s => Math.max(0.6, s*Rgrid/FINAL_REF_R));
+  const ch = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], Y = new Float32Array(N);
+  for (let i=0;i<N;i++){ const j=4*i; ch[0][i]=d[j]/255; ch[1][i]=d[j+1]/255; ch[2][i]=d[j+2]/255; Y[i]=0.2126*ch[0][i]+0.7152*ch[1][i]+0.0722*ch[2][i]; }
+  // noise response of each band for unit white noise, measured once per radius set
+  const key = radii.join(",");
+  if (!finalSharpen._resp || finalSharpen._resp.key !== key){
+    const S=128, n=new Float32Array(S*S); let seed=7;
+    for (let i=0;i<S*S;i++){ seed=(seed*1103515245+12345)&0x7fffffff; const u1=(seed+1)/0x80000000; seed=(seed*1103515245+12345)&0x7fffffff; const u2=seed/0x80000000; n[i]=Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2); }
+    const g = radii.map(s => _gauss(n, S, S, s)); const resp=[];
+    let prev=n; for (let i=0;i<radii.length;i++){ let ss=0; for (let p=0;p<S*S;p++){ const v=prev[p]-g[i][p]; ss+=v*v; } resp.push(Math.sqrt(ss/(S*S))); prev=g[i]; }
+    finalSharpen._resp = {key, resp: resp.map(v => v/resp[0])};
+  }
+  const resp = finalSharpen._resp.resp;
+  // sigma of the finest band of Y per 32 px tile (MAD), smoothed, bilinear back
+  let sig = null;
+  if (k > 0){
+    const b1 = _gauss(Y, W, H, radii[0]); for (let i=0;i<N;i++) b1[i]=Math.abs(Y[i]-b1[i]);
+    const T=32, ty=Math.max(1,Math.floor(H/T)), tx=Math.max(1,Math.floor(W/T)), tm=new Float32Array(ty*tx), buf=new Float32Array(T*T);
+    for (let a=0;a<ty;a++) for (let b=0;b<tx;b++){ let q=0; for (let y=0;y<T;y++){ const o=(a*T+y)*W+b*T; for (let x=0;x<T;x++) buf[q++]=b1[o+x]; } const v=buf.slice().sort(); tm[a*tx+b]=1.4826*v[(T*T)>>1]; }
+    const ts = _gauss(tm, tx, ty, 1.0);
+    sig = new Float32Array(N);
+    for (let y=0;y<H;y++){ const fy=Math.min(ty-1,Math.max(0,(y+0.5)/T-0.5)), y0=Math.floor(fy), y1=Math.min(ty-1,y0+1), wy=fy-y0;
+      for (let x=0;x<W;x++){ const fx=Math.min(tx-1,Math.max(0,(x+0.5)/T-0.5)), x0=Math.floor(fx), x1=Math.min(tx-1,x0+1), wx=fx-x0;
+        sig[y*W+x]=(1-wy)*((1-wx)*ts[y0*tx+x0]+wx*ts[y0*tx+x1])+wy*((1-wx)*ts[y1*tx+x0]+wx*ts[y1*tx+x1]); } }
+  }
+  // gates per band from Y
+  let gates = null;
+  if (sig){
+    gates = []; let prev = Y;
+    for (let i=0;i<radii.length;i++){ const cur=_gauss(Y, W, H, radii[i]); const g=new Float32Array(N); const kk=k*FINAL_GATE[i]*resp[i];
+      for (let p=0;p<N;p++) g[p]=_erf(Math.abs(prev[p]-cur[p])/Math.max(kk*sig[p],1e-6)); gates.push(g); prev=cur; }
+  }
+  const med = [new Float32Array(N), new Float32Array(N), new Float32Array(N)], mn=[new Float32Array(N), new Float32Array(N), new Float32Array(N)], mx=[new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+  const hp = [new Float32Array(N), new Float32Array(N), new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+  for (let c=0;c<3;c++){
+    let prev = ch[c]; const acc = new Float32Array(N);
+    for (let i=0;i<radii.length;i++){
+      const cur = _gauss(ch[c], W, H, radii[i]); const g = gates ? gates[i] : null;
+      for (let p=0;p<N;p++){ let b = prev[p]-cur[p]; if (g) b*=g[p]; acc[p]+=b; hp[i][p]=acc[p]+0.5; }
+      prev = cur;
+    }
+    const h0=hp[0],h1=hp[1],h2=hp[2],h3=hp[3],h4=hp[4], MN=mn[c], MD=med[c], MX=mx[c];
+    for (let p=0;p<N;p++){
+      // median of five without a sort: min, max, and the middle by elimination
+      let a=h0[p],b=h1[p],cc=h2[p],dd=h3[p],e=h4[p], t;
+      if (a>b){t=a;a=b;b=t;} if (cc>dd){t=cc;cc=dd;dd=t;}
+      let lo = a<cc ? a : cc, hi = b>dd ? b : dd;
+      MN[p] = lo<e ? lo : e; MX[p] = hi>e ? hi : e;
+      // the median: drop the overall min and max, median of the remaining three
+      if (a<cc){ a=cc; } else { cc=a; }           // a := max(min pair) after the swaps -> second-smallest candidate set
+      if (b>dd){ b=dd; }                           // b := min(max pair)
+      // remaining candidates: a, b, e (the two middles of the pairs and e)
+      MD[p] = a>b ? (b>e ? b : (a<e ? a : e)) : (a>e ? a : (b<e ? b : e));
+    }
+  }
+  for (let c=0;c<3;c++){
+    const C=ch[c], MD=med[c], MN=mn[c], MX=mx[c];
+    for (let i=0;i<N;i++){
+      let o = C[i];
+      if (mid>0){ let b=MD[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += mid*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+      if (dark>0){ let b=MN[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += dark*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+      if (light>0){ let b=MX[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += light*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+      d[4*i+c] = o<0?0:o>1?255:o*255;
+    }
+  }
+}
+
 function renderNow(){
+  if (CURVE) CURVE.draw();
   if (!ready) return;
+  let P = effParams();   // sliders with the hidden groups and controls bypassed
+  // the corona no longer holds the prominences when the layer is there -- see render.py
+  if (GEO.hasPromLayer) P = Object.assign({}, P, {promGain:0, promDetail:0, promChroma:0});
+  PEFF = P;
   const {fnMix,detailGain,baseLift,envGamma,radialFlatten,innerMix,innerDim,promGain,
          temp,satur,hlCompress,hlDesat,outGamma,bgBlack,discLevel,discTrim,earthShine} = P;
   const knee = 0.9 - 0.35*hlCompress;
@@ -1052,6 +1550,11 @@ function renderNow(){
         wf=L.wf, rr_=L.r, d=out.data;
   const ig=1/outGamma, ib=1/(1-bgBlack);
   const DEC = GEO.decim || 4;
+  const TLUT = (P.toneCurve && !curveIsIdentity(P.toneCurve)) ? toneLutPts(P.toneCurve) : null;
+  // the Moon's own curve -- render.py apply_tone: the main curve outside the
+  // Moon, this one on the disc, blended over the disc's soft edge
+  const MLUT = (P.moonCurve && !curveIsIdentity(P.moonCurve)) ? toneLutPts(P.moonCurve) : null;
+  const _lut = (T, v) => { const f = v*1023, i0 = f|0, fr = f-i0; return T[i0] + fr*((T[Math.min(1023,i0+1)]||T[i0]) - T[i0]); };
   // matches render.py's np.clip(ratio, 0.2, 3.0); hoisted out of the pixel loop
   const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
   const bc = GEO.bgChroma || [1,1,1], bn = P.bgNeutral || 0;
@@ -1061,7 +1564,8 @@ function renderNow(){
   const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
   const lvl = 1-0.5*radialFlatten;
   // Hill's log stretch, log(1 + k*I) with k = 10^logK. 0 keeps the cube root.
-  const LOGK = P.logK || 0, KK = Math.pow(10, LOGK), LKN = Math.log1p(KK);
+  // Log stretch REMOVED 2026-10-08 (Nico): the slider is gone and old settings with logK render as 0
+  const LOGK = 0, KK = Math.pow(10, LOGK), LKN = Math.log1p(KK);
   // the radial profile, evaluated from its own numbers and INTERPOLATED -- as
   // a full-res 8-bit layer it was a staircase and printed rings
   const RPROF = GEO.rprofile || null;
@@ -1098,7 +1602,8 @@ function renderNow(){
       HLUT[u] = Math.log1p(Kr*Math.max(xn,0))/lr;
     }
   }
-  const HK = (P.hillGain||0) * HMS / Math.max(HRMS[0]||1e-9, 1e-9);
+  const HR0 = (GEO.hillR0 > 0) ? GEO.hillR0 : (HRMS[0]||1e-9);   // 0.23.9, see server.py _hill_r0
+  const HK = (P.hillGain||0) * HMS / Math.max(HR0, 1e-9);
   // soft threshold against each pixel's own expected noise -- see render.py.
   // 0 is exactly the old behaviour.
   const HTH = (GEO.hasHillSigma && L.hillsigma) ? (P.hillDenoise||0) : 0;
@@ -1113,12 +1618,15 @@ function renderNow(){
   // the composite must be the same number -- the view is what gets tuned and
   // exported, so a second copy of this arithmetic would be a second image.
   // the masks alone, in im_log units (k*E); hillYh adds the base
-  function hillE(j){
+  const HZS = P.hillZone||0, HZR = (P.hillZoneR||1.8)*GEO.R, HZF = 0.4*GEO.R, HZSIGN = [1,1,0,-1,-1];
+  function hillE(j, r){
     let E = 0;
+    let zt = 0; if (HZS > 0){ zt = Math.min(1, Math.max(0, ((r||0)-HZR)/HZF + 0.5)); zt = zt*zt*(3-2*zt); }
     for (let k=0;k<HN;k++){
       if (!HG[k] || !HL[k]) continue;
       const u = (HL[k][j]*256 + HL[k][j+1])/65535;   // 0..1, zero at 0.5
       let mv = (u*2-1)*HSPAN[k];
+      if (HZS > 0 && HZSIGN[k]) mv *= 1 + HZS*HZSIGN[k]*(1-2*zt);
       if (HTH > 0 && HRSP[k]){
         const sg = (L.hillsigma[j]*256 + L.hillsigma[j+1])/65535*HSGS;
         const t = HTH*HRSP[k]*(HATT[k]==null?1:HATT[k])*sg;
@@ -1128,10 +1636,10 @@ function renderNow(){
     }
     return HK*E;
   }
-  function hillYh(j){
+  function hillYh(j, r){
     const ui = L.hilllog[j]*256 + L.hilllog[j+1];
     const hl = HLUT ? HLUT[ui] : ui/65535;
-    return hl + hillE(j);
+    return hl + hillE(j, r);
   }
 
   // The Partial-conv VIEW: render.py's headroom (0.75, so the masks have
@@ -1139,10 +1647,10 @@ function renderNow(){
   // Until 0.23.7 the page drew hl + k*E with no headroom, so the preview was
   // brighter than the TIFF it stood for.
   const HB = (P.hillBase == null) ? 1 : Math.max(0, Math.min(1, P.hillBase));
-  function hillView(j){
+  function hillView(j, r){
     const ui = L.hilllog[j]*256 + L.hilllog[j+1];
     const hl = HLUT ? HLUT[ui] : ui/65535;
-    const yh = hillYh(j);
+    const yh = hillYh(j, r);
     return 0.75*yh + (1-HB)*(0.5 - 0.75*hl);
   }
   // Single-layer views. This used to be a ternary chain ending in a bare
@@ -1157,120 +1665,373 @@ function renderNow(){
   if (VIEW==="partialconv" && L.hilllog){
     // GEO.cy/cx/W/H are in the layers' own (preview) frame
     const cyi = Math.round(GEO.cy), cxi = Math.round(GEO.cx);
-    if (cyi >= 0 && cyi < GEO.H && cxi >= 0 && cxi < GEO.W) HDISC = hillView((cyi*GEO.W + cxi)*4);
+    if (cyi >= 0 && cyi < GEO.H && cxi >= 0 && cxi < GEO.W) HDISC = hillView((cyi*GEO.W + cxi)*4, 0);
   }
   const vHill = VIEW==="partialconv" && !!L.hilllog;
   const vComputed = VIEW==="mgn" || VIEW==="fnrgf" || VIEW==="inner" || vHill;
   const vArr = VSRC[VIEW] ? L[VSRC[VIEW]] : null;
   const solo = VIEW !== "composite" && (vComputed || vArr);
-  if (VIEW !== "composite" && !solo)
+  if (VIEW !== "composite" && VIEW !== "moon" && !solo)
     console.warn("view '"+VIEW+"' has no layer — drawing the composite");
-  for (let i=0,j=0; i<wf.length; i++,j+=4){
-    const [mg, fn, inEff] = detailAt(j);
-    if (solo){
+  // THE PIXEL LOOP, IN TWO STAGES (2026-10-07). Stage A (detail, envelope,
+  // colour, highlight knee) is cached by its parameters; stage B (output
+  // gamma, black point, the two tone curves, the ring) runs every time. Tone
+  // curves, gamma, black point and the look controls only redo stage B. While
+  // a control is dragged, stage A runs on every second pixel in each
+  // direction (draft); the full picture follows when the control rests.
+  // Same arithmetic in the same order as the single loop it replaces.
+  const N = wf.length;
+  const DET = makeDetail(P);
+  if (solo){
+    for (let i=0,j=0; i<N; i++,j+=4){
+      DET(j);
+      const mg = DA.mg, fn = DA.fn, inEff = DA.inn;
       // the Partial-conv view paints the disc out to the masks' own edge
       // (Rmask + pad), at the base value at the Moon's centre -- see render.py
-      const v = VIEW==="mgn" ? mg : VIEW==="fnrgf" ? fn : VIEW==="inner" ? inEff
-                : vHill ? ((rr_[i] < L.rmask[i] + 6/DEC) ? HDISC : hillView(j)) : vArr[j]/255;
+      const v = VIEW==="mgn" ? 0.5 + (DA.mgr - 0.5)*VIEW_MGN_STRETCH : VIEW==="fnrgf" ? DA.fn0 : VIEW==="inner" ? inEff
+                : vHill ? ((rr_[i] < L.rmask[i] + 6/DEC) ? HDISC : hillView(j, rr_[i])) : vArr[j]/255;
       const b = Math.max(0, Math.min(255, v*255));
       d[j]=b; d[j+1]=b; d[j+2]=b; d[j+3]=255;
-      continue;
     }
-    const r = rr_[i];
-    const Re = L.rmask[i] + discTrim/DEC;   // discTrim is full-res px
-    const eg = Math.min(1, Math.max(0, (r-(Re-10/DEC))/(12/DEC)));
-    const wI = eg*_ss((1.45*GEO.R - r)/(0.40*GEO.R));
-    const wG = eg*Math.exp(-Math.max(0, r-Re)/(0.60*GEO.R));
-    // `bg` arrives 16-bit packed (R = high byte, G = low) so the log envelope
-    // can cube it without banding the far field -- see server.py.
-    const bgv = (bg[j]*256 + bg[j+1])/65535;
-    const env = LOGK > 0 ? Math.log1p(KK*bgv*bgv*bgv)/LKN : bgv;
-    let B = Math.pow(env, envGamma)*(1-innerDim*wG);
-    let _rp;
-    if (RPROF){
-      const rf = r*DEC, k = Math.floor(rf), g2 = rf-k;
-      const p0 = RPROF[Math.min(k, RPROF.length-1)];
-      const p1 = RPROF[Math.min(k+1, RPROF.length-1)];
-      _rp = p0*(1-g2) + p1*g2;
-    } else _rp = rp[j]/255;
-    B = B/Math.pow(Math.max(_rp, 0.12), radialFlatten)*lvl;
-    let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
-    det = det + P.pelGain*(L.pel[j]/255 - 0.5);
-    det = det*(1-innerMix*wI) + innerMix*wI*inEff;
-    // prominence detail, inside the gate only -- mirrors render.py exactly
-    if (P.promDetail > 0 && L.promdet){
-      const pw = P.promDetail*(pr[j]/255);
-      det = det*(1-pw) + pw*(L.promdet[j]/255);
+  } else {
+    const C = RCACHE, keyA = stageKeyA(P);
+    let needA = !(C.L === L && C.N === N && C.key === keyA);
+    if (!needA && C.draft && !RENDER_DRAFT) needA = true;
+    if (needA){
+      if (!C.V0 || C.N !== N){
+        C.V0 = new Float64Array(N); C.V1 = new Float64Array(N);
+        C.V2 = new Float64Array(N); C.EG = new Float64Array(N);
+      }
+      const V0 = C.V0, V1 = C.V1, V2 = C.V2, EGA = C.EG;
+      const dsw = Math.max(1, (P.discSoft||12))/DEC;
+      const sAt = (i) => {
+        const j = i*4;
+        DET(j);
+        const mg = DA.mg, fn = DA.fn, inEff = DA.inn;
+        const r = rr_[i];
+        const Re = L.rmask[i] + discTrim/DEC;   // discTrim is full-res px
+        const eg = Math.min(1, Math.max(0, (r-(Re+2/DEC-dsw))/dsw));
+        const wI = eg*_ss((1.45*GEO.R - r)/(0.40*GEO.R));
+        const wG = eg*Math.exp(-Math.max(0, r-Re)/(0.60*GEO.R));
+        // `bg` arrives 16-bit packed (R = high byte, G = low) so the log envelope
+        // can cube it without banding the far field -- see server.py.
+        const bgv = (bg[j]*256 + bg[j+1])/65535;
+        const env = LOGK > 0 ? Math.log1p(KK*bgv*bgv*bgv)/LKN : bgv;
+        let B = Math.pow(env, envGamma)*(1-innerDim*wG);
+        let _rp;
+        if (RPROF){
+          const rf = r*DEC, k = Math.floor(rf), g2 = rf-k;
+          const p0 = RPROF[Math.min(k, RPROF.length-1)];
+          const p1 = RPROF[Math.min(k+1, RPROF.length-1)];
+          _rp = p0*(1-g2) + p1*g2;
+        } else _rp = rp[j]/255;
+        B = B/Math.pow(Math.max(_rp, 0.12), radialFlatten)*lvl;
+        let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
+        det = det + P.pelGain*(L.pel[j]/255 - 0.5);
+        det = det*(1-innerMix*wI) + innerMix*wI*inEff;
+        // prominence detail, inside the gate only -- mirrors render.py exactly
+        if (P.promDetail > 0 && L.promdet){
+          const pw = P.promDetail*(pr[j]/255);
+          det = det*(1-pw) + pw*(L.promdet[j]/255);
+        }
+        let Y = B*(baseLift+detailGain*det);
+        // Hill's chain -- MUST match render.py's block of the same name
+        if (HMIX > 0 && L.hilllog){
+          // OVERLAY of the masks-only layer (0.5 + 0.75 k E) at opacity HMIX
+          let dd = Math.max(-0.5, Math.min(0.5, HMIX*0.75*hillE(j, r)));
+          // eased out under the prominence layer -- see render.py
+          if (L.pl_F && (P.promFade||0) > 0) dd *= 1 - P.promFade*(L.pl_F[j]/255);
+          Y = Y < 0.5 ? Y*(1 + 2*dd) : 1 - (1 - Y)*(1 - 2*dd);
+        }
+        const pdrv = L.promdet ? L.promdet[j]/255 : inEff;
+        Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(pdrv-0.5)));
+        const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
+        Y = Y*eg + Yd*(1-eg);
+        // sky-cast correction weighted by the chroma confidence -- see render.py
+        const cf = L.cconf ? L.cconf[j]/255 : 1;
+        let a0 = _cl(ch[j])  /(1 + cf*(BC[0]-1));
+        let a1 = _cl(ch[j+1])/(1 + cf*(BC[1]-1));
+        let a2 = _cl(ch[j+2])/(1 + cf*(BC[2]-1));
+        if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
+        a0 *= temp; a2 /= temp; a1 *= P.tint;
+        // Saturation AFTER the balance, so 0 is white as balanced -- see render.py
+        if (satur !== 1){ a0 = Math.pow(a0, satur); a1 = Math.pow(a1, satur); a2 = Math.pow(a2, satur); }
+        const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
+        a0 /= alum; a1 /= alum; a2 /= alum;
+        a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
+        // prominence structure in green/blue -- see render.py
+        if (P.promChroma !== 0 && L.promdet){
+          let cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
+          if (satur !== 1) cfac = Math.pow(Math.max(cfac, 1e-3), satur);
+          a1 *= cfac; a2 *= cfac;
+        }
+        const r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
+        const m = Math.max(r0,r1,r2);
+        const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));
+        const sc = m>1e-6 ? ms/m : 1;
+        const tt = Math.min(1, Math.max(0,(ms-0.9)/0.1))*hlDesat;
+        V0[i] = (r0*sc)*(1-tt)+ms*tt; V1[i] = (r1*sc)*(1-tt)+ms*tt; V2[i] = (r2*sc)*(1-tt)+ms*tt;
+        EGA[i] = eg;
+      };
+      if (RENDER_DRAFT){
+        // every DS-th pixel each way, copied into its DS x DS block
+        const W = GEO.W, H = GEO.H, DS = RENDER_DRAFT_STEP;
+        for (let y=0; y<H; y+=DS) for (let x=0; x<W; x+=DS){
+          const i = y*W + x; sAt(i);
+          const v0 = V0[i], v1 = V1[i], v2 = V2[i], e = EGA[i];
+          for (let yy=y; yy<y+DS && yy<H; yy++) for (let xx=x; xx<x+DS && xx<W; xx++){
+            const k = yy*W + xx; V0[k]=v0; V1[k]=v1; V2[k]=v2; EGA[k]=e; }
+        }
+      } else for (let i=0; i<N; i++) sAt(i);
+      C.L = L; C.N = N; C.key = keyA; C.draft = RENDER_DRAFT;
     }
-    let Y = B*(baseLift+detailGain*det);
-    // Hill's chain -- MUST match render.py's block of the same name, or the
-    // sliders are tuned on one image and applied to another on export
-    if (HMIX > 0 && L.hilllog){
-      // OVERLAY of the masks-only layer (0.5 + 0.75 k E) at opacity HMIX --
-      // bounded, so no blow-out; see render.py
-      const dd = Math.max(-0.5, Math.min(0.5, HMIX*0.75*hillE(j)));
-      Y = Y < 0.5 ? Y*(1 + 2*dd) : 1 - (1 - Y)*(1 - 2*dd);
-    }
-    // driven by the prominence layer when the workdir has one -- see the
-    // measurement in render.py beside the same line
-    const pdrv = L.promdet ? L.promdet[j]/255 : inEff;
-    Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(pdrv-0.5)));
-    const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
-    Y = Y*eg + Yd*(1-eg);
-    // the sky-cast correction is weighted by the chroma confidence, exactly as
-    // render.py does it -- see the note beside _cconf there
-    const cf = L.cconf ? L.cconf[j]/255 : 1;
-    let a0 = _cl(ch[j])  /(1 + cf*(BC[0]-1));
-    let a1 = _cl(ch[j+1])/(1 + cf*(BC[1]-1));
-    let a2 = _cl(ch[j+2])/(1 + cf*(BC[2]-1));
-    if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
-    a0 *= temp; a2 /= temp; a1 *= P.tint;
-    // Saturation AFTER the balance, so 0 is white as balanced -- see render.py
-    if (satur !== 1){ a0 = Math.pow(a0, satur); a1 = Math.pow(a1, satur); a2 = Math.pow(a2, satur); }
-    const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
-    a0 /= alum; a1 /= alum; a2 /= alum;
-    a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
-    // prominence structure in green/blue -- red is already pinned at 255 in
-    // there, so this is the only channel pair with room. See render.py.
-    if (P.promChroma !== 0 && L.promdet){
-      let cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
-      if (satur !== 1) cfac = Math.pow(Math.max(cfac, 1e-3), satur);
-      a1 *= cfac; a2 *= cfac;
-    }
-    let r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
-    const m = Math.max(r0,r1,r2);
-    const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));
-    const sc = m>1e-6 ? ms/m : 1;
-    const tt = Math.min(1, Math.max(0,(ms-0.9)/0.1))*hlDesat;
-    const rr = [r0*sc, r1*sc, r2*sc];
+    const V0 = C.V0, V1 = C.V1, V2 = C.V2, EGA = C.EG;
     const ring = P.ringBlend>0 && L.contact;
-    let jr = j;
-    if (ring && (P.ringScale!==1 || P.ringDX!==0 || P.ringDY!==0)){
-      const dec = GEO.decim || 4;
-      const y = (i/GEO.W)|0, x = i - y*GEO.W;
-      const sy = Math.round(GEO.cy + (y - GEO.cy - P.ringDY/dec)/P.ringScale);
-      const sx = Math.round(GEO.cx + (x - GEO.cx - P.ringDX/dec)/P.ringScale);
-      jr = (sy>=0 && sy<GEO.H && sx>=0 && sx<GEO.W) ? (sy*GEO.W+sx)*4 : -1;
-    }
-    for (let c=0; c<3; c++){
-      let v = rr[c]*(1-tt)+ms*tt; v = v<0?0:v>1?1:v;
+    const ringMove = ring && (P.ringScale!==1 || P.ringDX!==0 || P.ringDY!==0);
+    const CRV = !!(TLUT || MLUT);
+    const outB = (v, eg, jr, c) => {
+      v = v<0?0:v>1?1:v;
       v = Math.pow(v, ig);
       v = (v-bgBlack)*ib; v = v<0?0:v>1?1:v;
+      if (CRV){ const vg = TLUT ? _lut(TLUT, v) : v, vm = MLUT ? _lut(MLUT, v) : v; v = vg*eg + vm*(1-eg); }
       if (ring && jr>=0) v = 1-(1-v)*(1-P.ringBlend*(L.contact[jr+c]/255));
-      d[j+c] = v*255;
+      return v*255;
+    };
+    for (let i=0,j=0; i<N; i++,j+=4){
+      const eg = EGA[i];
+      let jr = j;
+      if (ringMove){
+        const dec = GEO.decim || 4;
+        const y = (i/GEO.W)|0, x = i - y*GEO.W;
+        const sy = Math.round(GEO.cy + (y - GEO.cy - P.ringDY/dec)/P.ringScale);
+        const sx = Math.round(GEO.cx + (x - GEO.cx - P.ringDX/dec)/P.ringScale);
+        jr = (sy>=0 && sy<GEO.H && sx>=0 && sx<GEO.W) ? (sy*GEO.W+sx)*4 : -1;
+      }
+      d[j]   = outB(V0[i], eg, jr, 0);
+      d[j+1] = outB(V1[i], eg, jr, 1);
+      d[j+2] = outB(V2[i], eg, jr, 2);
+      d[j+3] = 255;
     }
-    d[j+3] = 255;
   }
+  // contain whites: scale the whole picture so the 99.99th percentile of its luminance sits at the ceiling
+  // with an inner corona level, contain whites runs in lookPass, after the level step
+  if ((P.containWhites||1) < 0.999 && VIEW === "composite" && !((P.coronaLevel||0) > 0)){
+    const hist = new Uint32Array(256); let cnt = 0;
+    for (let i=0;i<d.length;i+=4){ if (d[i+3]){ hist[(0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2])|0]++; cnt++; } }
+    let acc = 0, p = 255; for (let b=0;b<256;b++){ acc += hist[b]; if (acc >= cnt*0.9999){ p = b; break; } }
+    const ceil = P.containWhites*255; if (p > ceil && p > 0){ const f = ceil/p; for (let i=0;i<d.length;i+=4){ d[i]*=f; d[i+1]*=f; d[i+2]*=f; } }
+  }
+  // the look controls -- render.py's look(), same order (after contain whites)
+  if (!solo) lookPass(d, P);
+  // the final sharpening copies the picture BEFORE the prominence layer goes on,
+  // and lays the layer on after it -- the order render.py uses
+  scheduleFinal(out);
+  if (VIEW === "composite") promOverlay(out.data);
+  if (VIEW === "moon") moonMask(out.data, P);
   octx.putImageData(out, 0, 0);
   draw();
+}
+// THE LOOK CONTROLS -- mirrors render.py's look(): inner corona level (median
+// display luminance at 1.05-1.15 R), a screen lift of everything outside the
+// Moon towards the sky colour, and the Moon disc's colour; one hue axis for both.
+const LOOK_BLUE = [0.766, 1.0, 1.323];
+function lookChroma(t){
+  const c = LOOK_BLUE.map(v => Math.pow(v, t));
+  const l = 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  return c.map(v => v/l);
+}
+// the Moon tint's direction from the picked colour, green as reference -- render.py moon_base
+// the sky lift's direction from the picked colour -- render.py sky_base
+function skyBase(P){
+  const h = [P.skyHueR ?? 0.579, P.skyHueG ?? 0.756, P.skyHueB ?? 1.0].map(v => Math.min(1, Math.max(0.02, +v)));
+  return h.map(v => v/h[1]);
+}
+function moonBase(P){
+  const h = [P.moonHueR ?? 0.579, P.moonHueG ?? 0.756, P.moonHueB ?? 1.0].map(v => Math.min(1, Math.max(0.02, +v)));
+  return h.map(v => v/h[1]);
+}
+function lookChromaB(t, b){
+  const c = b.map(v => Math.pow(v, t));
+  const l = 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  return c.map(v => v/l);
+}
+// THE MOON VIEW -- render.py moon_alpha: the disc with its soft edge, black outside
+function moonMask(d, P){
+  const DEC = GEO.decim || 4, rr = L.r, rm = L.rmask;
+  const dsw = Math.max(1, (P.discSoft||12))/DEC, dt = (P.discTrim||0)/DEC;
+  for (let i=0, j=0; i<rr.length; i++, j+=4){
+    const e = (rr[i]-(rm[i]+dt+2/DEC-dsw))/dsw, a = 1 - (e<0?0:e>1?1:e);
+    d[j] *= a; d[j+1] *= a; d[j+2] *= a;
+  }
+}
+function lookPass(d, P){
+  const cl = P.coronaLevel||0, sl = P.skyLevel||0, mc = P.moonColour||0;
+  if (!(cl > 0) && !(sl > 0) && mc === 0) return;
+  const DEC = GEO.decim || 4, R = GEO.R, rr = L.r, rm = L.rmask;
+  const dsw = Math.max(1, (P.discSoft||12))/DEC, dt = (P.discTrim||0)/DEC;
+  const N = rr.length, EG = new Float32Array(N);
+  for (let i=0;i<N;i++){ const e = (rr[i]-(rm[i]+dt+2/DEC-dsw))/dsw; EG[i] = e<0?0:e>1?1:e; }
+  let k = 1, kok = false;
+  if (cl > 0){
+    const ys = [];
+    for (let i=0;i<N;i++){ const r = rr[i]; if (r >= 1.05*R && r < 1.15*R && EG[i] > 0.999){ const j = 4*i; ys.push((0.2126*d[j]+0.7152*d[j+1]+0.0722*d[j+2])/255); } }
+    if (ys.length > 50){ ys.sort((a,b)=>a-b); const med = ys.length % 2 ? ys[ys.length>>1] : 0.5*(ys[(ys.length>>1)-1]+ys[ys.length>>1]); if (med > 1e-4){ k = cl/med; kok = true; } }
+  }
+  // highlight compression and contain whites act AFTER the level step (render.look)
+  const hc = P.hlCompress||0, kn = 0.9-0.35*hc, doSh = kok && (k > 1 || hc > 0);
+  let cwf = 1;
+  const cw = P.containWhites||1;
+  if (cl > 0 && cw < 0.999 && VIEW === "composite"){
+    const NB = 4096, hist = new Uint32Array(NB+1); let cnt = 0;
+    for (let i=0, j=0; i<N; i++, j+=4){
+      const kk = 1 + (k-1)*EG[i]; let v0 = d[j]/255*kk, v1 = d[j+1]/255*kk, v2 = d[j+2]/255*kk;
+      if (doSh){ const m = Math.max(v0,v1,v2); if (m > kn){ const f = (kn + (1-kn)*Math.tanh((m-kn)/(1-kn)))/m; v0*=f; v1*=f; v2*=f; } }
+      const y = 0.2126*v0+0.7152*v1+0.0722*v2; hist[Math.min(NB, Math.max(0, Math.round(y*NB)))]++; cnt++;
+    }
+    let acc = 0, p = 1; for (let b=0;b<=NB;b++){ acc += hist[b]; if (acc >= cnt*0.9999){ p = b/NB; break; } }
+    if (p > cw && p > 0) cwf = cw/p;
+  }
+  const sc = sl > 0 ? lookChromaB(P.skyColour||0, skyBase(P)) : null, mcc = mc !== 0 ? lookChromaB(mc, moonBase(P)) : null;
+  // the Moon's tint scales with the disc's own level (render.py: no coloured ring at the limb)
+  let yd = 0;
+  if (mcc){
+    const ys = [];
+    for (let i=0;i<N;i++) if (EG[i] <= 0){ const j = 4*i; ys.push((0.2126*d[j]+0.7152*d[j+1]+0.0722*d[j+2])/255); }
+    if (ys.length > 20){ ys.sort((a,b)=>a-b); yd = ys.length % 2 ? ys[ys.length>>1] : 0.5*(ys[(ys.length>>1)-1]+ys[ys.length>>1]); }
+  }
+  for (let i=0, j=0; i<N; i++, j+=4){
+    const eg = EG[i], kk = 1 + (k-1)*eg;     // the disc keeps its own level
+    let v0 = d[j]/255*kk, v1 = d[j+1]/255*kk, v2 = d[j+2]/255*kk;
+    if (doSh){ const m = Math.max(v0,v1,v2); if (m > kn){ const f = (kn + (1-kn)*Math.tanh((m-kn)/(1-kn)))/m; v0*=f; v1*=f; v2*=f; } }
+    if (cwf !== 1){ v0*=cwf; v1*=cwf; v2*=cwf; }
+    if (sc){
+      v0 = Math.min(1,v0); v1 = Math.min(1,v1); v2 = Math.min(1,v2);
+      const l0 = Math.min(0.95, sl*sc[0]*eg), l1 = Math.min(0.95, sl*sc[1]*eg), l2 = Math.min(0.95, sl*sc[2]*eg);
+      v0 = 1-(1-v0)*(1-l0); v1 = 1-(1-v1)*(1-l1); v2 = 1-(1-v2)*(1-l2);
+    }
+    if (mcc){ const yp = Math.min(0.2126*v0 + 0.7152*v1 + 0.0722*v2, 2*yd);
+              const u = (1-eg)*yp; v0 += u*(mcc[0]-1); v1 += u*(mcc[1]-1); v2 += u*(mcc[2]-1); }
+    d[j] = Math.min(1,Math.max(0,v0))*255; d[j+1] = Math.min(1,Math.max(0,v1))*255; d[j+2] = Math.min(1,Math.max(0,v2))*255;
+  }
+}
+// THE 0.24 PROMINENCE LAYER over the finished picture. Same formula as
+// promlayer.overlay: the layer's own curve and colour, alpha from its own
+// brightness times the prominence / rim weights.
+function promOverlay(d){
+  if (!GEO || !GEO.hasPromLayer || !L.pl_L) return;
+  const P = effParams(); const s = P.promLayer ?? 1; if (!(s > 0)) return;
+  const gam = P.promStretch ?? 0.5, rim = P.promRim ?? 1, sat = P.promSat ?? 1.3, K = 1.5*s;
+  const Ll = L.pl_L, C = L.pl_C, W1 = L.pl_W1, W2 = L.pl_W2;
+  // mono + tints: one picked colour, unit luminance -- promlayer.overlay
+  let PC = null;
+  if ((P.colourMode|0) === 2){
+    const h = [P.promHueR ?? 1, P.promHueG ?? 0.70, P.promHueB ?? 0.75].map(v => Math.min(1, Math.max(0.02, +v)));
+    const l = 0.2126*h[0] + 0.7152*h[1] + 0.0722*h[2]; PC = h.map(v => v/l);
+  }
+  const PK = Math.min(1, Math.max(0.3, P.promPeak ?? 1));
+  for (let j=0; j<d.length; j+=4){
+    const Lv = (Ll[j]*256 + Ll[j+1])/65535*4;
+    if (Lv <= 0) continue;
+    let y = Math.pow(Lv, gam);
+    if (y >= 0.9) y = 0.9 + 0.1*Math.tanh((y-0.9)/0.1);
+    const a = Math.min(1, Math.max(0, y*((W1[j] + rim*W2[j])/255)*K));
+    if (a <= 0) continue;
+    let c0 = Math.max(0, 1 + ((PC ? PC[0] : C[j]  /255*4) - 1)*sat);
+    let c1 = Math.max(0, 1 + ((PC ? PC[1] : C[j+1]/255*4) - 1)*sat);
+    let c2 = Math.max(0, 1 + ((PC ? PC[2] : C[j+2]/255*4) - 1)*sat);
+    const m = Math.max(1, y*c0, y*c1, y*c2);
+    c0 /= m; c1 /= m; c2 /= m;
+    if (PK < 1){ const mx = Math.max(c0, c1, c2); if (mx > PK){ const f = PK/mx; c0 *= f; c1 *= f; c2 *= f; } }
+    const v0 = d[j]/255*(1-a) + c0*a, v1 = d[j+1]/255*(1-a) + c1*a, v2 = d[j+2]/255*(1-a) + c2*a;
+    d[j] = Math.min(1, v0)*255; d[j+1] = Math.min(1, v1)*255; d[j+2] = Math.min(1, v2)*255;
+  }
+}
+// FINAL SHARPENING runs after the base render, debounced, in a worker thread
+// (2026-10-07) so the sliders stay live while it computes: the base appears at
+// once, the finish follows after the controls rest. A result that arrives for
+// an older render is dropped. Composite and Moon views only, like the export.
+let _finalTimer = null, _fsWorker = null, _fsJob = 0, _fsBusy = false, _fsNext = null;
+function _fsMakeWorker(){
+  if (_fsWorker !== null) return _fsWorker;
+  try {
+    const src = "const FINAL_RADII=" + JSON.stringify(FINAL_RADII) + ", FINAL_REF_R=" + FINAL_REF_R
+      + ", FINAL_GATE=" + JSON.stringify(FINAL_GATE) + ";\n"
+      + "const _ERF_LUT=new Float32Array(" + JSON.stringify(Array.from(_ERF_LUT)) + ");\n"
+      + "const STRUCT_R=" + JSON.stringify(STRUCT_R) + ", STRUCT_K=" + STRUCT_K + ", STRUCT_LIMB=" + JSON.stringify(STRUCT_LIMB) + ";\n"
+      + [_boxesForGauss, _boxBlurH, _boxBlurV, _gauss, _softLight, _erf, structureBoost, finalSharpen].map(f => f.toString()).join("\n")
+      + "\nonmessage = e => { const m = e.data; const d = new Uint8ClampedArray(m.buf);"
+      + " structureBoost(d, m.W, m.H, m.cy, m.cx, m.R, m.st); finalSharpen(d, m.W, m.H, m.R, m.mid, m.dark, m.light, m.k);"
+      + " postMessage({job: m.job, buf: d.buffer}, [d.buffer]); };";
+    _fsWorker = new Worker(URL.createObjectURL(new Blob([src], {type: "text/javascript"})));
+    _fsWorker.onmessage = e => {
+      _fsBusy = false;
+      const m = e.data, job = _fsWorker._jobs && _fsWorker._jobs[m.job];
+      if (_fsWorker._jobs) delete _fsWorker._jobs[m.job];
+      if (_fsNext){ const n = _fsNext; _fsNext = null; _fsPost(n); }
+      if (!job || m.job !== _fsJob) return;            // an older render: drop it
+      const copy = new ImageData(new Uint8ClampedArray(m.buf), job.W, job.H);
+      if (job.view === "moon") moonMask(copy.data, job.PE); else promOverlay(copy.data);
+      octx.putImageData(copy, 0, 0); draw();
+      console.log("final sharpening", Math.round(performance.now()-job.t0), "ms (worker)");
+    };
+    _fsWorker.onerror = () => { _fsWorker = false; };
+    _fsWorker._jobs = {};
+  } catch (e){ _fsWorker = false; }
+  return _fsWorker;
+}
+function _fsPost(r){
+  const w = _fsMakeWorker();
+  if (!w){ _fsMain(r); return; }
+  if (_fsBusy){ _fsNext = r; return; }
+  _fsBusy = true; w._jobs[r.job] = r;
+  w.postMessage({job: r.job, buf: r.data.buffer, W: r.W, H: r.H, R: GEO.R, cy: GEO.cy, cx: GEO.cx, st: r.st,
+                 mid: r.mid, dark: r.dark, light: r.light, k: r.k}, [r.data.buffer]);
+}
+function _fsMain(r){                                    // no worker: the old path
+  if (r.job !== _fsJob) return;
+  const copy = new ImageData(r.data, r.W, r.H);
+  structureBoost(copy.data, r.W, r.H, GEO.cy, GEO.cx, GEO.R, r.st);
+  finalSharpen(copy.data, r.W, r.H, GEO.R, r.mid, r.dark, r.light, r.k);
+  if (r.view === "moon") moonMask(copy.data, r.PE); else promOverlay(copy.data);
+  octx.putImageData(copy, 0, 0); draw();
+}
+function scheduleFinal(base){
+  const PE = effParams(); const mid=PE.finalMid||0, dark=PE.finalDark||0, light=PE.finalLight||0, st=PE.structure||0;
+  if (_finalTimer){ clearTimeout(_finalTimer); _finalTimer=null; }
+  _fsJob++;                                              // anything still running is now stale
+  if ((VIEW !== "composite" && VIEW !== "moon") || !(mid>0||dark>0||light>0||st>0)) return;
+  if (RENDER_DRAFT) return;                              // only on the full picture
+  const r = {job: _fsJob, data: new Uint8ClampedArray(base.data), W: base.width, H: base.height,
+             view: VIEW, PE, mid, dark, light, st, k: PE.finalNoise||0, t0: 0};
+  _finalTimer = setTimeout(() => { _finalTimer = null; r.t0 = performance.now(); _fsPost(r); }, 200);
 }
 document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () => {
   VIEW = b.dataset.view;
   document.querySelectorAll(".vbtn").forEach(x => x.classList.toggle("primary", x===b));
   renderNow();
 }));
-let raf = null;
-function scheduleRender(){ if(!raf) raf = requestAnimationFrame(()=>{raf=null; renderNow();}); }
+// RENDER SCHEDULING. One render per animation frame at most. While a control
+// is being moved (input in the last 150 ms) and a full render takes longer
+// than 60 ms, the frame is drawn as a draft at a half or a third of the resolution; the full picture
+// follows 180 ms after the last move.
+let raf = null, _lastInput = 0, _fullMs = 0, _fullTimer = null;
+function noteInput(){ _lastInput = performance.now(); }
+function scheduleRender(){
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = null;
+    const now = performance.now();
+    const draft = (now - _lastInput < 150) && _fullMs > 60;
+    RENDER_DRAFT = draft; RENDER_DRAFT_STEP = _fullMs > 700 ? 3 : 2;
+    const t0 = performance.now();
+    try { renderNow(); } finally { RENDER_DRAFT = false; }
+    if (!draft) _fullMs = performance.now() - t0;
+    markDefaults();
+    if (_fullTimer){ clearTimeout(_fullTimer); _fullTimer = null; }
+    if (draft) _fullTimer = setTimeout(() => { _fullTimer = null; _lastInput = 0; scheduleRender(); }, 180);
+  });
+}
+
 
 cv.addEventListener("wheel", e => {
   if (!GEO) return;
@@ -1387,10 +2148,48 @@ function solveWhite(x0, y0, x1, y1, pred, label){
   const tD = Math.min(Dt.max, Math.max(Dt.min, Math.round(tW)));
   const nD = Math.min(Dn.max, Math.max(Dn.min, Math.round(nW)));
   const clipped = Math.abs(tD-tW) > 1 || Math.abs(nD-nW) > 1;
-  applyParams({temp: Dt.from(tD), tint: Dn.from(nD)});
+  applyParams({temp: Dt.from(tD), tint: Dn.from(nD)}, {colourOnly: true});
   pickCancel(label + A0.length + " px: Temperature " + dispFmt(tD) + ", Tint " + dispFmt(nD)
              + (clipped ? "  (wanted " + dispFmt(tW) + " / " + dispFmt(nW) + " - clamped to the slider range; that spot is further from neutral than these sliders reach)" : ""));
 }
+// LOOK PRESETS: colour and tone fitted (looks/fit.py, 600 mm set) to measured
+// looks of published renders; named for what they look like, not for whom
+// partial convolution in every look (2026-10-07, Nico's start values; the 2-32 px weights are left as they are)
+const LOOKS = {"helion": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.1, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "containWhites": 1, "coronaLevel": 0.68, "radialFlatten": 0.35, "envGamma": 1.1, "satur": 0.15, "skyLevel": 0.17, "skyColour": 1.1, "discLevel": 0.2, "moonColour": 0.707, "hillMix": 0.2, "hillLogK": 4.0, "hillGain": 0.02, "hillBase": 0.0, "hillZone": 0.3, "hillZoneR": 2.0, "earthShine": 0.3, "clarity": 0.1, "smoothing": 0.55, "hillDenoise": 0.0, "hlCompress": 0.0, "mgnContrast": 0.1, "baseLift": 0.45, "detailGain": 1.3, "finalMid": 0.25, "finalLight": 0.15, "promSat": 0.5, "fnMix": 0.4, "warm": [0.94, 1.03]}, "lefaudeux": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [1, 1]], "containWhites": 1, "coronaLevel": 0.593, "radialFlatten": 0.327, "envGamma": 1.09, "satur": 0.542, "skyLevel": 0.119, "skyColour": 1.28, "discLevel": 0.114, "moonColour": 1.468, "hillMix": 0.4, "hillLogK": 4.0, "hillGain": 0.02, "hillBase": 0.0, "hillZone": 0.3, "hillZoneR": 2.0, "earthShine": 0.3}, "druckmuller": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.589, "radialFlatten": 0.0, "envGamma": 1.046, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.25, "hillLogK": 4.0, "hillGain": 0.02, "hillBase": 0.0, "hillZone": 0.3, "hillZoneR": 2.0, "earthShine": 0.0, "clarity": 0.28, "smoothing": 0.4, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.18, "hillDenoise": 0.0, "hlCompress": 0.0}, "sunset": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.06, "toneCurve": [[0, 0], [0.25, 0.42], [0.75, 0.9], [1, 1]], "containWhites": 1, "coronaLevel": 0.62, "radialFlatten": 0.08, "envGamma": 1.09, "satur": 0.9, "skyLevel": 0.03, "skyColour": -1.5, "discLevel": 0.16, "moonColour": 1.0, "earthShine": 0.3, "hlCompress": 0.0, "moonHueR": 1.0, "moonHueG": 0.55, "moonHueB": 0.3, "hillMix": 0.25, "hillLogK": 4.0, "hillGain": 0.02, "hillBase": 0.0, "hillZone": 0.3, "hillZoneR": 2.0, "hillDenoise": 0.0, "clarity": 0.15, "smoothing": 0.45, "warm": [2.3, 1.07]}, "darkmoody": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.1, "toneCurve": [[0, 0], [0.2, 0.22], [0.35, 0.42], [0.5, 0.5], [0.75, 0.78], [1, 1]], "containWhites": 1, "coronaLevel": 0.55, "radialFlatten": 0.1, "envGamma": 0.8, "satur": 0.25, "skyLevel": 0.09, "skyColour": 1.3, "discLevel": 0.4, "moonColour": 0.6, "hillMix": 0.25, "hillLogK": 4.0, "hillGain": 0.02, "hillBase": 0.0, "hillZone": 0.3, "hillZoneR": 2.0, "earthShine": 0.3, "hillDenoise": 0.0, "clarity": 0.1, "smoothing": 0.5, "warm": [0.9, 0.97]}, "purple": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.1, "toneCurve": [[0, 0], [0.25, 0.38], [0.5, 0.7], [0.75, 0.9], [1, 1]], "containWhites": 1, "coronaLevel": 0.85, "radialFlatten": 0.3, "envGamma": 1.0, "satur": 0.25, "skyLevel": 0.1, "skyColour": 1.1, "discLevel": 0.25, "moonColour": 1.0, "hillMix": 0.25, "hillLogK": 4.0, "hillGain": 0.02, "hillBase": 0.0, "hillZone": 0.3, "hillZoneR": 2.0, "earthShine": 0.3, "clarity": 0.1, "smoothing": 0.55, "hillDenoise": 0.0, "hlCompress": 0.0, "mgnContrast": 0.1, "baseLift": 0.45, "detailGain": 1.3, "finalMid": 0.25, "finalLight": 0.15, "promSat": 0.5, "fnMix": 0.4, "skyHueR": 0.72, "skyHueG": 0.68, "skyHueB": 1.0, "moonHueR": 0.8, "moonHueG": 0.82, "moonHueB": 1.0, "warm": [1.0, 0.93]}};
+// As loaded: every look control back to what the server sent after stacking
+// (the picture as it first appeared); a control whose layer was not built stays 0.
+function loadedParams(){
+  const np = JSON.parse(JSON.stringify(SLIDER_DEFAULTS));
+  for (const [k] of DEFS){ const need = NEEDS_LAYER[k]; if (need && GEO && !GEO[need[0]]) np[k] = 0; }
+  for (const ck of ["toneCurve", "moonCurve"]) if (!Array.isArray(np[ck])) np[ck] = [[0,0],[1,1]];
+  return np;
+}
+$("lookpreset").addEventListener("change", e => {
+  const v = e.target.value, name = e.target.selectedOptions[0].textContent;
+  if (!v || !ready || !GEO) return;
+  if (v === "asloaded"){ applyParams(loadedParams()); setMoonHueDefault(); setSkyHueDefault(); setPromHueDefault(); P.colourMode = 0; syncColourMode(); $("status").textContent = name + ": the picture as it appeared after stacking"; return; }
+  if (!LOOKS[v]) return;
+  // every key any look sets goes back to its as-loaded value first, so a look
+  // looks the same whichever look was applied before it
+  const base = loadedParams(), np = {};
+  for (const lk in LOOKS) for (const k in LOOKS[lk]) if (k !== "warm" && k in base) np[k] = base[k];
+  applyParams(Object.assign(np, LOOKS[v]));
+  // As shot keeps the camera's colours: no corona white
+  if (LOOKS[v].asShot){ $("status").textContent = name + ": camera colours (Temperature and Tint 1)"; return; }
+  // then the corona white on the 1.05-1.6 R ring, as the presets were fitted
+  const R0 = 1.05*GEO.R, R1 = 1.6*GEO.R;
+  solveWhite(0, 0, GEO.W-1, GEO.H-1, (dx, dy) => { const r = Math.hypot(dx, dy); return r >= R0 && r < R1; },
+             name + " + corona white from ");
+  // a warm look: Temperature and Tint multiplied onto that white, on the sliders' scale
+  const w = LOOKS[v].warm;
+  if (w){
+    const Dt = DISPLAY.temp, Dn = DISPLAY.tint;
+    const tD = Math.min(Dt.max, Math.max(Dt.min, Math.round(Dt.to(P.temp*w[0]))));
+    const nD = Math.min(Dn.max, Math.max(Dn.min, Math.round(Dn.to(P.tint*w[1]))));
+    applyParams({temp: Dt.from(tD), tint: Dn.from(nD)}, {colourOnly: true});
+    $("status").textContent = name + ": corona white, then warmed (Temperature " + dispFmt(tD) + ", Tint " + dispFmt(nD) + ")";
+  }
+});
 $("pickwb").addEventListener("click", () => { if (PICKWB) pickCancel("white point: cancelled"); else pickBegin(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && PICKWB) pickCancel("white point: cancelled"); });
 
@@ -1401,12 +2200,12 @@ $("ringload").addEventListener("click", async () => {
     body: JSON.stringify({path: $("ringpath").value})});
   const j = await r.json();
   if (!j.ok){ $("status").textContent = j.error; $("ringload").disabled = false; return; }
-  runStart();
+  runStart("contact");
   const poll = async () => {
     let p;
     try {
       p = await (await fetch("/api/progress")).json();
-      $("log").textContent = p.lines.join("\n"); $("log").scrollTop = 1e9;
+      setLog(p.lines, p.levels);
       runSync(p);
     } catch (e){ return pollAgain(poll, 600, e); }   // see pollAgain
     POLL_FAILS = 0;
@@ -1438,7 +2237,8 @@ async function pickOpen(kind, targetId, title, note){
   $("pickNote").textContent = note || "";
   $("pickUse").style.display = (kind === "dir") ? "" : "none";
   $("pick").classList.add("on");
-  const start = $(targetId).value.trim();
+  const [start, fb] = pickStartFor(kind, targetId);
+  PICK.fallback = fb || "";
   await pickGo(start || "");
 }
 
@@ -1446,11 +2246,13 @@ async function pickGo(path){
   let j;
   try {
     const r = await fetch("/api/browse?kind=" + encodeURIComponent(PICK.kind)
-                          + "&path=" + encodeURIComponent(path));
+                          + "&path=" + encodeURIComponent(path)
+                          + "&fallback=" + encodeURIComponent(PICK.fallback || ""));
     j = await r.json();
   } catch (e) { j = {ok:false, error:String(e)}; }
   if (!j.ok){ $("pickCrumb").textContent = j.error || "cannot read that folder"; return; }
   PICK.path = j.path; PICK.sep = j.sep;
+  try { localStorage.setItem("efh.pickdir." + PICK.kind, j.path); } catch(e){}
   $("pickCrumb").textContent = j.path;
   const L = $("pickList");
   L.textContent = "";
@@ -1534,7 +2336,27 @@ $("ringpath").addEventListener("keydown", e => {
 // its stale value straight back. So both are set, from the server's dict, for
 // every key -- including the ones the file did not mention, which the server
 // has already filled with the default rather than leaving them as they were.
-function applyParams(np){
+// opts.colourOnly: only the given controls change -- the white point sets
+// Temperature and Tint after a look and must not put its curves back to the
+// defaults (2026-10-07: that dropped the Sunset look's tone curve)
+function applyParams(np, opts){
+  if (!(opts && opts.colourOnly)) for (const ck of ["toneCurve", "moonCurve"]){
+    if (Array.isArray(np[ck])) P[ck] = curveNorm(np[ck]);
+    else if (!(ck in np) && SLIDER_DEFAULTS[ck] && !np.asShot && !("coronaLevel" in np)) P[ck] = curveNorm(SLIDER_DEFAULTS[ck]);
+  }
+  // a look preset carries no Moon colour: it goes back to the looks' blue, which the presets were fitted with
+  if ("coronaLevel" in np && !("moonHueR" in np)) setMoonHueDefault();
+  for (const hk of MOONHUE_KEYS) if (hk in np) P[hk] = +np[hk];
+  syncMoonHue();
+  if ("coronaLevel" in np && !("skyHueR" in np)) setSkyHueDefault();
+  for (const hk of SKYHUE_KEYS) if (hk in np) P[hk] = +np[hk];
+  syncSkyHue();
+  if ("coronaLevel" in np && !("promHueR" in np)) setPromHueDefault();
+  for (const hk of PROMHUE_KEYS) if (hk in np) P[hk] = +np[hk];
+  syncPromHue();
+  if ("colourMode" in np) P.colourMode = np.colourMode|0;
+  else if ("coronaLevel" in np) P.colourMode = 0;
+  syncColourMode();
   for (const [k,,,,,] of DEFS){
     if (!(k in np)) continue;
     P[k] = np[k];
@@ -1659,6 +2481,14 @@ async function settingsLoad(path){
 }
 
 $("start").addEventListener("click", startRun);
+$("cancelrun").addEventListener("click", async () => {
+  const b = $("cancelrun"); b.disabled = true; b.textContent = "Cancelling…";
+  try {
+    const j = await (await fetch("/api/cancel", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"})).json();
+    $("status").textContent = j.ok ? "cancelling — the job stops at its next step" : (j.error || "could not cancel");
+    if (!j.ok){ b.disabled = false; b.textContent = "Cancel"; }
+  } catch (e){ b.disabled = false; b.textContent = "Cancel"; }
+});
 // Registered here, at load. It used to sit INSIDE the export handler below,
 // so the orientation control did nothing until the first export and then
 // gained one more listener on every export after that.
@@ -1668,9 +2498,9 @@ $("export").addEventListener("click", async () => {
   $("export").disabled = true;
   const r = await fetch("/api/export", {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({format: fmt, params: P, name: $("expname").value, view: VIEW, orient: ORIENT, size: $("exphalf").checked ? "half" : "full", promLayer: $("expprom").checked})});
+    body: JSON.stringify({format: fmt, params: effParams(), name: $("expname").value, view: VIEW, orient: ORIENT, size: $("exphalf").checked ? "half" : "full", promLayer: $("expprom").checked, moonLayer: $("expmoon").checked})});
   const j = await r.json();
-  if (j.ok){ $("status").textContent = "exporting → " + j.path; runStart(); pollExport(); }
+  if (j.ok){ $("status").textContent = "exporting → " + j.path; runStart("export"); pollExport(); }
   else { $("status").textContent = j.error; $("export").disabled = false; }
 });
 async function pollExport(){
@@ -1682,13 +2512,478 @@ async function pollExport(){
   POLL_FAILS = 0;
   if (j.done){
     $("export").disabled = false;
-    runStop(j.error ? "✕" : "✓", j.error ? "export failed" : "export done");
+    runStop(j.error ? (j.cancelled ? "■" : "✕") : "✓",
+            j.error ? (j.cancelled ? "export cancelled" : "export failed") : "export done");
+    if (!j.error) loadVersions();
     $("status").textContent = j.error ? ("export failed: "+j.error) :
       (j.lines[j.lines.length-1] || "export done");
     return;
   }
   pollAgain(pollExport, 700);
 }
+
+
+
+// ---------------------------------------------------------------- block 3a
+// Per-group eye: hide a group's EFFECT without touching its sliders -- the
+// parameters the renderer sees are the sliders with these overrides. Preview
+// and export both use effParams(), so what you see is what you get.
+const BYPASS = {
+  "Structure": {mgnContrast:0, fnCompress:0, nafeMix:0, clarity:0, structure:0, pelGain:0},
+  "Partial convolution": {hillMix:0},
+  "Inner corona": {innerMix:0, innerDim:0},
+  "Prominences": {promGain:0, promChroma:0, promLayer:0},
+  "Color": {temp:1, tint:1, satur:1, bgNeutral:0, hlCompress:0, hlDesat:0, skyLevel:0},
+  "Tone": {outGamma:1, bgBlack:0, toneCurve:[[0,0],[1,1]], containWhites:1, coronaLevel:0},
+  "Moon": {earthShine:0, moonColour:0, moonCurve:[[0,0],[1,1]]},
+  "Final sharpening": {finalMid:0, finalDark:0, finalLight:0},
+  "Diamond ring": {ringBlend:0}
+};
+const HIDDEN = new Set();
+function effParams(){
+  const q = Object.assign({}, P);
+  for (const g of HIDDEN) Object.assign(q, BYPASS[g] || {});
+  for (const k of HIDDENK) q[k] = itemOff(k);
+  // the Colour mode -- render.py colour_mode
+  const cm = q.colourMode|0;
+  if (cm === 1){ q.satur = 0; q.skyColour = 0; q.moonColour = 0; q.promSat = 0; }
+  else if (cm === 2) q.satur = 0;
+  return q;
+}
+function syncHiddenNote(){
+  const n = $("hiddennote"); if (!n) return;
+  const parts = [];
+  if (HIDDEN.size) parts.push(HIDDEN.size + (HIDDEN.size === 1 ? " group" : " groups"));
+  if (HIDDENK.size) parts.push(HIDDENK.size + (HIDDENK.size === 1 ? " control" : " controls"));
+  n.textContent = parts.length ? ("· " + parts.join(" and ") + " hidden — the export follows the preview") : "";
+}
+document.querySelectorAll(".group .grouphead").forEach(h => {
+  const t = h.querySelector("h2").textContent.trim(); if (!BYPASS[t]) return;
+  const b = document.createElement("button"); b.className = "mini eye"; b.title = "Hide this group's effect for a before/after look (the sliders keep their values).";
+  b.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13"><path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
+  b.addEventListener("click", e => { e.stopPropagation();
+    if (HIDDEN.has(t)) HIDDEN.delete(t); else HIDDEN.add(t);
+    h.parentElement.classList.toggle("hidden", HIDDEN.has(t)); syncHiddenNote(); scheduleRender(); });
+  h.insertBefore(b, h.querySelector(".tog"));
+});
+// The browse dialog starts where the files are: the field's own value, else
+// where you last were for that kind, else the output folder of the loaded raw
+// folder for recipes and settings (the raw folder itself for images), else home.
+function pickStartFor(kind, targetId){
+  const own = $(targetId).value.trim(); if (own) return [own, ""];
+  let last = ""; try { last = localStorage.getItem("efh.pickdir." + kind) || ""; } catch(e){}
+  const folder = $("folder").value.trim();
+  const outdir = folder ? folder.replace(/[\/\\]+$/, "") + "/eclipseforge_output" : "";
+  if (kind === "settings" || kind === "processing") return [last || outdir, folder];
+  return [last || folder, folder];
+}
+
+
+
+// ---------------------------------------------------------------- block 3c: an eye per slider
+// What a control renders at while its eye is shut: 0 for an amount, 1 for a
+// gain or gamma, the default where there is no 'off' (a radius, a stretch).
+const ITEM_ONE = new Set(["temp","tint","satur","outGamma","envGamma","detailGain","containWhites","ringScale","promSat"]);
+const ITEM_DEFAULT = new Set(["detailScale","hillLogK","hillZoneR","discLevel","discSoft","promStretch"]);
+const HIDDENK = new Set();
+function itemOff(k){
+  if (ITEM_ONE.has(k)) return 1;
+  if (ITEM_DEFAULT.has(k)) return (SLIDER_DEFAULTS[k] != null ? SLIDER_DEFAULTS[k] : 0);
+  return 0;
+}
+function toggleItem(k){
+  const ctl = $("s_"+k) && $("s_"+k).closest(".ctl"); if (!ctl) return;
+  if (HIDDENK.has(k)) HIDDENK.delete(k); else HIDDENK.add(k);
+  ctl.classList.toggle("ihid", HIDDENK.has(k));
+  syncHiddenNote(); scheduleRender();
+}
+
+
+// ---------------------------------------------------------------- block 3e: the tone curve, points where you put them
+// P.toneCurve is a list of [in, out] points on 0..1 (identity = [[0,0],[1,1]]).
+// Click the curve to add a point, drag a point in both directions (it stays
+// between its neighbours), double-click a point to remove it, double-click the
+// background to straighten the curve. The LUT is the same monotone cubic the
+// export applies (render.tone_lut_pts).
+function curveNorm(pts){
+  let P = (pts || []).map(p => [Math.min(1, Math.max(0, +p[0])), Math.min(1, Math.max(0, +p[1]))]).sort((a, b) => a[0] - b[0]);
+  if (!P.length || P[0][0] > 1e-6) P.unshift([0, 0]);
+  if (P[P.length-1][0] < 1 - 1e-6) P.push([1, 1]);
+  return P;
+}
+function curveIsIdentity(pts){ return curveNorm(pts).every(p => Math.abs(p[0] - p[1]) < 1e-6); }
+function toneLutPts(pts){
+  const P = curveNorm(pts); const xs = [], ys = [];
+  for (const p of P){ if (xs.length && p[0] - xs[xs.length-1] <= 1e-4) continue; xs.push(p[0]); ys.push(Math.max(p[1], ys.length ? ys[ys.length-1] : 0)); }
+  const k = xs.length, n = 1024, out = new Float32Array(n);
+  if (k < 2){ for (let i = 0; i < n; i++) out[i] = i/(n-1); return out; }
+  const h = [], d = []; for (let i = 0; i < k-1; i++){ h.push(xs[i+1]-xs[i]); d.push((ys[i+1]-ys[i])/h[i]); }
+  const m = new Array(k).fill(0); m[0] = d[0]; m[k-1] = d[k-2];
+  for (let i = 1; i < k-1; i++) m[i] = d[i-1]*d[i] <= 0 ? 0 : 2/(1/d[i-1] + 1/d[i]);
+  let seg = 0;
+  for (let p = 0; p < n; p++){
+    const t = p/(n-1); while (seg < k-2 && t > xs[seg+1]) seg++;
+    const u = (t - xs[seg])/h[seg];
+    const h00 = 2*u*u*u-3*u*u+1, h10 = u*u*u-2*u*u+u, h01 = -2*u*u*u+3*u*u, h11 = u*u*u-u*u;
+    out[p] = Math.min(1, Math.max(0, h00*ys[seg] + h10*h[seg]*m[seg] + h01*ys[seg+1] + h11*h[seg]*m[seg+1]));
+  }
+  return out;
+}
+let CURVES = [];
+const CURVE = {draw(){ CURVES.forEach(c => c.draw()); }};
+function setupCurve(){
+  CURVES = [];
+  const a1 = $("s_containWhites"), a2 = $("s_discTrim");
+  if (a1) makeCurve("toneCurve", "Tone curve (everything but the Moon)", a1.closest(".ctl"));
+  if (a2) makeMoonHue(a2.closest(".ctl"));
+  { const a3 = $("s_skyColour"); if (a3) makeSkyHue(a3.closest(".ctl")); }
+  { const a4 = $("s_promSat"); if (a4) makePromHue(a4.closest(".ctl")); }
+  if (P.colourMode == null) P.colourMode = SLIDER_DEFAULTS.colourMode ?? 0;
+  syncColourMode();
+  if (a2) makeCurve("moonCurve", "Moon tone curve", a2.closest(".ctl"));
+}
+function makeCurve(KEY, LABEL, row){
+  if (!P[KEY]) P[KEY] = JSON.parse(JSON.stringify(SLIDER_DEFAULTS[KEY] || [[0,0],[1,1]]));
+  const box = document.createElement("div"); box.className = "curvebox"; box.dataset.key = KEY;
+  box.innerHTML = '<div class="clabel"><span>' + LABEL + '</span><span class="cinfo">click the curve to add a point</span></div>'
+    + '<svg viewBox="0 0 220 220" preserveAspectRatio="xMidYMid meet">'
+    + '<rect class="cbg" x="10" y="10" width="200" height="200" rx="3"/>'
+    + '<path class="cgrid" d="M60 10V210M110 10V210M160 10V210M10 60H210M10 110H210M10 160H210"/>'
+    + '<path class="cdiag" d="M10 210L210 10"/><path class="ccurve" d=""/><path class="chit" d="" fill="none" stroke="transparent" stroke-width="14"/>'
+    + '<g class="cknots"></g><text class="clab" x="12" y="207">shadows</text><text class="clab" x="208" y="20" text-anchor="end">highlights</text></svg>';
+  row.parentElement.insertBefore(box, row);
+  const svg = box.querySelector("svg"), path = box.querySelector(".ccurve"), hit = box.querySelector(".chit"), kg = box.querySelector(".cknots"), info = box.querySelector(".cinfo");
+  const X = v => 10 + 200*v, Y = v => 210 - 200*v, fx = px => Math.min(1, Math.max(0, (px - 10)/200)), fy = py => Math.min(1, Math.max(0, (210 - py)/200));
+  function pos(e){ const r = svg.getBoundingClientRect(); const s = 220/r.width; return [(e.clientX - r.left)*s, (e.clientY - r.top)*s]; }
+  function commit(){ P[KEY] = curveNorm(P[KEY]); scheduleRender(); }
+  function draw(){
+    const pts = curveNorm(P[KEY]), lut = toneLutPts(pts), ident = curveIsIdentity(pts);
+    let d = ""; for (let i = 0; i <= 100; i++){ const t = i/100; d += (i ? "L" : "M") + X(t).toFixed(1) + " " + Y(lut[Math.round(t*1023)]).toFixed(1); }
+    path.setAttribute("d", d); hit.setAttribute("d", d); path.classList.toggle("nd", !ident);
+    while (kg.children.length > pts.length) kg.removeChild(kg.lastChild);
+    while (kg.children.length < pts.length){ const c = document.createElementNS("http://www.w3.org/2000/svg", "circle"); c.setAttribute("r", "6"); c.setAttribute("class", "cknot"); kg.appendChild(c); }
+    pts.forEach((p, i) => { const c = kg.children[i]; c.setAttribute("cx", X(p[0])); c.setAttribute("cy", Y(p[1])); c.dataset.i = i; c.classList.toggle("nd", Math.abs(p[0]-p[1]) > 1e-6); c.classList.toggle("end", i === 0 || i === pts.length-1); });
+  }
+  let drag = null;
+  svg.addEventListener("pointerdown", e => {
+    const t = e.target; const [px, py] = pos(e);
+    if (t.classList && t.classList.contains("cknot")){ drag = +t.dataset.i; }
+    else if (t === hit || t === path){                       // add a point on the curve at this x
+      const pts = curveNorm(P[KEY]); const x = fx(px), lut = toneLutPts(pts); const y = lut[Math.round(x*1023)];
+      pts.push([x, y]); pts.sort((a, b) => a[0]-b[0]); P[KEY] = pts; drag = pts.findIndex(p => p[0] === x); draw();
+    } else return;
+    e.preventDefault(); e.stopPropagation(); svg.setPointerCapture(e.pointerId); kg.children[drag] && kg.children[drag].classList.add("on");
+  });
+  svg.addEventListener("pointermove", e => {
+    const [px, py] = pos(e);
+    if (drag == null){ const x = fx(px); const lut = toneLutPts(P[KEY]); info.textContent = "in " + x.toFixed(3) + " → out " + lut[Math.round(x*1023)].toFixed(3); return; }
+    const pts = curveNorm(P[KEY]); const i = drag, last = pts.length-1;
+    let x = fx(px), y = fy(py);
+    if (i === 0) x = 0; else if (i === last) x = 1; else x = Math.min(pts[i+1][0] - 0.01, Math.max(pts[i-1][0] + 0.01, x));
+    y = Math.round(y*1000)/1000; x = Math.round(x*1000)/1000;
+    pts[i] = [x, y]; P[KEY] = pts; info.textContent = "point " + (i+1) + ": in " + x.toFixed(3) + " → out " + y.toFixed(3);
+    draw(); noteInput(); scheduleRender();
+  });
+  const end = e => { if (drag == null) return; kg.children[drag] && kg.children[drag].classList.remove("on"); drag = null; commit(); };
+  svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", end);
+  svg.addEventListener("dblclick", e => {
+    e.stopPropagation(); e.preventDefault(); const t = e.target;
+    if (t.classList && t.classList.contains("cknot")){ const i = +t.dataset.i, pts = curveNorm(P[KEY]); if (i > 0 && i < pts.length-1){ pts.splice(i, 1); P[KEY] = pts; } }
+    else P[KEY] = [[0, 0], [1, 1]];
+    draw(); commit();
+  });
+  CURVES.push({draw}); draw();
+}
+// THE MOON COLOUR: a picker for the colour the tint heads towards (Moon colour
+// strength 1 = this colour, 0 = grey). Stored as three numbers, display RGB.
+const MOONHUE_KEYS = ["moonHueR", "moonHueG", "moonHueB"];
+function _hex(v){ return Math.round(Math.min(1, Math.max(0, +v))*255).toString(16).padStart(2, "0"); }
+function moonHueHex(){ return "#" + MOONHUE_KEYS.map(k => _hex(P[k] ?? SLIDER_DEFAULTS[k] ?? 0)).join(""); }
+function moonHueIsDefault(){ return MOONHUE_KEYS.every(k => SLIDER_DEFAULTS[k] == null || Math.abs((P[k] ?? SLIDER_DEFAULTS[k]) - SLIDER_DEFAULTS[k]) < 0.003); }
+function setMoonHueDefault(){ MOONHUE_KEYS.forEach(k => { if (SLIDER_DEFAULTS[k] != null) P[k] = SLIDER_DEFAULTS[k]; }); syncMoonHue(); }
+function syncMoonHue(){ const el = $("moonhue"); if (el) el.value = moonHueHex(); }
+function makeMoonHue(row){
+  MOONHUE_KEYS.forEach(k => { if (P[k] == null) P[k] = SLIDER_DEFAULTS[k] ?? 1; });
+  const div = document.createElement("div"); div.className = "ctl moonhuectl";
+  div.title = "Target colour of the Moon's tint; Moon colour strength sets how far (0 grey, 1 this colour). Double-click to reset.";
+  div.innerHTML = '<label><span>Moon colour</span><span class="val"><input type="color" id="moonhue" style="width:44px;height:22px;padding:0;border:1px solid var(--line);background:none;cursor:pointer"></span></label>';
+  row.parentElement.insertBefore(div, row);
+  const el = div.querySelector("input"); el.value = moonHueHex();
+  el.addEventListener("input", () => {
+    const h = el.value; P.moonHueR = parseInt(h.slice(1,3),16)/255; P.moonHueG = parseInt(h.slice(3,5),16)/255; P.moonHueB = parseInt(h.slice(5,7),16)/255;
+    scheduleRender();
+  });
+  div.addEventListener("dblclick", e => { if (e.target === el) return; setMoonHueDefault(); scheduleRender(); });
+}
+
+// THE SKY COLOUR: the same picker for the sky lift (Sky lift colour 1 = this
+// colour, 0 = grey, negative = its opposite). Default = the old blue axis.
+const SKYHUE_KEYS = ["skyHueR", "skyHueG", "skyHueB"];
+function skyHueHex(){ return "#" + SKYHUE_KEYS.map(k => _hex(P[k] ?? SLIDER_DEFAULTS[k] ?? 0)).join(""); }
+function skyHueIsDefault(){ return SKYHUE_KEYS.every(k => SLIDER_DEFAULTS[k] == null || Math.abs((P[k] ?? SLIDER_DEFAULTS[k]) - SLIDER_DEFAULTS[k]) < 0.003); }
+function setSkyHueDefault(){ SKYHUE_KEYS.forEach(k => { if (SLIDER_DEFAULTS[k] != null) P[k] = SLIDER_DEFAULTS[k]; }); syncSkyHue(); }
+function syncSkyHue(){ const el = $("skyhue"); if (el) el.value = skyHueHex(); }
+function makeSkyHue(row){
+  SKYHUE_KEYS.forEach(k => { if (P[k] == null) P[k] = SLIDER_DEFAULTS[k] ?? 1; });
+  const div = document.createElement("div"); div.className = "ctl skyhuectl";
+  div.title = "Target colour of the sky lift; Sky lift colour sets how far towards it (1 = this colour, 0 = grey). Double-click to reset.";
+  div.innerHTML = '<label><span>Sky colour</span><span class="val"><input type="color" id="skyhue" style="width:44px;height:22px;padding:0;border:1px solid var(--line);background:none;cursor:pointer"></span></label>';
+  row.parentElement.insertBefore(div, row.nextSibling);
+  const el = div.querySelector("input"); el.value = skyHueHex();
+  el.addEventListener("input", () => {
+    const h = el.value; P.skyHueR = parseInt(h.slice(1,3),16)/255; P.skyHueG = parseInt(h.slice(3,5),16)/255; P.skyHueB = parseInt(h.slice(5,7),16)/255;
+    scheduleRender();
+  });
+  div.addEventListener("dblclick", e => { if (e.target === el) return; setSkyHueDefault(); scheduleRender(); });
+}
+
+// THE PROMINENCE COLOUR: used in Colour mode "Mono + tints" only.
+const PROMHUE_KEYS = ["promHueR", "promHueG", "promHueB"];
+function promHueHex(){ return "#" + PROMHUE_KEYS.map(k => _hex(P[k] ?? SLIDER_DEFAULTS[k] ?? 0)).join(""); }
+function promHueIsDefault(){ return PROMHUE_KEYS.every(k => SLIDER_DEFAULTS[k] == null || Math.abs((P[k] ?? SLIDER_DEFAULTS[k]) - SLIDER_DEFAULTS[k]) < 0.003); }
+function setPromHueDefault(){ PROMHUE_KEYS.forEach(k => { if (SLIDER_DEFAULTS[k] != null) P[k] = SLIDER_DEFAULTS[k]; }); syncPromHue(); }
+function syncPromHue(){ const el = $("promhue"); if (el) el.value = promHueHex(); }
+function makePromHue(row){
+  PROMHUE_KEYS.forEach(k => { if (P[k] == null) P[k] = SLIDER_DEFAULTS[k] ?? 1; });
+  const div = document.createElement("div"); div.className = "ctl promhuectl";
+  div.title = "Prominence colour in Colour mode Mono + tints. Double-click to reset.";
+  div.innerHTML = '<label><span>Prominence colour</span><span class="val"><input type="color" id="promhue" style="width:44px;height:22px;padding:0;border:1px solid var(--line);background:none;cursor:pointer"></span></label>';
+  row.parentElement.insertBefore(div, row.nextSibling);
+  if (GEO && !GEO.hasPromLayer) div.style.display = "none";
+  const el = div.querySelector("input"); el.value = promHueHex();
+  el.addEventListener("input", () => {
+    const h = el.value; P.promHueR = parseInt(h.slice(1,3),16)/255; P.promHueG = parseInt(h.slice(3,5),16)/255; P.promHueB = parseInt(h.slice(5,7),16)/255;
+    scheduleRender();
+  });
+  div.addEventListener("dblclick", e => { if (e.target === el) return; setPromHueDefault(); scheduleRender(); });
+}
+// THE COLOUR MODE select (render.py colour_mode)
+function syncColourMode(){ const el = $("colourmode"); if (el) el.value = String(P.colourMode|0); }
+$("colourmode").addEventListener("change", e => { P.colourMode = +e.target.value; scheduleRender(); });
+
+// ---------------------------------------------------------------- block 3b: versions
+function fmtWhen(t){
+  const d = new Date(t*1000), now = new Date();
+  const hm = d.toTimeString().slice(0,5);
+  if (d.toDateString() === now.toDateString()) return "today " + hm;
+  return d.toISOString().slice(0,10) + " " + hm;
+}
+async function loadVersions(){
+  const box = $("versions"); if (!box) return;
+  let j; try { j = await (await fetch("/api/exports")).json(); } catch(e){ j = {ok:false}; }
+  if (!j.ok){ box.innerHTML = '<span class="hint">could not read the output folder</span>'; return; }
+  if (!j.items.length){ box.innerHTML = '<span class="hint">no exports yet — every export shows up here</span>'; return; }
+  box.innerHTML = "";
+  for (const it of j.items){
+    const card = document.createElement("div"); card.className = "vcard";
+    const img = document.createElement("img"); img.loading = "lazy"; img.alt = it.file;
+    img.src = "/api/thumb?f=" + encodeURIComponent(it.file) + "&t=" + Math.round(it.mtime);
+    img.title = it.file + (it.view !== "composite" ? " (" + it.view + " view)" : "");
+    const name = document.createElement("div"); name.className = "vname"; name.textContent = it.file.replace(/^eclipseforge_render_?/, "").replace(/\.(tif|tiff|png|jpg)$/i, "") || it.file;
+    name.title = it.file;
+    const when = document.createElement("div"); when.className = "vwhen"; when.textContent = fmtWhen(it.mtime) + " · " + (it.size/1048576).toFixed(1) + " MB";
+    const note = document.createElement("input"); note.type = "text"; note.className = "vnote"; note.placeholder = "note…"; note.value = it.note || ""; note.spellcheck = false;
+    note.addEventListener("change", async () => {
+      try { await fetch("/api/exports/note", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({file: it.file, note: note.value})}); } catch(e){}
+    });
+    const load = document.createElement("button"); load.className = "mini"; load.textContent = "Load settings";
+    load.title = "Load this export's settings (its .params.json).";
+    load.addEventListener("click", () => { settingsLoad(it.sidecar); $("grp-versions").scrollIntoView({block:"nearest"}); });
+    card.append(img, name, when, note, load);
+    box.appendChild(card);
+  }
+}
+$("versrefresh").addEventListener("click", e => { e.stopPropagation(); loadVersions(); });
+
+// ---------------------------------------------------------------- block 2
+// Group icons: small monochrome line drawings, gold when the group holds a
+// control that is off its default. Inline SVG, no files, no font.
+const GICONS = {
+ "Pipeline": '<svg viewBox="0 0 16 16"><path d="M3 2.5v11l10-5.5z"/></svg>',
+ "Structure": '<svg viewBox="0 0 16 16"><path d="M2 5l6-3 6 3-6 3z"/><path d="M2 8.5l6 3 6-3"/><path d="M2 11.5l6 3 6-3"/></svg>',
+ "Partial convolution": '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/><path d="M3.5 3.5a6.4 6.4 0 0 1 9 0"/><path d="M1.5 6.5a9 9 0 0 1 13 0" /><path d="M5 12.5a4 4 0 0 0 6 0"/></svg>',
+ "Inner corona": '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg>',
+ "Prominences": '<svg viewBox="0 0 16 16"><path d="M8 14c-3 0-5-2-5-4.5C3 6 6 5 6 2c2 1 2.5 3 2.5 4.5C10 5.5 10.5 4 10.5 4c1.5 1.5 2.5 3.5 2.5 5.5C13 12 11 14 8 14z"/></svg>',
+ "Color": '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><circle cx="5.5" cy="7" r=".8" fill="currentColor"/><circle cx="8.5" cy="4.8" r=".8" fill="currentColor"/><circle cx="11" cy="7.5" r=".8" fill="currentColor"/><path d="M8 14c-1.5-1.5 0-3 1.5-3 1 0 2-.5 2-1.5"/></svg>',
+ "Tone": '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></svg>',
+ "Moon": '<svg viewBox="0 0 16 16"><path d="M10.5 2.2a6 6 0 1 0 3.3 9.3A5 5 0 0 1 10.5 2.2z"/></svg>',
+ "Final sharpening": '<svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.9L14.5 8l-4.9 1.6L8 14.5 6.4 9.6 1.5 8l4.9-1.6z"/></svg>',
+ "Diamond ring": '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M12 3.5l2-2"/></svg>',
+ "Export": '<svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg>',
+ "Versions": '<svg viewBox="0 0 16 16"><rect x="2" y="4" width="8" height="8" rx="1"/><path d="M5 4V2.5h8.5V11H12"/></svg>',
+ "Settings": '<svg viewBox="0 0 16 16"><path d="M2 4.5h12M2 8h12M2 11.5h12"/><circle cx="6" cy="4.5" r="1.3" fill="var(--panel)"/><circle cx="10.5" cy="8" r="1.3" fill="var(--panel)"/><circle cx="5" cy="11.5" r="1.3" fill="var(--panel)"/></svg>',
+ "Processing recipe": '<svg viewBox="0 0 16 16"><path d="M4 2.5h8v11H4z"/><path d="M6 5.5h4M6 8h4M6 10.5h2.5"/></svg>'
+};
+document.querySelectorAll(".group .grouphead").forEach(h => {
+  const t = h.querySelector("h2").textContent.trim(); const ic = h.querySelector(".gico");
+  if (ic && GICONS[t]) ic.innerHTML = GICONS[t];
+});
+// Non-default marks: a gold dot at the value of every slider off its default
+// and on the group's icon; the group's reset button puts them back.
+function markDefaults(){
+  const grpnd = new Map();
+  for (const [k] of DEFS){
+    const el = $("s_"+k); if (!el) return;            // sliders not built yet
+    const ctl = el.closest(".ctl"); const dv = SLIDER_DEFAULTS[k];
+    const nd = dv != null && !el.disabled && Math.abs((P[k] ?? dv) - dv) > 1e-9;
+    ctl.classList.toggle("nd", nd);
+    const grp = ctl.closest(".group"); if (grp) grpnd.set(grp, (grpnd.get(grp) || false) || nd);
+  }
+  document.querySelectorAll(".curvebox").forEach(cb => { const g = cb.closest(".group"); const nd = !curveIsIdentity(P[cb.dataset.key] || []); if (nd && g) grpnd.set(g, true); });
+  { const hc = document.querySelector(".moonhuectl"); if (hc){ const nd = !moonHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
+  { const hc = document.querySelector(".skyhuectl"); if (hc){ const nd = !skyHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
+  { const hc = document.querySelector(".promhuectl"); if (hc){ const nd = !promHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
+  for (const [grp, nd] of grpnd) grp.classList.toggle("nd", nd);
+}
+document.querySelectorAll(".group .grouphead .reset").forEach(b => b.addEventListener("click", e => {
+  e.stopPropagation();
+  const grp = b.closest(".group");
+  grp.querySelectorAll(".ctl input[type=range]").forEach(el => {
+    const k = el.id.slice(2), dv = SLIDER_DEFAULTS[k];
+    if (dv == null || el.disabled) return;
+    P[k] = dv; el.value = dispTo(k, dv); $("v_"+k).textContent = dispText(k, el.value);
+  });
+  grp.querySelectorAll(".curvebox").forEach(cb => { P[cb.dataset.key] = [[0, 0], [1, 1]]; });
+  if (grp.querySelector(".moonhuectl")) setMoonHueDefault();
+  if (grp.querySelector(".skyhuectl")) setSkyHueDefault();
+  if (grp.querySelector(".promhuectl")) setPromHueDefault();
+  if (grp.querySelector("#colourmode")){ P.colourMode = 0; syncColourMode(); }
+  scheduleRender();
+}));
+// Shift + arrow moves a slider ten steps
+document.addEventListener("keydown", e => {
+  const el = e.target; if (!(el instanceof HTMLInputElement) || el.type !== "range" || !e.shiftKey) return;
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  e.preventDefault();
+  const step = parseFloat(el.step) || 0.01, dir = (e.key === "ArrowRight" || e.key === "ArrowUp") ? 1 : -1;
+  el.value = Math.min(parseFloat(el.max), Math.max(parseFloat(el.min), parseFloat(el.value) + dir*10*step));
+  el.dispatchEvent(new Event("input", {bubbles:true}));
+});
+// What will Start do? The cached run's options come from the server; the
+// controls are compared with them here, the differing ones get an amber mark,
+// the button says "from cache", "layers only", "rebuild masks" or "re-stack",
+// and the status dot shows the same at a glance. Durations are remembered per
+// folder and kind from the page's own clock.
+let CACHE = null;
+const OPTMAP = {denoise:"denoise", feather:"feather", wb:"wb_source", photoSolve:"photo_solve", tierMode:"tier_mode",
+  intraLock:"intra_lock", colourPlanes:"colour_planes", alignCorr:"align_corr", alignFilter:"align_filter",
+  stackCombine:"stack_combine", fnrgfPreset:"fnrgf_preset", frames:"frames",
+  despeckle:"despeckle", exportTiers:"export_tiers", tierLinear:"tier_linear"};
+function ctlValue(id){ const el = $(id); return el.type === "checkbox" ? el.checked : el.value; }
+function diffOpts(){
+  if (!CACHE || !CACHE.opts) return [];
+  const o = CACHE.opts, d = [];
+  for (const id in OPTMAP){
+    const el = $(id); if (!el) continue;
+    const want = ctlValue(id); let have = o[OPTMAP[id]];
+    if (typeof want === "boolean") have = !!have;
+    if (have === undefined) continue;
+    if (have !== want) d.push(id);
+  }
+  // photometry: the run stores "hill" for the per-channel fit, "scalar" for the single factor
+  if (o.photometry !== undefined){
+    const want = $("photometry").value === "scalar" ? "scalar" : "hill";
+    if (o.photometry !== want) d.push("photometry");
+  }
+  // a flats folder typed by hand against the one the cached run used
+  const fd = $("flatDir").value.trim();
+  if (fd && o.flat_dir !== undefined && fd !== o.flat_dir && fd !== "auto") d.push("flatDir");
+  if ($("simpleStack").checked !== (o.mode === "simple")) d.push("simpleStack");
+  return d;
+}
+function durKey(kind){ return "efh.dur." + kind + "." + ($("folder").value || "").trim(); }
+function durNote(kind){
+  try { const s = parseFloat(localStorage.getItem(durKey(kind)) || "0"); if (s > 20) return " · last time " + fmtDur(s); } catch(e){}
+  return "";
+}
+let RUN_KIND = "";
+function syncStartLabel(){
+  const b = $("start"), dot = $("sdot");
+  const mark = ids => { for (const id in OPTMAP) { const el = $(id); const box = el && (el.closest("label") || el.closest(".opt")); if (box) box.classList.toggle("changed", ids.includes(id)); }
+    for (const id of ["photometry","flatDir","simpleStack"]) { const el = $(id); const box = el && (el.closest("label") || el.closest(".opt")); if (box) box.classList.toggle("changed", ids.includes(id)); } };
+  let main = "Start", sub = "", cls = "", kind = "";
+  if (RUN_BASE){ b.innerHTML = "Running\u2026"; dot.className = "sdot run"; return; }
+  if ($("importPath").value.trim() && $("srcimp").style.display !== "none"){ main = "Start"; sub = "import one HDR"; kind = "import"; cls = ""; mark([]); }
+  else if (!$("folder").value.trim() || !CACHE){ mark([]); }
+  else if (!CACHE.cached){ sub = "full stack from the raws"; kind = "stack"; cls = "restack"; mark([]); }
+  else {
+    const d = diffOpts(); mark(d);
+    if (CACHE.inputs_changed){ sub = "re-stack · raw files changed"; kind = "stack"; cls = "restack"; }
+    else if (d.length){ sub = "re-stack · " + d.length + " option" + (d.length > 1 ? "s" : "") + " changed"; kind = "stack"; cls = "restack"; }
+    else if (CACHE.layers_stale){ sub = "layers only, no re-stack"; kind = "layers"; cls = "ok"; }
+    else if (CACHE.hill_stale){ sub = "rebuild masks, no re-stack"; kind = "masks"; cls = "ok"; }
+    else { sub = "from cache"; kind = "cache"; cls = "ok"; }
+  }
+  RUN_KIND = kind;
+  b.innerHTML = main + (sub ? '<span class="sub">' + sub + durNote(kind) + '</span>' : "");
+  dot.className = "sdot" + (cls ? " " + cls : "");
+}
+async function refreshCache(){
+  try { const r = await fetch("/api/cachestate"); CACHE = r.ok ? await r.json() : null; } catch(e){ CACHE = null; }
+  syncStartLabel();
+}
+for (const id in OPTMAP){ const el = $(id); if (el) el.addEventListener("change", syncStartLabel); }
+for (const id of ["photometry","simpleStack"]){ const el = $(id); if (el) el.addEventListener("change", syncStartLabel); }
+$("flatDir").addEventListener("input", syncStartLabel);
+$("importPath").addEventListener("input", syncStartLabel);
+
+// ---------------------------------------------------------------- layout (block 1)
+// Raw bracket | Import HDR: one source at a time. The inactive path is hidden,
+// its field cleared, so Start can never see both.
+function setSrcMode(mode){
+  const raw = mode !== "import";
+  $("srcraw").style.display = raw ? "" : "none";
+  $("srcimp").style.display = raw ? "none" : "";
+  document.querySelectorAll("#srcmode .segbtn").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  if (raw) $("importPath").value = ""; else { $("simpleStack").checked = false; syncSimple(); }
+  try { localStorage.setItem("efh.srcmode", mode); } catch(e){}
+  if (!raw) syncStart();
+}
+document.querySelectorAll("#srcmode .segbtn").forEach(b => b.addEventListener("click", () => setSrcMode(b.dataset.mode)));
+try { if (localStorage.getItem("efh.srcmode") === "import") setSrcMode("import"); } catch(e){}
+// the processing options fold away; open until the first run is ready, then remembered
+function setOpts(open){
+  $("optpanel").classList.toggle("closed", !open);
+  $("optsToggle").querySelector(".chev").style.transform = open ? "" : "rotate(-90deg)";
+  try { localStorage.setItem("efh.opts", open ? "1" : "0"); } catch(e){}
+  updateZoom();
+}
+$("optsToggle").addEventListener("click", () => setOpts($("optpanel").classList.contains("closed")));
+try { if (localStorage.getItem("efh.opts") === "0") setOpts(false); } catch(e){}
+// the rail: drag its left edge, 280 px to 70 % of the window, remembered
+(function(){
+  const g = $("railgrip"); let drag = null;
+  const apply = w => { w = Math.max(280, Math.min(window.innerWidth*0.7, w)); document.documentElement.style.setProperty("--rail", w+"px"); return w; };
+  try { const w = parseInt(localStorage.getItem("efh.rail")||"0"); if (w) apply(w); } catch(e){}
+  g.addEventListener("pointerdown", e => { drag = true; g.classList.add("on"); g.setPointerCapture(e.pointerId); e.preventDefault(); });
+  g.addEventListener("pointermove", e => { if (!drag) return; apply(window.innerWidth - e.clientX); updateZoom(); });
+  const end = e => { if (!drag) return; drag = null; g.classList.remove("on");
+    try { localStorage.setItem("efh.rail", parseInt(getComputedStyle(document.documentElement).getPropertyValue("--rail"))); } catch(err){} };
+  g.addEventListener("pointerup", end); g.addEventListener("pointercancel", end);
+})();
+// the log: drag its bottom edge (remembered), or pop it out over the picture
+(function(){
+  const log = $("log");
+  try { const h = parseInt(localStorage.getItem("efh.logh")||"0"); if (h) document.documentElement.style.setProperty("--logh", h+"px"); } catch(e){}
+  if (window.ResizeObserver) new ResizeObserver(() => {
+    if (log.classList.contains("big")) return;
+    const h = Math.round(log.getBoundingClientRect().height);
+    if (h > 40) { document.documentElement.style.setProperty("--logh", h+"px"); try { localStorage.setItem("efh.logh", h); } catch(e){} }
+  }).observe(log);
+  const toggle = () => { log.classList.toggle("big"); $("logbig").textContent = log.classList.contains("big") ? "⤡ close" : "⤢ log"; if (log.classList.contains("big")) log.scrollTop = log.scrollHeight; };
+  $("logbig").addEventListener("click", toggle);
+  addEventListener("keydown", e => { if (e.key === "Escape" && log.classList.contains("big")) toggle(); });
+})();
+// groups fold on their header; the state is remembered per group
+document.querySelectorAll(".group .grouphead").forEach(h => {
+  const grp = h.parentElement, key = "efh.grp." + h.querySelector("h2").textContent.trim();
+  try { if (localStorage.getItem(key) === "0") grp.classList.add("closed"); } catch(e){}
+  h.addEventListener("click", e => {
+    if (e.target.closest("button")) return;
+    grp.classList.toggle("closed");
+    try { localStorage.setItem(key, grp.classList.contains("closed") ? "0" : "1"); } catch(err){}
+  });
+});
 </script>
 </body>
 </html>

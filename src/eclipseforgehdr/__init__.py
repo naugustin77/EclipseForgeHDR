@@ -1,4 +1,4 @@
-__version__ = "0.23.11"
+__version__ = "0.25.0"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -324,6 +324,13 @@ CACHE_FAMILIES = (
     # feathered MGN holes); the stack is the same data and the server rebuilds
     # the layers from it on the next Start (minutes, no re-stack).
     frozenset({"0.23.9", "0.23.10", "0.23.11"}),
+    # 0.25.0 is the lab line merged into the release. The stack itself changed
+    # in many places (merge weights and feather, sky subtraction off by default,
+    # calibration-folder guards, the prominence layer from the short frames, the
+    # Moon layer), so no older cache is the same data. Its own family: one
+    # re-stack per folder. Layer and mask rebuilds after that carry their own
+    # recipe numbers (detail.LAYER_BUILD, HILL_BUILD).
+    frozenset({"0.25.0"}),
 
 )
 

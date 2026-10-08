@@ -88,10 +88,12 @@ def _drives():
 def browse():
     from .raw import RAW_EXTS, list_raws
     kind = request.args.get("kind", "dir")
-    path = request.args.get("path", "") or os.path.expanduser("~")
-    path = os.path.abspath(os.path.expanduser(path))
-    if not os.path.isdir(path):
-        path = os.path.expanduser("~")
+    path = request.args.get("path", "") or ""
+    # the page sends where it would like to start and a fallback (the raw
+    # folder, say, when its eclipseforge_output/ does not exist yet)
+    _cands = [path, request.args.get("fallback", ""), os.path.expanduser("~")]
+    path = next((os.path.abspath(os.path.expanduser(c)) for c in _cands
+                 if c and os.path.isdir(os.path.expanduser(c))), os.path.expanduser("~"))
     exts = _PICK_EXT.get(kind)
     if kind == "raw":
         exts = set(RAW_EXTS) | _PICK_EXT["image"]
@@ -167,6 +169,13 @@ def set_folder():
     # correction that did not happen.
     from .dark import find_bias_dir, find_dark_dir
     bd, dd = find_bias_dir(folder), find_dark_dir(folder)
+    # and the short-exposure subfolder (name has "short" or "prom"): its frames
+    # feed the prominence layer only -- named here for the same reason
+    try:
+        from .pipeline import find_short_dir
+        sd = find_short_dir(folder)
+    except Exception:
+        sd = None
     # A finished HDR the user might want to import rather than stack: a lone
     # 16-bit TIFF sitting in the folder is almost always exactly that.
     cand = []
@@ -184,6 +193,8 @@ def set_folder():
                     "bias_count": len(list_raws(bd)) if bd else 0,
                     "dark_dir": dd,
                     "dark_count": len(list_raws(dd)) if dd else 0,
+                    "short_dir": sd,
+                    "short_count": len(list_raws(sd)) if sd else 0,
                     "tiffs": cand[:24]})
 
 
@@ -246,9 +257,10 @@ def clear_cache():
     return jsonify({"ok": True, "files": n, "bytes": size, "path": wd})
 
 
+
 def _layers_stale(wd):
     """Was this work directory's detail-layer set built by an older recipe?
-    (detail.LAYER_BUILD, 0.23.11). The stack is not the question -- only what
+    (detail.LAYER_BUILD, 0.23.9). The stack is not the question -- only what
     was derived from it -- so this is what lets a layer change reach a cached
     stack in minutes instead of a re-stack."""
     from .detail import LAYER_BUILD
@@ -260,16 +272,22 @@ def _layers_stale(wd):
     return have < LAYER_BUILD, have, LAYER_BUILD
 
 
-def _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv, earthshine=False):
+def _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv, earthshine=False,
+                    force=False, why=""):
     """Rebuild every detail layer from the cached merge and record the recipe
     in report.json. Mirrors the tail of the pipeline: build_layers is the last
-    stage there, so nothing after it is skipped."""
+    stage there, so nothing after it is skipped. `force`: rebuild even when the
+    recipe is current, because Denoise changed -- it acts on the layers only,
+    so it never needs a re-stack (2026-10-08)."""
     from . import detail
     stale, have, want = _layers_stale(wd)
-    if not stale:
+    if not stale and not force:
         return False
-    prog.log(f"the cached detail layers were built by recipe {have} and this build "
-             f"asks for {want} — rebuilding them from the cached merge (no re-stack)", 0.5)
+    if stale:
+        prog.log(f"detail layers: recipe {have} cached, "
+                 f"{want} needed: rebuilding from the cached merge (no re-stack)", 0.5)
+    else:
+        prog.log(f"detail layers: {why}: rebuilding from the cached merge (no re-stack)", 0.5)
     lst = detail.build_layers(wd, prog, denoise=denoise, earthshine=earthshine,
                               fnrgf_preset=fnrgf_preset, partialconv=partialconv)
     _rp = os.path.join(wd, "report.json")
@@ -280,7 +298,7 @@ def _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv, earthshine=Fal
         from .report import write as _write_report
         _write_report(wd, _r)          # report.json + report.txt, as the pipeline does
     except Exception as _e:
-        prog.log(f"detail layers rebuilt but not recorded in the report ({_e})", None)
+        prog.log(f"[warn] detail layers rebuilt, not recorded in report ({_e})", None)
     return True
 
 
@@ -315,15 +333,23 @@ def start_run():
     if _b:
         return jsonify({"ok": False, "error": f"{_b} is still running"}), 400
     force = bool(request.json.get("force", False)) if request.is_json else False
-    feather = request.json.get("feather", "plain") if request.is_json else "plain"
+    # DEFAULTS (2026-10-07, Nico, tested on his 600 mm and Clifton's 250 mm sets):
+    # Exact edge, Network solve, Published FNRGF, Clipped mean. The fallbacks
+    # further down that read an OLD cache's opts.json keep the old values --
+    # they say what that cache was built with, not what is default now.
+    feather = request.json.get("feather", "taper") if request.is_json else "taper"
     if feather not in ("plain", "taper", "masked"):
-        feather = "plain"
-    denoise = request.json.get("denoise", "fine") if request.is_json else "fine"
+        feather = "taper"
+    denoise = request.json.get("denoise", "off") if request.is_json else "off"
     if denoise is True:
         denoise = "fine"
     if denoise is False:
         denoise = "off"
-    earthshine = bool(request.json.get("earthshine", False)) if request.is_json else False
+    # THE OLD EARTHSHINE OPTION IS GONE (2026-10-07): the Moon layer (moonlayer.py)
+    # is built after every Start and is what the render uses; the old layer was
+    # built and never shown, and as a stacking option it forced a re-stack when
+    # toggled. Always off; old caches keep their earth.npy as the fallback.
+    earthshine = False
     despeckle = bool(request.json.get("despeckle", True)) if request.is_json else True
     export_tiers = bool(request.json.get("exportTiers", False)) if request.is_json else False
     tier_linear = bool(request.json.get("tierLinear", False)) if request.is_json else False
@@ -337,10 +363,10 @@ def start_run():
                   if request.is_json else "linfit")
     if photometry not in ("linfit", "scalar"):
         photometry = "linfit"
-    photo_solve = (request.json.get("photoSolve", "chain")
-                   if request.is_json else "chain")
+    photo_solve = (request.json.get("photoSolve", "network")
+                   if request.is_json else "network")
     if photo_solve not in ("chain", "network"):
-        photo_solve = "chain"
+        photo_solve = "network"
     tier_mode = (request.json.get("tierMode", "exposure")
                  if request.is_json else "exposure")
     if tier_mode not in ("exposure", "frame"):
@@ -348,16 +374,16 @@ def start_run():
     # FNRGF: our hard order cutoff, or Druckmullerova's published attenuation.
     # Thesis p.80 gives the second as the setting that "always works without
     # producing any artifacts"; ours has never been compared against it.
-    fnrgf_preset = (request.json.get("fnrgfPreset", "ours")
-                    if request.is_json else "ours")
+    fnrgf_preset = (request.json.get("fnrgfPreset", "published")
+                    if request.is_json else "published")
     if fnrgf_preset not in ("ours", "published"):
-        fnrgf_preset = "ours"
+        fnrgf_preset = "published"
     # Per-tier frame combine. 'mean' is what every version up to 0.23.1 did and
     # has no per-pixel rejection at all.
-    stack_combine = (request.json.get("stackCombine", "mean")
-                     if request.is_json else "mean")
+    stack_combine = (request.json.get("stackCombine", "clip")
+                     if request.is_json else "clip")
     if stack_combine not in ("mean", "clip"):
-        stack_combine = "mean"
+        stack_combine = "clip"
     # The alignment pre-filter: an isotropic high-pass (ours) or an arc-length
     # one (Druckmullerova's T_sigma, which is what removes the lunar edge and
     # the moving saturation edge).
@@ -379,8 +405,9 @@ def start_run():
         intra_lock = "corona"
     # COLOUR PLANES: move red and blue onto green by the offset measured on the
     # lunar limb (atmospheric dispersion at a low Sun). Changes the merged
-    # data, so it is in the cache key below. On by default: it measures on
-    # every run and moves nothing when the offset is below 0.2 px.
+    # data, so it is in the cache key below.
+    # Default "auto" since 0.23.9 (Nico, 21 Sep): it measures on every run and
+    # moves nothing when the offset is below 0.2 px.
     colour_planes = (request.json.get("colourPlanes", "auto")
                      if request.is_json else "auto")
     if colour_planes not in ("off", "auto"):
@@ -483,7 +510,22 @@ def start_run():
                     except Exception:
                         pass
                 else:
-                    prog.log("using cached layers for this simple stack", 0.9)
+                    prog.log("using cached simple stack", 0.9)
+                    _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv)
+                # THE MOON LAYER ON THE SIMPLE STACK TOO (2026-10-08, Val's
+                # FITS): it reads the long frames itself and fits its own
+                # scale against the merge, so it needs nothing the full
+                # pipeline has and the simple stack lacks. The simple stack
+                # sits in the first frame's coordinates (crop origin 0, 0).
+                try:
+                    from . import moonlayer as _ml
+                    if _ml.needs_build(wd):
+                        prog.log("building Moon layer (earthshine) from long frames...", None)
+                        _ml.build(folder, wd, prog)
+                except Exception as _e:
+                    if getattr(prog, "cancelled", False):
+                        raise
+                    prog.log(f"[warn] Moon layer not built ({_e})", None)
                 prog.log("loading layers for preview...", None)
                 STATE["layers"] = Layers(wd)
                 prog.log("ready", 1.0)
@@ -518,9 +560,10 @@ def start_run():
                         except OSError:
                             pass
                     importhdr.run(folder, import_path, prog, denoise=denoise,
-                                  partialconv=partialconv)
+                                  partialconv=partialconv, fnrgf_preset=fnrgf_preset)
                 else:
-                    prog.log("using cached layers for this image", 0.9)
+                    prog.log("using cached import", 0.9)
+                    _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv)
                 prog.log("loading layers for preview...", None)
                 STATE["layers"] = Layers(wd)
                 prog.log("ready", 1.0)
@@ -534,8 +577,9 @@ def start_run():
             opts_ok = False
             if os.path.exists(opts_path):
                 o = json.load(open(opts_path))
-                opts_ok = (o.get("denoise") == denoise
-                           and o.get("flat_dir") == _fd
+                # Denoise is a LAYER option (2026-10-08): a change rebuilds the
+                # detail layers below, never the stack
+                opts_ok = (o.get("flat_dir") == _fd
                            and o.get("flat_inputs") == _flat_fp(_fd)
                            # Dropping a bias/ or darks/ folder beside the raws
                            # changes the stacked data, and nothing the page
@@ -545,7 +589,6 @@ def start_run():
                            and o.get("dark_dir") == _dd
                            and o.get("bias_inputs", []) == _calib_fp(_bd)
                            and o.get("dark_inputs", []) == _calib_fp(_dd)
-                           and bool(o.get("earthshine", False)) == earthshine
                            and bool(o.get("despeckle", True)) == despeckle
                            and o.get("frames", "all") == frames
                            and bool(o.get("export_tiers", False)) == export_tiers
@@ -592,8 +635,6 @@ def start_run():
                            # stacked before 0.23.8, when that was the only
                            # behaviour.
                            and o.get("intra_lock", "moon") == intra_lock
-                           # a cache written before the setting existed was
-                           # stacked without it
                            and o.get("colour_planes", "off") == colour_planes
                            # ... and the grouping, which changes what a tier IS
                            and o.get("tier_mode", "exposure") == tier_mode
@@ -612,7 +653,7 @@ def start_run():
                 # something else). Every key the test above compares, with the
                 # cached and the requested value.
                 try:
-                    _want = {"denoise": denoise, "flat_dir": _fd, "bias_dir": _bd, "dark_dir": _dd,
+                    _want = {"flat_dir": _fd, "bias_dir": _bd, "dark_dir": _dd,
                              "earthshine": earthshine, "despeckle": despeckle, "frames": frames,
                              "export_tiers": export_tiers, "tier_linear": tier_linear,
                              "feather": feather, "wb_source": wb_source, "demosaic": demosaic_method,
@@ -644,10 +685,10 @@ def start_run():
                         _diff.append(f"build: cached {o.get('build')!r}, this is {_ver!r}")
                     if o.get("inputs") != _input_fingerprint(folder):
                         _diff.append("raw files changed (name, size or date)")
-                    prog.log("re-stacking, the cache does not match this request: "
-                             + ("; ".join(_diff) if _diff else "no key differs -- please report this"), None)
+                    prog.log("re-stacking, cache mismatch: "
+                             + ("; ".join(_diff) if _diff else "no key differs (please report)"), None)
                 except Exception as _e:
-                    prog.log(f"re-stacking (could not say why: {_e})", None)
+                    prog.log(f"[odd] re-stacking (cache check failed: {_e})", None)
             if force or not have_all or not opts_ok:
                 # A run that dies partway leaves a valid-looking opts.json from
                 # the previous run beside a mix of new and old products; clear it
@@ -675,14 +716,25 @@ def start_run():
                              partialconv=partialconv,
                              tier_mode=tier_mode)
             else:
-                prog.log("using cached pipeline products "
-                         "(press Clear cache to redo from the raws)", 0.9)
-                # a newer detail-layer recipe is applied to the cached merge
-                # here (0.23.11). build_layers also builds the partial-
-                # convolution masks when they are on, so the block below then
-                # finds them fresh and does nothing.
+                prog.log("using cached stack", 0.9)
+                # 0.23.9: a newer detail-layer recipe is applied to the cached
+                # merge here. build_layers also builds the partial-convolution
+                # masks when they are on, so the block below then finds them
+                # fresh and does nothing.
+                try:
+                    _oc = json.load(open(opts_path)) if os.path.exists(opts_path) else {}
+                except Exception:
+                    _oc = {}
+                _dn_changed = bool(_oc) and _oc.get("denoise") != denoise
                 _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv,
-                                earthshine=earthshine)
+                                earthshine=earthshine, force=_dn_changed,
+                                why=f"denoise {_oc.get('denoise')!r} -> {denoise!r}")
+                if _dn_changed:
+                    try:
+                        _oc["denoise"] = denoise
+                        json.dump(_oc, open(opts_path, "w"), indent=1)
+                    except Exception:
+                        pass
             # HILL MASKS FROM A CACHED STACK. Everything they need -- the merged
             # luminance, the geometry, the prominence mask -- is already on
             # disk, so a folder stacked before 0.22.64 gains the layer for the
@@ -692,7 +744,7 @@ def start_run():
             # branch is `if not _hstale`, which re-derives staleness from
             # report.json, finds no "hill" entry because the run did not write
             # one, reads its build number as 1, and rebuilds. That is exactly
-            # what happened on the reference set's 600 mm run: the pipeline reported
+            # what happened on Nico's 600 mm run: the pipeline reported
             # "partial convolution: OFF" and the masks were then built anyway
             # right after "pipeline complete", turning an 18m39s run into 39
             # minutes. Whatever is on disk is also dropped, since it was built
@@ -705,9 +757,8 @@ def start_run():
                             os.remove(_hfp)
                         except OSError:
                             pass
-                prog.log("partial convolution: OFF (setting) — not built and "
-                         "any cached masks dropped; turning it back on costs "
-                         "the mask build alone, not a re-stack", None)
+                prog.log("partial convolution off: masks not built, "
+                         "cached masks dropped", None)
                 _hstale = False
             else:
                 _hstale = not os.path.exists(os.path.join(wd, "hill.npy"))
@@ -730,18 +781,18 @@ def start_run():
                         else "raw")
                     if not _hstale and _hj.get("base", "denoised") != _want:
                         _hstale = True
-                        prog.log("the cached partial-convolution masks were "
-                                 "built on the %s master and this run asks for "
-                                 "the %s one — rebuilding them"
+                        prog.log("partial-convolution masks: "
+                                 "%s master cached, %s needed: "
+                                 "rebuilding"
                                  % (_hj.get("base", "denoised"), _want), None)
                     # ... and when the radial smoothing factor changed
                     from .detail import HILL_RADIAL as _HR
                     _wr = float(os.environ.get("ECLIPSEFORGE_HILL_RADIAL", _HR))
                     if not _hstale and abs(float(_hj.get("radial", 0.0)) - _wr) > 1e-6:
                         _hstale = True
-                        prog.log("the cached partial-convolution masks were "
-                                 "built with radial smoothing %g and this run "
-                                 "asks for %g — rebuilding them"
+                        prog.log("partial-convolution masks: "
+                                 "radial smoothing %g cached, "
+                                 "%g needed: rebuilding"
                                  % (float(_hj.get("radial", 0.0)), _wr), None)
                     from .detail import HILL_GATE as _HG, HILL_GATE_LEN as _HGL
                     _wg = (float(os.environ.get("ECLIPSEFORGE_HILL_GATE", _HG)),
@@ -750,15 +801,15 @@ def start_run():
                     if not _hstale and _wr > 0 and (abs(_hg[0] - _wg[0]) > 1e-6 or (
                             _wg[0] > 0 and abs(_hg[1] - _wg[1]) > 1e-6)):
                         _hstale = True
-                        prog.log("the cached partial-convolution masks were "
-                                 "built with gate %g/%g and this run asks for "
-                                 "%g/%g — rebuilding them"
+                        prog.log("partial-convolution masks: "
+                                 "gate %g/%g cached, "
+                                 "%g/%g needed: rebuilding"
                                  % (_hg[0], _hg[1], _wg[0], _wg[1]), None)
                 except Exception:
                     _hstale = True
                 if _hstale:
-                    prog.log("the cached partial-convolution masks were built by an older "
-                             "recipe — rebuilding them", None)
+                    prog.log("partial-convolution masks: older recipe cached: "
+                             "rebuilding", None)
             if partialconv and _hstale:
                 from .detail import build_hill
                 _hst = build_hill(wd, prog, denoise=denoise)
@@ -769,15 +820,29 @@ def start_run():
                         _r["hill"] = _hst
                         json.dump(_r, open(_rp, "w"))
                     except Exception as _e:
-                        prog.log(f"partial-convolution masks built but not recorded in the "
-                                 f"report ({_e}); the renderer measures them "
-                                 f"itself", None)
+                        prog.log(f"[warn] partial-convolution masks built, not recorded in "
+                                 f"report ({_e})", None)
+            # THE MOON LAYER (lab 0.24): built on its own, about a minute, when
+            # missing or older than the merge -- no re-stack, no layer rebuild
+            try:
+                from . import moonlayer as _ml
+                if _ml.needs_build(wd):
+                    prog.log("building Moon layer (earthshine) from long frames...", None)
+                    _ml.build(folder, wd, prog)
+            except Exception as _e:
+                if getattr(prog, "cancelled", False):
+                    raise
+                prog.log(f"[warn] Moon layer not built ({_e})", None)
             prog.log("loading layers for preview...", None)
             STATE["layers"] = Layers(wd)
             prog.log("ready", 1.0)
             prog.done = True
         except Exception as e:
-            prog.error = f"{e}\n{traceback.format_exc()}"
+            if getattr(prog, "cancelled", False):
+                prog.error = ("cancelled by you -- nothing from this run is used; "
+                              "the next Start runs it again")
+            else:
+                prog.error = f"{e}\n{traceback.format_exc()}"
             prog.done = True
 
     t = threading.Thread(target=work, daemon=True, name="the pipeline run")
@@ -786,22 +851,79 @@ def start_run():
     return jsonify({"ok": True})
 
 
+@app.post("/api/cancel")
+def cancel_job():
+    """Stop the running job (stack, layer build, export) at its next step.
+    A cancelled stack leaves no valid cache: opts.json is removed before a
+    run starts and written only at its end, so the next Start redoes it."""
+    p = STATE.get("progress")
+    if p is None or not _busy() or getattr(p, "done", True):
+        return jsonify({"ok": False, "error": "nothing is running"})
+    p.cancel()
+    return jsonify({"ok": True})
+
+
 @app.get("/api/progress")
 def get_progress():
     p = STATE["progress"]
     if p is None:
-        return jsonify({"lines": [], "frac": 0, "done": False, "error": None,
+        return jsonify({"lines": [], "levels": [], "frac": 0, "done": False, "error": None,
                         "elapsed": 0.0, "since": 0.0, "step": "",
                         "ready": STATE["layers"] is not None})
     # "step" is the last log line: it is what the run is actually doing, and
     # pairing it with "since" tells the user whether a long wait is a slow step
     # or a dead one.
+    _lv = getattr(p, "levels", None) or []
     return jsonify({"lines": p.lines[-250:], "frac": p.frac, "done": p.done,
+                    "levels": _lv[-250:] if len(_lv) == len(p.lines) else [],
                     "error": p.error,
+                    "cancelled": bool(getattr(p, "cancelled", False)),
+                    "cancelling": bool(getattr(p, "cancel_requested", False)) and not p.done,
                     "elapsed": round(p.elapsed(), 1),
                     "since": round(p.since(), 1),
                     "step": p.lines[-1] if p.lines else "",
                     "ready": STATE["layers"] is not None})
+
+
+@app.get("/api/cachestate")
+def cache_state():
+    """What the next Start would do with the loaded folder, for the GUI's Start
+    label and the amber marks on the options: the cached run's options (minus
+    the input lists), whether the stack is reusable at all, and whether the
+    layer set or the Hill masks are behind the build."""
+    folder = STATE.get("folder")
+    if not folder:
+        return jsonify({"ok": False, "error": "no folder"}), 400
+    wd = workdir(folder)
+    out = {"ok": True, "cached": False, "opts": None, "layers_stale": False,
+           "hill_stale": False, "mode": None}
+    _op = os.path.join(wd, "opts.json")
+    if os.path.exists(os.path.join(wd, "geometry.json")) and os.path.exists(_op):
+        try:
+            o = json.load(open(_op))
+            from . import cache_ok
+            out["cached"] = bool(cache_ok(o.get("build")))
+            out["mode"] = o.get("mode")
+            out["opts"] = {k: v for k, v in o.items()
+                           if k not in ("inputs", "flat_inputs", "bias_inputs", "dark_inputs")}
+            out["inputs_changed"] = (o.get("inputs") != _input_fingerprint(folder))
+        except Exception as e:
+            out["error"] = str(e)
+    if out["cached"]:
+        try:
+            out["layers_stale"] = bool(_layers_stale(wd)[0])
+        except Exception:
+            pass
+        try:
+            from .detail import HILL_BUILD as _HB
+            if os.path.exists(os.path.join(wd, "hill.npy")):
+                _rj = json.load(open(os.path.join(wd, "report.json")))
+                out["hill_stale"] = int(((_rj.get("hill") or {}).get("build", 1))) < _HB
+            else:
+                out["hill_stale"] = True
+        except Exception:
+            out["hill_stale"] = True
+    return jsonify(out)
 
 
 @app.get("/api/geometry")
@@ -834,6 +956,10 @@ def get_geometry():
                     # so the export came out 4x stronger than the preview.
                     "hillRmsStruct": [float(x) for x
                                       in getattr(ly, "hill_rms_struct", [])],
+                    # 0.23.9: the scale the export actually divides by (render.py,
+                    # Layers.hill_ref / HILL_REF_C). The page must use the same
+                    # number or the preview and the export part again.
+                    "hillR0": _hill_r0(ly),
                     "hillLogKBuild": float(getattr(ly, "hill_logk", 6.0)),
                     "hillResp": [float(x) for x in getattr(ly, "hill_resp", [])],
                     # the page renders at preview scale, so it needs the same
@@ -850,6 +976,7 @@ def get_geometry():
                     "decim": ly.prev_decim, "has_contact": ly.has_contact,
                     "has_flat": getattr(ly, "has_flat", False),
                     "has_promdet": getattr(ly, "has_promdet", False),
+                    "hasPromLayer": bool(getattr(ly, "has_promlayer", False)),
                     "has_nafe": getattr(ly, "has_nafe", True),
                     "has_mgn_fine": getattr(ly, "has_mgn_fine", False),
                     "flat_range": list(getattr(ly, "flat_range", []) or []),
@@ -882,6 +1009,18 @@ def load_contact():
     STATE["busy"] = _t
     _t.start()
     return jsonify({"ok": True})
+
+
+def _hill_r0(ly):
+    """The Amplification slider's divisor, exactly as render.render uses it."""
+    try:
+        from .render import HILL_REF_C
+        if (os.environ.get("ECLIPSEFORGE_HILL_OLDNORM") != "1"
+                and float(getattr(ly, "hill_ref", 0.0)) > 0.0):
+            return float(ly.hill_ref) / HILL_REF_C
+    except Exception:
+        pass
+    return 0.0          # the page falls back to hillRmsStruct / hillRms
 
 
 def _hill_span(ly, i, k=8.0):
@@ -938,6 +1077,19 @@ def get_layer(name):
         rgb[:, :, 0] = (u >> 8).astype(np.uint8)
         rgb[:, :, 1] = (u & 0xFF).astype(np.uint8)
         img = Image.fromarray(rgb)
+    elif name == "pl_L":
+        # the prominence layer's luminance over its own 99.97th percentile:
+        # cores run above 1, so it goes out over 0..4, 16-bit packed like bg
+        q = np.clip(np.asarray(arr, np.float32) / 4.0, 0, 1)
+        u = np.rint(q * 65535.0).astype(np.uint16)
+        rgb = np.zeros(u.shape + (3,), np.uint8)
+        rgb[:, :, 0] = (u >> 8).astype(np.uint8)
+        rgb[:, :, 1] = (u & 0xFF).astype(np.uint8)
+        img = Image.fromarray(rgb)
+    elif name == "pl_C":
+        # its chroma at unit luminance: red runs to ~2.5, so 0..4
+        img = Image.fromarray((np.clip(np.asarray(arr, np.float32) / 4.0, 0, 1) * 255 + 0.5)
+                              .astype(np.uint8))
     elif name == "contact":
         img = Image.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8))
     else:
@@ -1000,7 +1152,7 @@ _PROCESSING_KEYS = {
     "wb_source":     ("camera",    "wb"),
     "photometry":    ("linfit",    "photometry"),
     "frames":        ("all",       "frames"),
-    "denoise":       ("fine",      "denoise"),
+    "denoise":       ("off",       "denoise"),
     # THE SIMPLE STACK FLAG. Without it a saved recipe could not turn the
     # fallback back on: the recipe is built from what the run reported, and the
     # simple path reported only denoise and fnrgf_preset.
@@ -1109,6 +1261,11 @@ def settings_load():
         loc = {k: doc[k] for k in _l if k in doc}
         wrote, origin, note = "?", "", ""
         shape = "exported .params.json"
+        # a sidecar in this folder's own eclipseforge_output describes this
+        # very stack, so its disc, black point and ring settings apply too
+        if STATE.get("folder") and os.path.normcase(os.path.abspath(os.path.dirname(path))) == \
+                os.path.normcase(os.path.abspath(os.path.join(STATE["folder"], "eclipseforge_output"))):
+            origin = STATE["folder"]
 
     same_stack = bool(origin) and STATE["folder"] and \
         os.path.normcase(os.path.abspath(origin)) == \
@@ -1116,8 +1273,17 @@ def settings_load():
 
     applied, unknown = {}, []
     for k, v in list(src.items()) + (list(loc.items()) if same_stack else []):
+        if k == "orient":
+            continue
         if k not in base:
             unknown.append(k)
+            continue
+        if isinstance(base[k], list):          # the tone curve: [[in, out], ...]
+            try:
+                pts = [[min(1.0, max(0.0, float(a))), min(1.0, max(0.0, float(b)))] for a, b in v]
+                applied[k] = pts if pts else list(base[k])
+            except (TypeError, ValueError):
+                unknown.append(k)
             continue
         try:
             applied[k] = float(v)
@@ -1146,6 +1312,117 @@ def settings_load():
     return jsonify({"ok": True, "params": out, "notes": notes, "note": note,
                     "same_stack": same_stack, "n": len(applied),
                     "file": os.path.basename(path)})
+
+
+
+
+# ---- block 3b: the Versions strip ------------------------------------------
+_VERSIONS_NOTES = ".efversions.json"      # {image file name: note}, in eclipseforge_output
+
+
+def _outdir():
+    return os.path.join(STATE["folder"], "eclipseforge_output") if STATE.get("folder") else None
+
+
+def _thumb_path(img):
+    return os.path.splitext(img)[0] + "_thumb.jpg"
+
+
+def _make_thumb(img, thumb):
+    """A thumbnail for an export made before thumbnails existed: read the
+    file back (16-bit TIFF through tifffile, the rest through PIL)."""
+    from .render import thumbnail
+    ext = os.path.splitext(img)[1].lower()
+    if ext in (".tif", ".tiff"):
+        import tifffile
+        a = tifffile.imread(img)
+    else:
+        from PIL import Image
+        a = np.asarray(Image.open(img))
+    a = np.asarray(a)
+    if a.ndim == 3 and a.shape[2] == 4:
+        a = a[:, :, :3]
+    scale = 65535.0 if a.dtype == np.uint16 else 255.0
+    thumbnail(a.astype(np.float32) / scale, thumb)
+
+
+def _read_notes(out):
+    try:
+        d = json.load(open(os.path.join(out, _VERSIONS_NOTES), encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+@app.get("/api/exports")
+def list_exports():
+    """The exports of the loaded folder, newest first: every image with a
+    .params.json sidecar beside it (the sidecar is what makes it loadable)."""
+    out = _outdir()
+    if not out or not os.path.isdir(out):
+        return jsonify({"ok": True, "items": []})
+    notes = _read_notes(out)
+    items = []
+    for fn in os.listdir(out):
+        if not fn.endswith(".params.json"):
+            continue
+        img = os.path.join(out, fn[:-len(".params.json")])
+        if not os.path.isfile(img):
+            continue
+        try:
+            st = os.stat(img)
+        except OSError:
+            continue
+        base = os.path.basename(img)
+        view = "composite"
+        for v in ("_mgn", "_fnrgf", "_nafe", "_inner", "_pellett", "_promgate", "_hill"):
+            if v in base:
+                view = v[1:]
+        items.append({"file": base, "mtime": st.st_mtime, "size": st.st_size,
+                      "thumb": os.path.isfile(_thumb_path(img)),
+                      "note": notes.get(base, ""), "view": view,
+                      "sidecar": os.path.join(out, fn)})
+    items.sort(key=lambda d: -d["mtime"])
+    return jsonify({"ok": True, "items": items[:60], "dir": out})
+
+
+@app.get("/api/thumb")
+def get_thumb():
+    out = _outdir()
+    fn = os.path.basename(request.args.get("f", ""))
+    if not out or not fn:
+        return jsonify({"ok": False, "error": "no folder"}), 400
+    img = os.path.join(out, fn)
+    if not os.path.isfile(img):
+        return jsonify({"ok": False, "error": "no such export"}), 404
+    th = _thumb_path(img)
+    if not os.path.isfile(th):
+        try:
+            _make_thumb(img, th)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+    return send_file(th, mimetype="image/jpeg", max_age=0)
+
+
+@app.post("/api/exports/note")
+def set_export_note():
+    out = _outdir()
+    data = request.json if request.is_json else {}
+    fn = os.path.basename(str(data.get("file") or ""))
+    if not out or not fn:
+        return jsonify({"ok": False, "error": "no folder"}), 400
+    notes = _read_notes(out)
+    note = str(data.get("note") or "").strip()
+    if note:
+        notes[fn] = note
+    else:
+        notes.pop(fn, None)
+    try:
+        os.makedirs(out, exist_ok=True)
+        json.dump(notes, open(os.path.join(out, _VERSIONS_NOTES), "w", encoding="utf-8"), indent=1)
+    except OSError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True})
 
 
 _PROCESSING_EXT = ".efprocess.json"
@@ -1253,6 +1530,7 @@ def do_export():
     view = data.get("view", "composite")
     size = data.get("size", "full")
     prom_layer = bool(data.get("promLayer", False))
+    moon_layer = bool(data.get("moonLayer", False))
     params = data.get("params", {})
     # Purely cosmetic and applied last, so it needs no re-run and no re-render
     # of anything cached -- see render.apply_orient.
@@ -1279,8 +1557,24 @@ def do_export():
     def work():
         try:
             _notes = []
-            export(ly, params, fmt, path, view=view, size=size, notes=_notes)
+            # the rendered composite is kept for the prominence layer and the quality grading
+            _keep = {} if view == "composite" else None
+            export(ly, params, fmt, path, view=view, size=size, notes=_notes,
+                   thumb=_thumb_path(path), keep=_keep)
             json.dump(params, open(path + ".params.json", "w"), indent=1)
+            # PICTURE QUALITY (lab 0.24): graded measurements of what was just written
+            _pq = None
+            if _keep is not None and _keep.get("rgb") is not None:
+                try:
+                    from . import picquality as _pqm
+                    prog.log("grading picture ...", 0.75)
+                    _gcy, _gcx, _gR = ly.geometry(1)
+                    _pq = _pqm.grade(_keep["rgb"], _gcy, _gcx, _gR, getattr(ly, "Rmask", None))
+                    _sm = _pqm.summary(_pq)
+                    _notes.append(("[warn] " if "BAD" in _sm else "[odd] " if "check" in _sm else "[ok] ")
+                                  + _sm + " (details in report)")
+                except Exception as _e:
+                    _notes.append(f"[warn] picture quality not measured ({_e})")
             # the prominences as their own RGBA layer, on the same grid
             if prom_layer and view == "composite":
                 try:
@@ -1291,16 +1585,44 @@ def do_export():
                     _st = os.path.splitext(path)[0]
                     _pp = ("_prominences_16bit".join(_st.rsplit("_16bit", 1))
                            if "_16bit" in os.path.basename(_st) else _st + "_prominences_16bit") + ".tif"
-                    prog.log("building the prominence layer ...", 0.8)
-                    _sharp = _pl.export_layer(_wd, _geo, _pp, orient=params.get("orient", ""),
-                                              size=size, log=lambda m: prog.log(m, None))
-                    prog.log(f"saved {_pp}", 0.95)
+                    prog.log("building prominence layer ...", 0.8)
+                    if getattr(ly, "has_promlayer", False):
+                        # THE 0.24 LAYER: the RGBA file holds exactly what the
+                        # preview lays over the picture, and the corona it goes
+                        # on is written beside it, so the pair rebuilds the
+                        # composite in Photoshop (layer on top, Normal)
+                        _cb = ("_corona_16bit".join(_st.rsplit("_16bit", 1))
+                               if "_16bit" in os.path.basename(_st) else _st + "_corona") + ext
+                        _kc = {}
+                        export(ly, dict(params, promLayer=0.0), fmt, _cb, view=view, size=size,
+                               keep=_kc)
+                        prog.log(f"[ok] saved {_cb} (corona without prominence layer)", 0.85)
+                        _pl.export_layer2(ly, params, _pp, _keep.get("rgb"), _kc.get("rgb"),
+                                          size=size)
+                        del _kc
+                        _sharp = True
+                    else:
+                        _sharp = _pl.export_layer(_wd, _geo, _pp, orient=params.get("orient", ""),
+                                                  size=size, log=lambda m: prog.log(m, None))
+                    prog.log(f"[ok] saved {_pp}", 0.95)
                     if not _sharp:
-                        _notes.append("Prominence layer built from the merge only: this cache "
-                                      "has no prominence stack. Clear cache and re-run for "
-                                      "sharp prominence edges.")
+                        _notes.append("[warn] prominence layer from merge only (no cached "
+                                      "stack); Clear cache and re-run for "
+                                      "sharp edges")
                 except Exception as _e:
-                    _notes.append(f"Prominence layer not written ({_e})")
+                    _notes.append(f"[warn] prominence layer not written ({_e})")
+            # the Moon as its own RGBA layer, on the same grid (lab 0.24)
+            if moon_layer and view == "composite" and _keep.get("rgb") is not None:
+                try:
+                    from .render import export_moon_layer
+                    _st = os.path.splitext(path)[0]
+                    _mp = ("_moon_16bit".join(_st.rsplit("_16bit", 1))
+                           if "_16bit" in os.path.basename(_st) else _st + "_moon_16bit") + ".tif"
+                    prog.log("writing Moon layer ...", 0.9)
+                    export_moon_layer(ly, params, _mp, _keep["rgb"], size=size)
+                    prog.log(f"[ok] saved {_mp}", 0.95)
+                except Exception as _e:
+                    _notes.append(f"[warn] Moon layer not written ({_e})")
             try:
                 from . import report as _report
                 rp = os.path.join(workdir(STATE["folder"]), "report.json")
@@ -1314,11 +1636,16 @@ def do_export():
                     st["bg_chroma"] = [round(float(x), 3) for x in ly.bg_chroma]
                 except Exception:
                     pass
-                open(os.path.splitext(path)[0] + "_report.txt", "w").write(
-                    _report.build(st) + "\n")
+                if _pq:
+                    st["picture_quality"] = _pq
+                _txt = _report.build(st)
+                if _pq:
+                    from . import picquality as _pqm
+                    _txt += "\n\n" + _pqm.text(_pq)
+                open(os.path.splitext(path)[0] + "_report.txt", "w").write(_txt + "\n")
             except Exception:
                 pass
-            prog.log(f"saved {path}", 1.0)
+            prog.log(f"[ok] saved {path}", 1.0)
             # Logged AFTER the save line so it is the one the page shows: a
             # warning nobody reads is the same as no warning.
             for _n in _notes:

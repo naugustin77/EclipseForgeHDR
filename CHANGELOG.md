@@ -5,6 +5,81 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.25.0
+
+The lab line (0.24 development) merged into the release. **Caches from 0.23.x
+are re-stacked once**: the stack itself changed. After that, layer and mask
+rebuilds carry their own recipe numbers (detail layers 18, partial-convolution
+masks 15) and run from the cached merge without a re-stack.
+
+**New layers**
+- **Moon layer.** The disc's own detail (earthshine, maria) stacked from the
+  long exposures (the longest one left out when two shorter remain), with the
+  scattered glare modelled (power-law PSF, fitted per set) and removed; band-
+  passed inside the disc, limb band held to the inner disc's spread, faded out
+  over 0.80–0.97 R. Moon group: disc level, earthshine, colour picker, its own
+  tone curve. Built automatically after the stack, also on the simple stack.
+- **Prominence layer.** Prominences stacked from the short exposures (or a
+  subfolder whose name contains "short" or "prom"), aligned on the Sun, H-alpha separated from the corona by
+  colour, saturated cores filled from the rim as a lower bound, faint detached
+  pieces dropped. Laid over the finished picture with its own stretch, rim,
+  saturation, colour picker (Mono + tints) and peak cap; exportable as an RGBA
+  TIFF. The corona under it has the prominence light removed by colour, without
+  adding R/G pixel noise outside the prominences.
+
+**Rendering**
+- **Look presets:** EFHDR as loaded, Natural balanced blue, Bright desaturated
+  streamers, Calm blue, Sunset, Dark moody, Deep purple. A look sets
+  structure, partial convolution, final sharpening, colour and tone together.
+- **Colour modes:** From the data (default), Monochrome (no colour anywhere;
+  the composite exports as one 16-bit channel), Mono + tints (a stylized
+  rendering: the corona's measured colour is replaced by the chosen sky and
+  prominence tints). Sky colour picker beside Sky lift colour.
+- **Structure** (Structure group): local contrast of the finished picture's
+  brightness at 0.01–0.08 R, Moon left out, the mean per ring removed so the
+  limb gets no halo, applied as a brightness ratio (colour kept). Default 0.
+  The Clarity slider is hidden; Clarity stays a look parameter.
+- **Final sharpening:** five high passes at 1.5–24 px (scaled to the solar
+  radius), combined as median / minimum / maximum in soft light, with a
+  per-band noise gate. Runs in a worker thread in the page.
+- **Highlight compression and Contain whites work in every look.** Both acted
+  before the Inner corona level step, which scaled them straight back out; they
+  now act after it. Looks that carried Highlight compression 1 (which never
+  acted) now carry 0, so they render as they were tuned.
+- **Removed:** the Log stretch control (no look used it; at its nominal value
+  the picture went white) and the NAFE layer (below).
+
+**Detail layers**
+- **Denoise defaults to Off.** The detail layers normalise by local spread, so
+  removing the 1–2 px grain makes them amplify the 4–16 px scales (+20–35 %
+  blotch noise in the finished picture); a dedicated denoiser on the export
+  does better (measured with NoiseXTerminator: a third fewer sky blotches).
+  Changing Denoise now rebuilds only the layers from the cached merge.
+- **NAFE removed.** With Denoise Off its rank equalisation turned noise near
+  the limb into 4-sigma blobs (18 between 1.02 and 1.47 R on the 600 mm set),
+  and it added nothing measurable to the streamers.
+- **MGN far-field rings fixed.** The deband step fitted each 1 px ring's trend
+  from 360 samples; the per-ring fit noise printed concentric arcs (3.8–4.4x
+  the noise power at 15–60 px periods). It now fits each ring from every pixel
+  on it; the trend model is unchanged and nothing is smoothed.
+- Prominence detection, gate and MGN holes as in 0.23.11, on the corona with
+  the H-alpha light removed.
+
+**Stacking**
+- Sky subtraction from the science frames is off by default (it is not
+  reliable without an independent sky measurement).
+- Calibration-folder guards: a flats, bias or darks folder that holds the
+  light frames themselves is refused and the conventional subfolder used.
+- Tiers: By shutter speed / Per frame (for brackets whose exposure times were
+  entered by hand).
+- Picture-quality line and report (grain, dark limb rim and others).
+
+**Interface**
+- Processing recipes: save and load all processing settings (`.efprocess.json`).
+- Tooltips rewritten (1–2 sentences each); log colour-coded by severity; a
+  remaining-time estimate on the progress bar; per-group before/after eyes;
+  versions panel for exports.
+
 ## 0.23.11
 
 **Detail layers now carry a recipe number (LAYER_BUILD); a cached stack whose

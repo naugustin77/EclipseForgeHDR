@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.23.11
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.25.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
 
@@ -47,6 +47,34 @@ against.*
 
 ---
 
+## New in 0.25.0
+
+- **Moon layer:** the lunar disc with its earthshine detail (maria), stacked
+  from the long exposures, with its own level, colour and tone curve (Moon
+  group). Built automatically, also on the simple stack.
+- **Prominence layer:** prominences stacked from the short exposures and laid
+  over the finished picture, with their own colour, peak and stretch; exportable
+  as an RGBA TIFF.
+- **Look presets:** EFHDR as loaded, Natural balanced blue, Bright desaturated
+  streamers, Calm blue, Sunset, Dark moody, Deep purple.
+- **Colour modes:** from the data, Monochrome (single-channel export), or
+  Mono + tints (a stylized rendering with a chosen sky and prominence tint).
+- **Structure:** local contrast on the finished picture at the width of the
+  streamers. Final sharpening after Nimmervoll's high-pass method.
+- **Denoise Off by default.** Fine grain is best left to a dedicated denoiser
+  (e.g. NoiseXTerminator) on the export; Denoise can be changed without a
+  re-stack.
+- **Removed:** the NAFE layer (it turned unsmoothed noise into blotches near the
+  limb) and the Log stretch control.
+- **Fixed:** concentric rings in the MGN layer's far field; Highlight
+  compression and Contain whites now work in every look.
+- **Processing recipes:** save and load all processing settings per dataset.
+- Caches from 0.23.x are re-stacked once.
+
+See the [changelog](CHANGELOG.md) for details.
+
+---
+
 ## What it is
 
 A purpose-built corona pipeline. It assumes the subject is a solar corona around
@@ -57,7 +85,7 @@ stars.
 ## What it is not
 
 - **Not a general astrophotography stacker.** No star registration, plate
-  solving, deconvolution, dark frames, dithering or drizzle. (Flats it does
+  solving, deconvolution, dithering or drizzle. (Flats, bias and darks it does
   take — see [Flat-field calibration](#flat-field-calibration).)
 - **Not a raw developer.** It does its own demosaic, white balance and colour
   transform from the sensor data, and does not read your develop settings.
@@ -107,9 +135,10 @@ exporting afterwards are immediate.
    *beyond the measured corona extent* and divided out. That removes the sky's
    colour gradient without removing the corona's own asymmetry.
 7. **Extract structure.** Several independent enhancement layers are computed
-   from the merged HDR: MGN, FNRGF, NAFE-VN, a tangential (rotational) unsharp
-   mask, a partial-convolution unsharp chain, a short-exposure inner-corona
-   layer, and an earthshine layer from the longest exposures.
+   from the merged HDR: MGN, FNRGF, a tangential (rotational) unsharp mask, a
+   partial-convolution unsharp chain and a short-exposure inner-corona layer;
+   a prominence layer from the shortest exposures and a Moon layer from the
+   longest.
 8. **Render.** The interface mixes those layers live over a decimated preview;
    the same parameters are then applied at full resolution and exported.
 
@@ -125,15 +154,15 @@ constants are noted in the code where they occur.
 Steps 7 and 8 extract several independent views of the same merged image. They
 are not alternatives to each other: each sees different structure, each has its
 own button so it can be inspected alone, and the composite is a weighted mix.
-MGN, Tangential and Partial conv are for fine structure, FNRGF and NAFE for
-faint outer structure, and Inner and Prom gate are additional *sources* rather
+MGN, Tangential and Partial conv are for fine structure, FNRGF for faint
+outer structure, and Inner and Prom gate are additional *sources* rather
 than filters.
 
-| MGN | FNRGF | NAFE |
+| MGN | FNRGF | Tangential |
 |:---:|:---:|:---:|
-| ![](docs/images/eclipseforge_render_mgn.jpeg) | ![](docs/images/eclipseforge_render_fnrgf.jpeg) | ![](docs/images/eclipseforge_render_nafe.jpeg) |
-| **Tangential** | **Inner** | **Prom gate** |
-| ![](docs/images/eclipseforge_render_pellett.jpeg) | ![](docs/images/eclipseforge_render_inner.jpeg) | ![](docs/images/eclipseforge_render_prom.jpg) |
+| ![](docs/images/eclipseforge_render_mgn.jpeg) | ![](docs/images/eclipseforge_render_fnrgf.jpeg) | ![](docs/images/eclipseforge_render_pellett.jpeg) |
+| **Inner** | **Prom gate** | |
+| ![](docs/images/eclipseforge_render_inner.jpeg) | ![](docs/images/eclipseforge_render_prom.jpg) | |
 
 *The same merged image through each layer.*
 
@@ -145,7 +174,8 @@ equally visible at the bright base and in the faint streamers. It carries most
 of the fine detail — plumes, streamer filaments, radial texture. Its weakness is
 the disc edge, where a normalising kernel straddling the limb has nothing
 sensible to normalise against.
-*Sliders: MGN contrast, Clarity, Grain smoothing.*
+*Sliders: MGN contrast, Grain smoothing.* High MGN contrast (above about 0.3)
+darkens the gaps between streamers more than it brightens the streamers.
 
 **FNRGF — Fourier Normalising Radial Gradient Filter** (Druckmüllerová, Morgan &
 Habbal 2011)
@@ -157,14 +187,9 @@ Strongest in the outer corona, and mixed in progressively with radius rather
 than applied everywhere.
 *Sliders: FNRGF strength, FNRGF share (outer).*
 
-**NAFE — Noise Adaptive Fuzzy Equalisation** (Druckmüller 2013)
-A local histogram equalisation with the neighbourhood defined in *value* rather
-than in space: a pixel is ranked against other pixels of similar brightness, not
-against whatever is nearby. Its strength is limited by the locally measured
-noise, so it lifts faint structure without amplifying grain. It needs no disc
-geometry, which is why it stays clean at the limb where MGN and FNRGF are most
-fragile. Off by default, as it is easy to overdo.
-*Slider: NAFE mix.*
+**NAFE** (Druckmüller 2013) was a layer up to 0.23.11 and is removed in
+0.25.0: without a denoised input it turned noise near the limb into blotches,
+and it added nothing measurable to the streamers.
 
 **Tangential — rotational unsharp mask**
 Blurs the image along the azimuthal direction about the disc centre and
@@ -181,7 +206,7 @@ above. The blur behind each mask is taken in *polar* coordinates, so it averages
 along a streamer rather than across it. And it is *partial*: the occulted disc
 and the prominences are excluded from both the convolution and its
 normalisation, so nothing is smeared out of them into the corona. It is also
-additive and linear where MGN, NAFE and RHEF are multiplicative and locally
+additive and linear where MGN and RHEF are multiplicative and locally
 normalised — faint structure stays faint instead of being lifted to the same
 texture as everything else. Built on the raw merge, not the denoised master,
 so the masks carry honest photon noise and the noise threshold (against a
@@ -192,7 +217,7 @@ at 4 px. The base weight slider shows the masks on their own (0, Hill's
 blend into the composite is an overlay of that grey layer, bounded, so it
 adds contrast and never brightness. After Jonathan Hill, "Advanced Solar
 Eclipse Photography".
-*Sliders: the Partial convolution group. Off by default.*
+*Sliders: the Partial convolution group. Off by default; the looks switch it on.*
 
 **Inner — short-exposure inner corona**
 A separate source rather than a filter: its own stack of the shortest exposures,
@@ -239,9 +264,10 @@ stopping on a line.
 - Per-tier lunar masking, applied only when it measurably improves the limb
 - Automatic crop of the alignment border
 - Six independent structure layers, each on its own slider and each viewable
-  alone: MGN, FNRGF, NAFE-VN, tangential filter, partial convolution,
-  inner corona, prominences
-- Earthshine layer from the longest exposures
+  alone: MGN, FNRGF, tangential filter, partial convolution, inner corona,
+  prominences
+- Moon layer (earthshine) from the longest exposures; prominence layer from
+  the shortest
 - Diamond-ring blending from a separate contact frame
 - Colour controls that separate sky cast from corona colour, plus warmth, tint,
   saturation and highlight compression
@@ -450,9 +476,11 @@ not consulted and the report marks them `[bypassed]`.
 ### Denoise — Off / Fine / Fine + medium / Strong
 
 Multiscale soft thresholding of the merged luminance against a per-pixel
-photon-noise model, before the detail layers are built. *Fine* is the default.
-Raise it for a short, noisy bracket; drop it to Off if you intend to denoise
-yourself afterwards.
+photon-noise model, before the detail layers are built. *Off* is the default
+since 0.25.0: the detail layers normalise by local contrast, so removing the
+finest grain makes them amplify the next scales, and a dedicated denoiser on
+the export does better. Changing it rebuilds the layers from the cached stack
+(no re-stack).
 
 ### Merge weight — Blended edge / Exact edge
 
@@ -546,11 +574,13 @@ fraction. That is the expected direction, not a fault. *Use it if* the
 background behind the streamers looks lumpy and you will trade contrast for
 smoothness.
 
-### Earthshine — off by default
+### Moon layer — built automatically
 
-Builds a separate earthshine layer from the longest tiers. Off by default
-because earthshine needs long tiers with real headroom over the scattered
-glare, which most totality brackets do not have.
+The lunar disc's own detail (earthshine, maria) is stacked from the longest
+exposures, with the scattered glare modelled and removed. It is built after the
+stack, takes about a minute, and is shown with the Moon group's sliders (disc
+level, earthshine, colour, its own tone curve). It needs long tiers with real
+signal on the disc; without them the disc stays plain.
 
 ### Fix hot pixels — on by default
 
@@ -577,7 +607,7 @@ where sRGB-encoded files open looking correct.
 
 If you already have a merged corona image, it does not have to be stacked again.
 Put its path in the box next to the flats box and press Start: the disc is
-located, the sky gradient is fitted and removed, and MGN, FNRGF, NAFE-VN, the
+located, the sky gradient is fitted and removed, and MGN, FNRGF, the
 inner-corona layer, the tangential filter and the prominence gate are all built
 on that image.
 Every view exports exactly as it does from a bracket.
@@ -592,7 +622,7 @@ its name, or it is rejected rather than guessed at.
 
 What an imported image gives up, all of it stated in the report:
 
-- no alignment, photometry or per-tier lunar masking, and no earthshine layer —
+- no alignment, photometry or per-tier lunar masking, and no Moon layer —
   those describe a stack, and there is no stack
 - the **inner-corona layer stops being independent**. Normally it is a separate
   MGN of the shortest tiers, which see the inner corona unsaturated; from one
@@ -622,7 +652,7 @@ tier before anything else touches it. It removes lens vignetting, the cos⁴
 falloff, dust shadows on the sensor stack, and per-photosite sensitivity (PRNU).
 This matters more for an eclipse than for most subjects, because the corona's
 own radial falloff *is* the signal: a 6% vignette is a 6% error in the F-corona
-gradient, and MGN, FNRGF and NAFE-VN then all work to preserve it.
+gradient, and MGN and FNRGF then both work to preserve it.
 
 **The amount of smoothing applied to the master is measured, not chosen.**
 Dividing by a flat injects that flat's own noise into every frame identically,
@@ -762,7 +792,7 @@ happens.
 - H. Morgan and M. Druckmüller, "Multi-scale Gaussian normalization for solar
   image processing", *Solar Physics* **289**, 2945 (2014) — MGN.
 - S. R. Habbal, M. Druckmüller and H. Morgan, in *IWCIA 2014* — the published
-  NAFE working values used as this code's defaults.
+  NAFE working values (NAFE was part of the app up to 0.23.11).
 - P. E. Debevec and J. Malik, "Recovering high dynamic range radiance maps from
   photographs", *SIGGRAPH* (1997) — the saturation-weighted HDR merge.
 - H. S. Malvar, L. He and R. Cutler, "High-quality linear interpolation for

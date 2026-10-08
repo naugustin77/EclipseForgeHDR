@@ -202,7 +202,7 @@ class RawFile:
         # `white_level` is the container's -- 16383 for 14-bit Canon data.
         # `camera_white_level_per_channel` is LibRaw's linear_max: the level at
         # which the sensor stops responding linearly, which is where the data
-        # actually stops. On the test set's Canon 1500D they differ by 8.6%:
+        # actually stops. On Clifton's Canon 1500D they differ by 8.6%:
         #
         #     _MG_4637.CR2   white_level 16383   linear_max 15092   black 2047
         #
@@ -214,7 +214,7 @@ class RawFile:
         # disagreement rim, and concentric arcs sitting within 0.6 px of a clip
         # contour. Adobe writes the true value into a DNG (white_level 15092
         # there), which is why the same code gave a clean run on DNGs of the
-        # same nine frames -- the reference set's test, 0.22.33, and the thing that found it.
+        # same nine frames -- Nico's test, 0.22.33, and the thing that found it.
         #
         # Guarded, because linear_max is not always populated: use it only when
         # every channel reports a positive value below the container ceiling and
@@ -225,7 +225,7 @@ class RawFile:
         # Reported in the log, because "the reported white level" was printed on
         # a run whose number actually came from the observed maximum -- true and
         # misleading at the same time, on exactly the line that exists to make
-        # this diagnosable. the reference set's 600 mm S1R II run, 0.22.36.
+        # this diagnosable. Nico's 600 mm S1R II run, 0.22.36.
         self.sat_source = "white_level"
         _lm = _lm_raw
         if _lm is not None:
@@ -289,7 +289,15 @@ class RawFile:
         # black 512, and the pipeline is subtracting the right number. Read the
         # frame, not the metadata summary, and check the fit against a real run
         # before rewriting this again.
-        _obs = float(self.bayer.max()) if self.bayer.size else 0.0
+        # NOT THE RAW MAXIMUM (TODO 0-c, lab 0.24): read before hot-pixel
+        # repair, one defective photosite at full scale would set the ceiling
+        # above the true clip -- the mechanism that printed the rings. The
+        # 99.999th percentile (of every third photosite) costs nothing where
+        # this should fire (on a blown frame it IS the ceiling) and is not set
+        # by a handful of defects. pipeline.py takes the highest of these over
+        # the bracket, not the first frame's (see color_info there).
+        _obs = (float(np.percentile(self.bayer[::3, ::3], 99.999))
+                if self.bayer.size else 0.0)
         if _obs > self.sat_level:
             self.sat_level = _obs * 0.975
             self.white_level = _obs + black
@@ -384,7 +392,7 @@ def cfa_clip_max(cfa):
     then declared valid and enters the merge at full weight carrying a value
     reconstructed, in part, from a photosite that hit the ceiling.
 
-    Measured on the 600 mm reference set: adjacent tiers disagree by up to 3x within
+    Measured on Nico's 600 mm set: adjacent tiers disagree by up to 3x within
     0-8 px outside the longer tier's saturated region and by ~1% beyond
     8-16 px. This is one of the two mechanisms that can produce that collar --
     the other, charge spill or veiling glare off the saturated area, is real
@@ -745,7 +753,7 @@ def _outlier_flags(bayer, k=6.0, read_noise=None):
                     # print both. The bench cannot settle which number is
                     # right on a given sensor: on a synthetic tier the fit
                     # comes out HIGH (pinning found 97 defects against 80),
-                    # on the 600 mm reference set it must have come out LOW (the
+                    # on Nico's 600 mm set it must have come out LOW (the
                     # count fell 3675 -> 1848). Same failure, opposite sign,
                     # so the only way to know is to look at the two numbers
                     # for the data in hand.

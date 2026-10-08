@@ -237,7 +237,7 @@ def _stack(paths, shape, log, label, want_iso=None):
         del b
 
     for name, why in rejected:
-        log(f"{label} rejected: {name} {why}", None)
+        log(f"[warn] {label} rejected: {name} {why.split(' — ')[0]}", None)
     info["n_used"] = len(used)
     info["rejected"] = [{"file": n, "why": w} for n, w in rejected]
     n = len(used)
@@ -295,9 +295,8 @@ def _stack(paths, shape, log, label, want_iso=None):
         info["seconds"] = float(np.median(secs))
         info["seconds_spread"] = [float(min(secs)), float(max(secs))]
         if max(secs) > 1.001 * min(secs):
-            log(f"{label}: exposures are not all the same "
-                f"({min(secs):g}s to {max(secs):g}s) — the rate is scaled from "
-                f"the median, {np.median(secs):g}s", None)
+            log(f"[odd] {label}: exposures vary {min(secs):g}-{max(secs):g}s; "
+                f"rate scaled from median {np.median(secs):g}s", None)
     if isos:
         info["iso"] = int(np.median(isos))
     return master.astype(np.float32), meanA, meanB, info
@@ -422,7 +421,7 @@ def build(folder, bias_dir, dark_dir, shape=None, progress=None,
             # SUBTRACT ONLY WHERE THERE IS SOMETHING TO SUBTRACT.
             #
             # The verdict below compares what the master removes against the
-            # noise it injects, and on the reference set's 20 darks that ratio came out 1.1x
+            # noise it injects, and on Nico's 20 darks that ratio came out 1.1x
             # -- barely worth applying. The census above says why: 0.314% of
             # photosites carry measurable dark current. For the other 99.7% the
             # master's value is not dark current, it is the master's own noise,
@@ -536,9 +535,9 @@ def describe(info):
     di = info.get("dark") or {}
     if bi:
         if bi.get("error"):
-            out.append(f"bias: {bi['error']}")
+            out.append(f"[warn] bias: {bi['error']}")
         else:
-            out.append(f"bias: {bi.get('combine', '')} from "
+            out.append(f"[ok] master bias: {bi.get('combine', '')} from "
                        f"{os.path.basename(info.get('bias_dir') or '')}/"
                        + (f", ISO {bi['iso']}" if bi.get("iso") else ""))
             if bi.get("read_noise"):
@@ -548,15 +547,15 @@ def describe(info):
                     + (" (R %.2f, G %.2f/%.2f, B %.2f)" % tuple(_c)
                        if len(_c) == 4 else ""))
             rem, inj = bi.get("removes", 0.0), bi.get("noise", 0.0)
-            out.append(f"bias: offset {bi.get('level', 0.0):+.3f} ADU on top of "
-                       f"the black level the raw file already reported; fixed "
-                       f"pattern {rem:.3f} ADU, master noise {inj:.3f} ADU")
+            out.append(f"bias: offset {bi.get('level', 0.0):+.3f} ADU over raw "
+                       f"black level; fixed pattern {rem:.3f} ADU, master noise "
+                       f"{inj:.3f} ADU")
             out.append(_verdict("bias", rem, inj))
     if di:
         if di.get("error"):
-            out.append(f"dark: {di['error']}")
+            out.append(f"[warn] dark: {di['error']}")
         elif di.get("rate_median") is not None:
-            out.append(f"dark: {di.get('combine', '')} from "
+            out.append(f"[ok] master dark: {di.get('combine', '')} from "
                        f"{os.path.basename(info.get('dark_dir') or '')}/ at "
                        f"{di.get('seconds', 0):g}s"
                        + (f", ISO {di['iso']}" if di.get("iso") else ""))
@@ -566,25 +565,21 @@ def describe(info):
             if di.get("defects") is not None:
                 _sg = di.get("defect_sigma_rate") or []
                 out.append(
-                    f"dark: {di['defects']} photosites carry dark current "
-                    f"{di.get('defect_k', DEFECT_K):.0f} sigma above their "
+                    f"dark: {di['defects']} photosites "
+                    f">{di.get('defect_k', DEFECT_K):.0f} sigma above "
                     f"same-colour neighbours"
                     + (" (sigma %.4f-%.4f ADU/s per channel)"
                        % (min(_sg), max(_sg)) if _sg else "")
-                    + " — a census, not defects: each one's rate is subtracted "
-                      "individually, which is the correct fix for it")
+                    + ", each rate subtracted individually")
             if di.get("gate_kept_frac") is not None:
                 out.append(
-                    f"dark: subtracting the rate on {100.0 * di['gate_kept_frac']:.2f}% "
-                    f"of photosites ({di['gate_k']:.1f} sigma above zero, chosen "
-                    f"by predicted residual) — on the rest the master measured "
-                    f"only its own noise, and subtracting it would add that "
-                    f"noise while removing nothing")
+                    f"dark: rate subtracted on {100.0 * di['gate_kept_frac']:.2f}% "
+                    f"of photosites (>{di['gate_k']:.1f} sigma above zero)")
             at = di.get("at_longest_tier")
             if at:
-                out.append(f"dark: at the longest tier ({at['seconds']:g}s) it "
-                           f"removes {at['removes']:.3f} ADU of fixed pattern "
-                           f"and injects {at['injects']:.3f} ADU of noise")
+                out.append(f"dark: at longest tier ({at['seconds']:g}s) removes "
+                           f"{at['removes']:.3f} ADU fixed pattern, injects "
+                           f"{at['injects']:.3f} ADU noise")
                 out.append(_verdict("dark", at["removes"], at["injects"]))
             else:
                 out.append(_verdict("dark", di.get("removes", 0.0),
@@ -594,16 +589,14 @@ def describe(info):
 
 def _verdict(what, removes, injects):
     if injects <= 0:
-        return (f"{what}: noise of the master could not be measured — treat "
-                f"the correction as unverified")
+        return (f"[warn] {what}: master noise not measurable, correction "
+                f"unverified")
     r = removes / injects
     if r >= WORTH_IT:
         return (f"{what}: removes {r:.1f}x more fixed pattern than it injects "
-                f"noise — worth applying")
-    return (f"{what}: WARNING — removes only {r:.1f}x its own noise. Below "
-            f"{WORTH_IT:.0f}x the master is mostly noise and subtracting it "
-            f"puts more in than it takes out. More frames would fix this; "
-            f"nothing else will.")
+                f"noise")
+    return (f"[warn] {what}: removes only {r:.1f}x its own noise "
+            f"(<{WORTH_IT:.0f}x); more frames needed")
 
 
 def load_or_build(folder, bias_dir, dark_dir, shape, progress=None,
@@ -668,5 +661,5 @@ def load_or_build(folder, bias_dir, dark_dir, shape, progress=None,
             if _dm is not None:
                 info["defect_map"] = _dm
         except Exception as e:
-            log(f"dark: could not cache the masters ({e})", None)
+            log(f"[warn] dark: masters not cached ({e})", None)
     return bias, rate, info

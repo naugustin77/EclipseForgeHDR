@@ -91,6 +91,45 @@ _BAR_PIVOT = 0.935
 _BAR_DETAIL = 0.52
 
 
+class Cancelled(Exception):
+    """The user pressed Cancel. Raised from Progress.log at the next logged
+    step, so a job stops between steps (a long single step finishes first)."""
+
+
+# LOG LEVELS (2026-10-07). A message may start with a tag -- "[ok] ",
+# "[warn] ", "[fail] ", "[odd] ", "[step] " -- which is stripped and kept as the
+# line's level; the page colours the line by it. The tag rides inside the
+# string so it passes through every log wrapper unchanged. Untagged lines are
+# classified from their wording.
+import re as _re
+_LEVEL_TAG = _re.compile(r"^\[(ok|warn|fail|odd|step|info)\]\s*")
+_LV_FAIL = _re.compile(r"\b(failed|error|exception|traceback|aborted)\b", _re.I)
+_LV_WARN = _re.compile(r"\b(rejected|skipped|not written|not measurable|not used|"
+                       r"falls? back|fell back|no usable|too dark|too few|warning|"
+                       r"ignored|unavailable|missing)\b", _re.I)
+_LV_OK = _re.compile(r"(^saved\b|^ready$|\b(done|complete|saved|written|built|repaired)\b)", _re.I)
+
+
+def split_level(msg, level=None):
+    """(message without its tag, level). See the note above."""
+    msg = str(msg)
+    m = _LEVEL_TAG.match(msg)
+    if m:
+        msg = msg[m.end():]
+        level = level or m.group(1)
+    if level:
+        return msg, level
+    if _LV_FAIL.search(msg):
+        return msg, "fail"
+    if _LV_WARN.search(msg):
+        return msg, "warn"
+    if msg.rstrip().endswith("..."):
+        return msg, "step"
+    if _LV_OK.search(msg):
+        return msg, "ok"
+    return msg, "info"
+
+
 class Progress:
     """Log lines plus the two clocks the GUI needs to show it is alive.
 
@@ -103,6 +142,7 @@ class Progress:
 
     def __init__(self):
         self.lines = []
+        self.levels = []          # one per line: ok / warn / fail / odd / step / info
         self.stamps = []          # seconds since t0, one per line
         self.frac = 0.0
         self.done = False
@@ -111,6 +151,12 @@ class Progress:
         self.t_line = self.t0
         self.bar_pivot = _BAR_PIVOT
         self.bar_detail = _BAR_DETAIL
+        self.cancel_requested = False
+        self.cancelled = False
+
+    def cancel(self):
+        """Ask the job to stop at its next logged step (see Cancelled)."""
+        self.cancel_requested = True
 
     def bar(self, f):
         """Authored frac -> the frac the bar shows. See _BAR_DETAIL above."""
@@ -120,14 +166,21 @@ class Progress:
             return f * (d / p)
         return d + (f - p) * (1.0 - d) / (1.0 - p)
 
-    def log(self, msg, frac=None):
+    def log(self, msg, frac=None, level=None):
+        msg, level = split_level(msg, level)
         self.t_line = time.time()
         self.lines.append(msg)
+        self.levels.append(level)
         self.stamps.append(self.t_line - self.t0)
         if frac is not None:
             # never go backwards: a stage that reports a lower frac than one
             # already passed would make the bar jump back and read as a restart
             self.frac = max(self.frac, self.bar(frac))
+        # every log line is a point where the job may stop; raised again on
+        # every later line too, so a handler that logs and carries on stops there
+        if self.cancel_requested:
+            self.cancelled = True
+            raise Cancelled("cancelled by the user")
 
     def elapsed(self):
         return time.time() - self.t0
@@ -528,7 +581,7 @@ ASYM_WINDOW = False
 #: 0.40 px: "p = q = 0.01 % max{A_f1, A_f2}".
 #:
 #: NOT the optimum on our own bench, and taken anyway. Sweeping pq on tiers
-#: built from the reference set's own corona and his own master flat (rms error on a known
+#: built from Nico's own corona and his own master flat (rms error on a known
 #: injected shift, px):
 #:
 #:     pq      1e6*    1e-1   1e-2   1e-3   3e-4   1e-4   1e-5    0
@@ -815,10 +868,8 @@ def _moon_track(tier_moon, tier_time, progress):
     info = {"drift_px_per_s": rate, "drift_px_total": span,
             "scatter_y_px": float(np.std(ry)), "scatter_x_px": float(np.std(rx)),
             "time_base_s": float(np.ptp(t))}
-    progress.log(f"lunar track: {rate:.2f} px/s, {span:.0f} px across the "
-                 f"bracket; scatter about the line {np.std(ry):.0f}/"
-                 f"{np.std(rx):.0f} px; the tiers' mean times span "
-                 f"{np.ptp(t):.0f} s", None)
+    progress.log(f"lunar track: {rate:.2f} px/s, {span:.0f} px over the bracket, "
+                 f"scatter {np.std(ry):.0f}/{np.std(rx):.0f} px, time base {np.ptp(t):.0f} s", None)
     # THE RATE IS CHECKED AGAINST ORBITAL MECHANICS (0.23.8). The Moon crosses
     # the corona at 0.4-0.6 arcsec/s during totality (its own motion less the
     # Sun's, with the observer's parallax), and the plate scale follows from
@@ -834,22 +885,17 @@ def _moon_track(tier_moon, tier_time, progress):
         _exp = 0.5 / (1920.0 / (2.0 * _Rr))          # px/s at this scale
         info["drift_expected_px_per_s"] = _exp
         if rate > 2.0 * _exp or rate < 0.3 * _exp:
-            _why = ("the tiers are locked to the lunar edge, not the corona"
+            _why = ("tiers locked to the lunar edge"
                     if rate < 0.3 * _exp else
-                    "this fit is describing the cross-tier alignment error, "
-                    "not the Moon" + (f" (only {np.ptp(t):.0f} s between the "
-                                      f"tiers' mean times: a round-robin "
-                                      f"bracket gives the slope no base)"
-                                      if np.ptp(t) < 20.0 else ""))
-            progress.log(f"WARNING: at this plate scale the Moon moves about "
-                         f"{_exp:.2f} px/s against the corona; the track reads "
-                         f"{rate:.2f} px/s, so {_why}. The positions on the "
-                         f"line are used as before; the rate is not a "
-                         f"measurement.", None)
+                    "fit follows the cross-tier alignment error"
+                    + (f" ({np.ptp(t):.0f} s time base)"
+                       if np.ptp(t) < 20.0 else ""))
+            progress.log(f"[odd] lunar track {rate:.2f} px/s vs ~{_exp:.2f} px/s expected: "
+                         f"{_why}; rate unreliable", None)
             info["rate_implausible"] = True
     # SCATTER THAT DWARFS THE TRACK MEANS THERE IS NO TRACK.
     #
-    # a tester's 560mm run: "0.63 px/s, 6 px across the bracket; scatter
+    # Clifton Brown's 560mm run: "0.63 px/s, 6 px across the bracket; scatter
     # about the line 26/39 px". The Moon moved six pixels and the per-tier
     # measurements are forty pixels off a straight line -- the fit is describing
     # the alignment error, not the Moon. Printed, and nothing said so.
@@ -861,13 +907,8 @@ def _moon_track(tier_moon, tier_time, progress):
     _sc = float(max(np.std(ry), np.std(rx)))
     if _Rt > 0 and _sc > max(0.02 * _Rt, 3.0):
         progress.log(
-            f"WARNING: the per-tier lunar positions scatter {_sc:.0f}px about "
-            f"the fitted track, which is {100 * _sc / _Rt:.0f}% of the lunar "
-            f"radius and {'far more than' if _sc > span else 'comparable to'} "
-            f"the {span:.0f}px the Moon actually moved. The track is then "
-            f"fitting the cross-tier alignment error rather than the Moon, and "
-            f"everything keyed to it -- the inner-stack disc above all -- is "
-            f"placed by it.", None)
+            f"[warn] lunar track scatter {_sc:.0f} px ({100 * _sc / _Rt:.0f}% of R) "
+            f"vs {span:.0f} px lunar motion: track follows alignment error", None)
         info["track_scatter_bad"] = round(_sc, 1)
     info["_line"] = (cy, cx, cr)
     return {x: (float(np.polyval(cy, t[i])), float(np.polyval(cx, t[i])),
@@ -957,9 +998,9 @@ def _moon_mask_helps(stacks_half, sat_half, secs, cal, abs_shift,
             "uncovered_frac": hole, "applied": bool(ok),
             "verdict": "applied" if ok else "rejected — " + "; ".join(reasons)}
     progress.log(
-        f"moon-mask trial: limb 20-80% {w_off:.1f}px -> {w_on:.1f}px "
-        f"({100 * gain:+.0f}%), fit rms {f0[3]:.2f} -> {f1[3]:.2f}, "
-        f"radius {100 * dR:+.1f}% -> {info['verdict']}", None)
+        f"moon-mask trial: limb 20-80% {w_off:.1f} -> {w_on:.1f} px "
+        f"({100 * gain:+.0f}%), rms {f0[3]:.2f} -> {f1[3]:.2f}, "
+        f"R {100 * dR:+.1f}%: {info['verdict']}", None)
     return ok, info
 
 
@@ -1178,10 +1219,10 @@ def _pick_weight_alpha(stacks_half, sat_half, secs, cal, abs_shift, track,
         f"a={a:.2f}:" + "/".join(f"{sc[k][0] * max(sc[k][1], 0):.4f}"
                                  for k in ("limb", "mid", "outer") if k in sc)
         for a, sc in rows.items())
-    progress.log(f"merge weight trial (coherent detail limb/mid/outer): {_fmt} "
-                 f"-> exposure exponent {best:.2f}"
+    progress.log(f"merge weight trial (limb/mid/outer): {_fmt} "
+                 f"-> exponent {best:.2f}"
                  + (f", {100 * best_gain:+.0f}% at the limb" if best != 1.0
-                    else " (unchanged — nothing beat it without costing the outer field)"),
+                    else " (unchanged)"),
                  None)
     return best, info
 
@@ -1262,7 +1303,7 @@ FEATHER_NAMES = {"plain": "Blended edge", "taper": "Exact edge",
 # 0.22.16 replaced the plain blur with a leak-free weight and fixed the radial
 # profile exactly. It also made a ring artifact visible that the plain blur had
 # been hiding, on every dataset, in MGN, FNRGF and NAFE alike. Fifteen weight
-# forms were then rebuilt from the reference set's own aligned tiers and scored (tools/):
+# forms were then rebuilt from Nico's own aligned tiers and scored (tools/):
 #
 #   variant                              1.02R    ring power
 #   none (no feather at all)             1.000       0.94
@@ -1285,8 +1326,8 @@ FEATHER_NAMES = {"plain": "Blended edge", "taper": "Exact edge",
 #
 # So the plain feather is a deliberate, documented trade of brightness near the
 # limb for pictures that do not show rings -- and the price is NOT a constant.
-# 25% of the true level at 1.02 R on the 600 mm reference set; a factor of EIGHT on
-# the test set's 360 mm, where it prints as a pink rim. He reported exactly that on
+# 25% of the true level at 1.02 R on Nico's 600 mm set; a factor of EIGHT on
+# Clifton's 360 mm, where it printed as a pink rim. He reported exactly that on
 # 0.22.26, which is what killed this as a global default. The PINK of that rim
 # is understood since 0.23.8 and removed in the merge loop (the leaked value
 # is made achromatic: the channels clip at different depths); the brightness
@@ -1318,8 +1359,8 @@ _PEDESTAL_UNKNOWN_MAX = 0.02
 # the median signal the link was fitted on. This term models a black-level
 # residual, which is a few ADU; anything approaching the signal itself is the
 # fit trading slope against offset on data that cannot constrain both. On
-# the tester's 2024 560 mm set every well-constrained link needed 0.5-3% and the
-# one that ran away needed 60%; on the 600 mm reference set the largest is 4%. 0.20
+# Clifton's 2024 560 mm set every well-constrained link needed 0.5-3% and the
+# one that ran away needed 60%; on Nico's 600 mm set the largest is 4%. 0.20
 # sits an order of magnitude above the honest ones and well below the failure.
 _OFFSET_MAX_FRAC = 0.20
 
@@ -1351,7 +1392,7 @@ def _photometry_requested(folder, requested=None):
 
     ON BY DEFAULT SINCE 0.22.86. It was opt-in through a marker file from
     0.22.68, which is how it should have started -- but the file is invisible
-    once dropped, and that cost real work: five of the test set's test runs were
+    once dropped, and that cost real work: five of Clifton's test runs were
     reported and discussed as linear-fit results when the folder had no marker
     in it, and the reference 600 mm folder turned out to have had one all along
     without anyone remembering. A setting nobody can see is a setting nobody can
@@ -1429,9 +1470,9 @@ def _fit_pedestal(prof, scale, pmax):
     between tiers over 1.5-3.5 R once each is put back on the same scene scale:
 
         set                tiers   no offset   one global offset   fitted P
-        the tester 360mm        12      39.20%          2.87%        +2.87 ADU14
-        the tester 2024 560mm   14      36.43%          5.17%        +5.49 ADU14
-        the tester 250mm         9       2.42%          1.72%        -1.97 ADU14
+        Clifton 360mm        12      39.20%          2.87%        +2.87 ADU14
+        Clifton 2024 560mm   14      36.43%          5.17%        +5.49 ADU14
+        Clifton 250mm         9       2.42%          1.72%        -1.97 ADU14
 
     Thirteen-fold and sevenfold reductions from ONE number. On the 360 mm set
     the 1/1000 s tier reads 2.76x the scene at 2.9 R before the correction and
@@ -1778,7 +1819,7 @@ def _fit_azimuthal_affine(vals, wts, secs_order):
     and is not axisymmetric, so one scalar per tier cannot express it.
 
     WHAT WE HAD: one scalar `cal[s]` per tier plus one shared additive
-    pedestal. Fitted on the 600 mm reference set, k varies 3-27% around the limb
+    pedestal. Fitted on Nico's 600 mm set, k varies 3-27% around the limb
     depending on the tier and q runs to 9% of the local signal. That is the
     part a scalar cannot reach, and it is azimuthal -- so it changes wherever
     the mix of tiers changes, which is along each tier's saturation contour.
@@ -2169,7 +2210,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
     THE DEFAULT SINCE 0.22.86, and a toolbar setting -- "Photometry", with
     "Single scale factor" for the old behaviour. Opt-in through a marker file
     from 0.22.68 until then, which is how it should have started and not how it
-    should have stayed: an invisible setting cost five of the test set's test runs,
+    should have stayed: an invisible setting cost five of Clifton's test runs,
     reported and discussed as linear-fit results on folders that had no marker
     in them. ECLIPSEFORGE_PHOTOMETRY still overrides the toolbar in either
     direction (`linfit` or `scalar`) for a bisect, and the marker files are
@@ -2287,7 +2328,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
             #
             # AND A GUARD ON THE OFFSET (0.22.80), which this never had. The
             # slope was checked and q was taken on trust, so a link whose fit
-            # ran away in the offset went straight into the chain. the test set's
+            # ran away in the offset went straight into the chain. Clifton's
             # 2024 560 mm set: every tier with real overlap needed |q| of 50-260
             # in these units, and the 0.5s->1s link -- the last one carrying any
             # signal at all -- returned 1149, 1171 and 899. Those propagate to
@@ -2351,7 +2392,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
     # A failed link leaves k=1, q=0, so the composition below hands the tier its
     # neighbour's ACCUMULATED K and Q unchanged -- including the per-channel
     # part, which was measured on the neighbour's data and says nothing about
-    # this tier. Found on the tester's 2024 560 mm set, where the 1s->2s and
+    # this tier. Found on Clifton's 2024 560 mm set, where the 1s->2s and
     # 2s->4s links had literally zero pixels carrying signal in both exposures:
     # the 1s tier's fit (red 9.7% above green, plus its offset) was inherited
     # verbatim by 2s and 4s, which are the tiers that carry the OUTER corona.
@@ -2364,7 +2405,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
     # offset is dropped, which is exactly what the scalar chain would do.
     #
     # A bracket whose links all fit is untouched: `blind` is all False and this
-    # is the arithmetic it always was. Verified on the 600 mm reference set, where
+    # is the arithmetic it always was. Verified on Nico's 600 mm set, where
     # every tier's K is distinct and no channel is negative anywhere.
     _flat = []
     for j in range(mid - 1, -1, -1):            # shorter than the reference
@@ -2406,14 +2447,12 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
     # here would silently reimpose the constraint this function exists to lift.
     _nrm = float(np.mean(K[mid]))
     if not np.isfinite(_nrm) or _nrm <= 0:
-        progress.log("Hill photometric chain: normalisation failed — falling "
-                     "back to the scalar chain", None)
+        progress.log("[warn] linear-fit chain: normalisation failed, scalar chain used", None)
         return None, None
     K /= _nrm
     Q /= _nrm
     if not (np.isfinite(K).all() and np.isfinite(Q).all()):
-        progress.log("Hill photometric chain: non-finite terms — falling back "
-                     "to the scalar chain", None)
+        progress.log("[warn] linear-fit chain: non-finite terms, scalar chain used", None)
         return None, None
 
     # 0.22.81 TRIED A NON-NEGATIVITY CONSTRAINT HERE AND IT WAS WRONG.
@@ -2453,29 +2492,14 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
         "worst_dev_tier": None if _worst is None else ("%g" % _worst),
         "colour_spread_at_mid_pct": round(100 * _col, 2)}
     progress.log(
-        f"PHOTOMETRY: per-channel linear-fit chain. "
-        f"Slope and offset fitted per colour channel between neighbouring "
-        f"exposures, after PixInsight LinearFit as used in Hill's HDR eclipse "
-        f"workflow. "
-        f"This REPLACES the single luminance scale factor per tier and the one "
-        f"shared pedestal. Largest change against the scalar chain: "
-        f"{100 * _dev:.1f}% on the {_exp_name(float(_worst)) if _worst else 'n/a'} "
-        f"tier. Colour spread at the reference tier {100 * _col:.1f}%. "
-        f"{nfell} link-channel fit(s) fell back to the exposure ratio"
-        + (", and %d had an offset too large for the signal it was fitted on "
-           "and were refitted through the origin" % nqcap if nqcap else "")
-        + (". No colour correction was carried across %d blind link(s), so "
-           "the %s tier(s) keep the scalar chain's own factor on all three "
-           "channels -- a link with no overlapping signal measures no colour"
-           % (len(_flat), ", ".join(_exp_name(x) for x in sorted(set(_flat))))
-           if _flat else "") + ". "
-        f"Chained from the MIDDLE tier, not the longest: on a bracket this "
-        f"deep the longest is {n - 1} links from the shortest and the error "
-        f"accumulates over every one. Per-link model "
-        f"({modes.count('full')} slope+offset, {modes.count('slope')} slope "
-        f"only, {modes.count('ratio')} exposure ratio) — a link is only given "
-        f"an offset where enough pixels carry signal in both exposures to "
-        f"constrain one.", None)
+        f"[ok] linear-fit chain: max change {100 * _dev:.1f}% "
+        f"({_exp_name(float(_worst)) if _worst else 'n/a'}), "
+        f"colour spread {100 * _col:.1f}%, links {modes.count('full')} "
+        f"slope+offset / {modes.count('slope')} slope / "
+        f"{modes.count('ratio')} ratio, {nfell} fallback(s)"
+        + (f", {nqcap} refitted through origin" if nqcap else "")
+        + (f", {len(_flat)} blind link(s) without colour correction"
+           if _flat else ""), None)
     return Kd, Qd
 
 
@@ -2913,7 +2937,7 @@ def _per_channel_photometry(bayer, sat_half, secs, ref, links_good, cal,
             out["samples_file"] = os.path.basename(_dp)
             out["samples_mb"] = round(os.path.getsize(_dp) / 1e6, 1)
         except Exception as _e:
-            progress.log(f"per-channel samples not written ({_e})", None)
+            progress.log(f"[warn] per-channel samples not written ({_e})", None)
     _dump = None
 
     # The largest per-link offset any channel needed, in raw ADU. This is the
@@ -2927,51 +2951,33 @@ def _per_channel_photometry(bayer, sat_half, secs, ref, links_good, cal,
     if _od is not None:
         out["worst_link_offset"] = round(float(_od), 4)
 
-    _pt = (f"; the outer-field offset fitted per channel spreads "
+    _pt = (f", outer offset spread "
            f"{_ped_spread:.2f} ADU" if _ped_spread is not None else "")
-    _ot = (f"; the largest offset any single link needed is {_od:.1f} ADU"
+    _ot = (f", max link offset {_od:.1f} ADU"
            if _od is not None else "")
     # The band comparison is the part that says WHAT the tilt is, so it goes in
     # the log rather than only in the bundle.
     _bt = ""
     if _both:
-        _bt = (f". Over the {len(_both)} link(s) both signal bands could fit, "
-               f"the colour difference is {100 * _wlo:.1f}% on faint pixels "
-               f"(2-20% of saturation) and {100 * _whi:.1f}% on bright ones "
-               f"(35-85%)")
+        _bt = (f", faint {100 * _wlo:.1f}% / bright {100 * _whi:.1f}% "
+               f"over {len(_both)} link(s)")
         if _whi > max(2 * _wlo, _wlo + 0.005):
-            _bt += (" — much larger where the signal is high, which is what "
-                    "sensor non-linearity looks like rather than a gain "
-                    "difference, so treat the headline figure as an upper "
-                    "bound")
+            _bt += " (non-linearity, upper bound)"
         elif _wlo > max(2 * _whi, _whi + 0.005):
-            _bt += (" — larger on faint pixels, where the shorter tier of each "
-                    "link is closest to its noise floor; some of that is the "
-                    "fit being dragged toward zero by noise in the reference "
-                    "rather than a real difference")
+            _bt += " (noise-dominated)"
         else:
-            _bt += (" — the same at both signal levels, which is what a true "
-                    "per-channel gain looks like and not what non-linearity "
-                    "would do")
-    _kt = (f"; the azimuthal gain's swing around the limb differs between "
-           f"channels by up to {_kd:.0f} points" if _kd is not None else "")
+            _bt += " (per-channel gain)"
+    _kt = (f", azimuthal swing differs up to "
+           f"{_kd:.0f} pts" if _kd is not None else "")
     if _worst_tier is not None and _worst_scale > 0.01:
         progress.log(
-            f"per-channel photometry check: fitting slope and offset together "
-            f"per link, the way PixInsight's LinearFit does, the "
-            f"{_exp_name(float(_worst_tier))} tier's slope differs between "
-            f"colour channels by up to {100 * _worst_scale:.1f}%{_pt}{_ot}{_kt}{_bt}. "
-            f"This pipeline fits ONE factor per tier on luminance and applies "
-            f"it to R, G and B alike, so a difference of this size cannot be "
-            f"corrected and comes back out as a colour cast that changes with "
-            f"radius. Recorded, not corrected — the per-channel factors are in "
-            f"the diagnostics bundle.", None)
+            f"[warn] per-channel photometry: {_exp_name(float(_worst_tier))} "
+            f"slope differs {100 * _worst_scale:.1f}% between channels"
+            f"{_pt}{_ot}{_kt}{_bt}; not corrected", None)
     elif _worst_tier is not None:
         progress.log(
-            f"per-channel photometry check: fitting slope and offset together "
-            f"per link, the three colour channels agree on every tier's slope "
-            f"to {100 * _worst_scale:.1f}%{_pt}{_ot}{_kt}{_bt}. Fitting the "
-            f"photometric chain on luminance alone costs this dataset nothing.",
+            f"per-channel photometry: channels agree to "
+            f"{100 * _worst_scale:.1f}%{_pt}{_ot}{_kt}{_bt}",
             None)
     return out
 
@@ -2982,8 +2988,8 @@ def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
     """Choose the merge feather from THIS dataset, not from a global default.
 
     0.22.25 put the plain feather back because it hides the ring artifact.
-    That was right for the 600 mm reference set, where the leak it trades for costs
-    25% of the true brightness at 1.02 R, and wrong for the tester's 360 mm set,
+    That was right for Nico's 600 mm set, where the leak it trades for costs
+    25% of the true brightness at 1.02 R, and wrong for Clifton's 360 mm set,
     where the same leak costs a factor of EIGHT and prints as a pink rim
     around the limb -- which is exactly what he reported on 0.22.26.
 
@@ -2996,8 +3002,8 @@ def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
     The rule: use the plain feather while its error stays small enough not to
     read as a rim, and fall back to the leak-free taper when it does not. The
     threshold is 25%, which is where the one dataset known to be acceptable
-    sits -- so this ships the picture the tester already approved on their data and
-    refuses the 8x version on the test set's.
+    sits -- so this ships the picture Nico already approved on his data and
+    refuses the 8x version on Clifton's.
 
     Returns (mode, ratio) with ratio = plain level / taper level at 1.02 R.
     """
@@ -3058,33 +3064,26 @@ def _pick_feather(stacks_half, sat_half, secs, cal, pedestal, sat_level,
     rr = rr[np.isfinite(rr)]
     # the MINIMUM over the band, not the median: a rim is visible where the
     # deficit is worst, and the deficit shrinks quickly with radius (on
-    # the test set's 360 mm, 0.13 at 1.02 R but 0.49 by 1.06 R -- a median over the
+    # Clifton's 360 mm, 0.13 at 1.02 R but 0.49 by 1.06 R -- a median over the
     # band would blur the two datasets together).
     ratio = float(np.min(rr)) if rr.size >= 3 else float("nan")
     if not np.isfinite(ratio) or ratio > 1.2:
-        progress.log("feather trial: no usable comparison at the limb on this "
-                     "bracket (every tier clipped there, or no signal) — "
-                     "keeping the plain feather", None)
+        progress.log("[warn] feather trial: no usable limb comparison, plain feather kept", None)
         return "plain", float("nan")
     # THRESHOLD, AND WHAT IT IS CALIBRATED ON. Two real numbers, measured by
     # rebuilding both merges from the exported tiers:
-    #     the reference set's 600 mm   0.747  -- he calls this good, no rim
-    #     the test set's 360mm 0.126  -- he reported a pink rim on 0.22.26
+    #     Nico's 600 mm   0.747  -- he calls this good, no rim
+    #     Clifton's 360mm 0.126  -- he reported a pink rim on 0.22.26
     # Anything in (0.13, 0.75) separates them; 0.60 means "accept up to a 40%
     # deficit". Two calibration points that far apart do not pin it down, and
     # a third dataset landing between them is what would.
     mode = "plain" if ratio >= 0.60 else "taper"
     if mode == "plain":
-        progress.log(f"feather trial: the plain feather reads "
-                     f"{100 * ratio:.0f}% of the leak-free level at 1.02 R — "
-                     f"small enough to keep, and it suppresses the ring "
-                     f"artifact", None)
+        progress.log(f"feather trial: plain feather {100 * ratio:.0f}% of leak-free "
+                     f"level at 1.02 R, plain kept", None)
     else:
-        progress.log(f"feather trial: the plain feather reads only "
-                     f"{100 * ratio:.0f}% of the leak-free level at 1.02 R on "
-                     f"this bracket — that prints as a rim around the limb, so "
-                     f"the leak-free weight is used instead. The ring artifact "
-                     f"will be visible; it is the smaller error here", None)
+        progress.log(f"[warn] feather trial: plain feather only {100 * ratio:.0f}% of "
+                     f"leak-free level at 1.02 R, leak-free weight used (ring visible)", None)
     return mode, ratio
 
 
@@ -3093,7 +3092,7 @@ def _feather_weight(w, valid, sigma, mode=None):
     the region where the tier is clipped.
 
     THREE VERSIONS, TWO OF THEM WRONG, ALL THREE MEASURED. Two-tier merge
-    rebuilt from the test set's 360 mm raws (1/125 s and 1/8 s, identical weights,
+    rebuilt from Clifton's 360 mm raws (1/125 s and 1/8 s, identical weights,
     only this function changed). "max weight step" is the largest jump one
     tier's weight makes between neighbouring pixels; the profile columns are the
     merged radial profile against the unfeathered reference:
@@ -3115,10 +3114,10 @@ def _feather_weight(w, valid, sigma, mode=None):
     something else. Restoring the weight's magnitude at the boundary and then
     zeroing it just past that boundary leaves a step of nearly the full weight
     -- 0.986 against the plain blur's 0.027. Every tier's saturation contour
-    then prints as its own arc in the merged image. a tester saw it immediately on
+    then prints as its own arc in the merged image. Nico saw it immediately on
     his own 600 mm set: *"strange rims in the corona, in almost all layers.
     Something broke - it was perfect with my data before."*
-    It showed on his set and not on the test set's because his bracket runs at
+    It showed on his set and not on Clifton's because his bracket runs at
     exposure exponent 0.55 (the alpha trial fires there), so every tier carries
     comparable weight and every tier's boundary is visible; at alpha 1.0 the
     longest unclipped tier dominates and the others' steps do not show.
@@ -3154,7 +3153,25 @@ def _feather_weight(w, valid, sigma, mode=None):
     if _mode == "masked":                      # 0.22.16, steps at the clip edge
         return (out * v).astype(np.float32)
     t = np.clip((den - 0.5) * 2.0, 0.0, 1.0)
-    return (out * t * t * v).astype(np.float32)
+    t = t * t
+    # ... AND BY DISTANCE FROM THE CLIPPED PIXELS (0.24 lab). `den` reaches 0.5
+    # only at the edge of a clipped region LARGER than the feather: around a
+    # small clipped island -- a prominence, 8-15 px across in the 1/100 and
+    # 1/60 s tiers of the 600 mm set -- `den` stays near 1, so the taper never
+    # starts and the weight still jumps to zero at the island's edge. Measured
+    # weight just outside a clipped island of radius 4/8/15/30/200 px: 0.93,
+    # 0.74, 0.39, 0.10, 0.01. That step printed every prominence's outline
+    # into the merge (the outlines and dark crescents Nico healed by hand in
+    # Photoshop). Rebuilt from his 41 raws: the outlines are there with the
+    # taper alone and gone with this; the limb profile is unchanged, because
+    # at the limb the old taper is already the smaller of the two.
+    # ECLIPSEFORGE_TAPER_NODIST=1 restores the taper alone.
+    if (v < 0.5).any() and os.environ.get("ECLIPSEFORGE_TAPER_NODIST", "") in ("", "0"):
+        d = ndimage.distance_transform_edt(v > 0.5)
+        td = np.clip(d / float(sigma), 0.0, 1.0)
+        t = np.minimum(t, td * td * (3.0 - 2.0 * td))
+        del d, td
+    return (out * t * v).astype(np.float32)
 
 
 def _write_tier_tiff(folder, sec, cal_s, sat_level, hi, rgb_norm, n_frames,
@@ -3206,6 +3223,241 @@ def _write_tier_tiff(folder, sec, cal_s, sat_level, hi, rgb_norm, n_frames,
     progress.log(f"  wrote {os.path.basename(path)}", None)
 
 
+_WMODE_SEEN = {}
+
+
+def _weight_exposure_mode(cal, progress):
+    """WHICH EXPOSURE THE MERGE WEIGHT ASKS (TODO 21, lab 0.24).
+
+    The weight is exposure^alpha. Normally the stated exposure (EXIF/FITS) is
+    right and the photometric factors sit near 1 (Nico's set and Clifton's
+    three: 0.94-1.18). When a factor leaves 0.8-1.25 the header and the data
+    disagree, and the weight should follow the light the tier actually got:
+    s * cal[s]. Bench (the 41 FITS of a set with EXPTIME falsified by up to
+    1.9x): pixel rms against the true-header run at 1.00-1.05 R 15.5 % -> 3.8 %,
+    at 1.05-1.15 R 4.2 % -> 1.0 %, centre 1.4 px -> 0.1 px off. The LEVEL error
+    (+23 % at 1.05-1.6 R) is the same either way -- it does not come from the
+    weight. ECLIPSEFORGE_WEIGHT_EXPOSURE=stated|measured forces one."""
+    key = (id(cal), tuple(sorted((float(k), float(v)) for k, v in cal.items())))
+    if key in _WMODE_SEEN:
+        return _WMODE_SEEN[key]
+    env = os.environ.get("ECLIPSEFORGE_WEIGHT_EXPOSURE", "").strip().lower()
+    vals = [float(v) for v in cal.values() if v and np.isfinite(float(v))]
+    off = [v for v in vals if v < 0.8 or v > 1.25]
+    if env in ("stated", "measured"):
+        mode = env
+        progress.log(f"merge weight: {mode} exposure times (ECLIPSEFORGE_WEIGHT_EXPOSURE)", None)
+    elif off:
+        mode = "measured"
+        progress.log(f"[odd] merge weight: {len(off)} tier(s) at {min(vals):.2f}-{max(vals):.2f}x "
+                     f"stated exposure, measured exposure used", None)
+    else:
+        mode = "stated"
+    _WMODE_SEEN.clear(); _WMODE_SEEN[key] = mode
+    return mode
+
+
+def subtract_sky(wd, cy, cx, R, stats, progress, write=True):
+    """THE SKY IS SUBTRACTED (TODO 22, lab 0.24).
+
+    Sky light scales with exposure exactly like the corona, so it passes
+    through the merge untouched and arrives as a CONSTANT (a gently tilted
+    plane, at a low Sun) added to every pixel. Measured on Val Italo's FITS:
+    2.4x the corona in red and 6.8x in blue at 2.85 R, the colour of the
+    outer field walking from the corona's (B/R 0.48) to the sky's (1.47): the
+    radial colour swing. `_fit_pedestal` cannot take it: that is one constant
+    for every TIER, a black-level model, and sky is not one.
+
+    MODEL, per channel, on the merge beyond 1.5 R:
+        v = a * r^-n  +  f * r^-2.5  +  p0 + p1*x + p2*y
+    the corona's own fall-off -- the steep inner (K) corona, n from the
+    luminance profile, and the slow outer (F) corona at r^-2.5 -- and the sky as
+    a plane. Without the F term the slow outer corona is read as sky: on Nico's
+    600 mm merge the profile fits 15x worse (relative rms 0.056 against 0.0037)
+    and the sky comes out 10 % too bright. Only the plane is subtracted. Fitting the two TOGETHER is
+    the point: a sky fitted alone "beyond the corona" either eats the corona's
+    outer profile (fitted beyond 2.55 R on Val's set it drove it to zero) or has
+    no region left to fit in.
+
+    THE GUARDS: the sky must be MEASURED -- its level may change by at most
+    10 % when any one of 12 azimuth sectors is left out of the fit -- and it has to dominate SOMEWHERE in the frame, or it is not
+    identifiable. If the corona model still exceeds the fitted sky at 90 % of
+    the largest radius in the frame, nothing is subtracted and the log says so.
+    A negative fitted sky (an over-subtracted pedestal) is not subtracted either.
+    OFF BY DEFAULT (lab 0.24, after Nico's run of 2026-10-06): on his 600 mm
+    set it took the blue sky out with the gradient, its plane left the
+    curved part of the sky behind (far-field brightness varying ~25 % around
+    the Sun at 5-7 R, against 1-2 % with the multiplicative quadratic
+    division), and the reddened corona showed as a hue edge. The same
+    conclusion as docs/SKY_SUBTRACTION.md (0.22.51-0.22.61) and the
+    2026-09-11 status: the sky cannot be fitted reliably from the science
+    frames alone. ECLIPSEFORGE_SKYSUB=1 turns it on for experiments.
+    """
+    if os.environ.get("ECLIPSEFORGE_SKYSUB") != "1":
+        stats["sky_sub"] = {"applied": False, "why": "off by default (ECLIPSEFORGE_SKYSUB=1 turns it on)"}
+        return None
+    hp = os.path.join(wd, "hdr_rgb.npy")
+    hdr = np.load(hp, mmap_mode="r")
+    H, W, _ = hdr.shape
+    d = max(2, int(round(R / 100.0)))
+    S = np.array(hdr[::d, ::d], dtype=np.float64, copy=True)
+    del hdr
+    h, w, _ = S.shape
+    yy = (np.arange(h, dtype=np.float64)[:, None] * d - cy) / R
+    xx = (np.arange(w, dtype=np.float64)[None, :] * d - cx) / R
+    r = np.hypot(yy, xx) * np.ones((h, w))
+    X = xx * np.ones((h, w)); Y = yy * np.ones((h, w))
+    rmax = float(r.max())
+    lum = 0.2126 * S[..., 0] + 0.7152 * S[..., 1] + 0.0722 * S[..., 2]
+    zone = (r > 1.5) & np.isfinite(lum)
+    if zone.sum() < 5000 or rmax < 2.2:
+        progress.log(f"[warn] sky subtraction skipped: frame reaches only {rmax:.1f} R", None)
+        stats["sky_sub"] = {"applied": False, "why": "frame too tight", "rmax_R": rmax}
+        return None
+    from scipy.optimize import lsq_linear
+    # n from the luminance profile: power law plus a constant, best of a grid.
+    # BOTH CORONA TERMS NON-NEGATIVE (lab 0.24, the bench): unbounded, on a
+    # frame reaching 2.5 R, the F term went negative to buy a brighter sky and
+    # the blue corona came out NEGATIVE at 3 R (B/R -0.10).
+    edges = np.arange(1.5, rmax, 0.05)
+    idx = np.digitize(r[zone], edges)
+    lz = lum[zone]
+    prof = np.array([np.median(lz[idx == k]) if (idx == k).sum() > 30 else np.nan
+                     for k in range(1, len(edges))])
+    rc = 0.5 * (edges[1:] + edges[:-1])
+    ok = np.isfinite(prof) & (prof > 0)
+    rc, prof = rc[ok], prof[ok]
+    NF = 2.5
+    best = None
+    for n in np.arange(3.0, 10.01, 0.25):
+        A = np.stack([rc ** -n, rc ** -NF, np.ones_like(rc)], 1) / prof[:, None]
+        c = lsq_linear(A, np.ones_like(prof), bounds=([0, 0, -np.inf], [np.inf] * 3)).x
+        e = float(np.sum((A @ c - 1.0) ** 2))
+        if best is None or e < best[0]:
+            best = (e, n, c)
+    _, n, cl = best
+    # PER CHANNEL: ONE CORONA COLOUR, k_c * C(r), plus the sky plane. The K and
+    # F corona are both scattered sunlight; fitted with free shapes per channel
+    # the corona and the sky trade against each other. Measured where it is
+    # well determined (Clifton 250/360 mm): the two terms' own colours agree
+    # (B/R 0.257 and 0.250; 0.243 and 0.285). Robust: three passes, 3 sigma.
+    sub = zone.copy()
+    rr, xs, ys = r[sub], X[sub], Y[sub]
+    Cr = cl[0] * rr ** -n + cl[1] * rr ** -NF
+    A4 = np.stack([Cr, np.ones_like(rr), xs, ys], 1)
+    lo4 = [0, -np.inf, -np.inf, -np.inf]; hi4 = [np.inf] * 4
+    coef = []; keeps = []
+    for ch in range(3):
+        v = S[..., ch][sub]
+        keep = np.isfinite(v)
+        for _ in range(3):
+            c = lsq_linear(A4[keep], v[keep], bounds=(lo4, hi4)).x
+            res = v - A4 @ c
+            s = 1.4826 * np.median(np.abs(res[keep]))
+            keep = np.isfinite(v) & (np.abs(res) < 3 * max(s, 1e-12))
+        coef.append([c[0] * cl[0], c[0] * cl[1], c[1], c[2], c[3]]); keeps.append(keep)
+    coef = np.array(coef)                       # (3, 5): a, f, p0, p1, p2
+    A = np.stack([rr ** -n, rr ** -NF, np.ones_like(rr), xs, ys], 1)
+    # IS THE SKY MEASURED? Jackknife over 12 azimuth sectors: the streamers,
+    # not the noise, decide how well corona and sky separate. Bench (lab 0.24):
+    # 0.5 % and 0.7 % on Clifton's 250/360 mm frames (12 R and 8 R), 52 % to
+    # 350 % on frames reaching 2.5 R or filled by the corona.
+    ang = np.arctan2(ys, xs)
+    sec = ((ang + np.pi) / (2 * np.pi) * 12).astype(int) % 12
+    wl = np.array([0.2126, 0.7152, 0.0722])
+    vl = S[sub] @ wl; kl = keeps[1]
+    bjk = []
+    for k in range(12):
+        m = kl & (sec != k)
+        if m.sum() > 100:
+            bjk.append(lsq_linear(A4[m], vl[m], bounds=(lo4, hi4)).x[1])
+    bjk = np.array(bjk)
+    sky_err = (float(np.sqrt((len(bjk) - 1) / len(bjk) * np.sum((bjk - bjk.mean()) ** 2)))
+               if len(bjk) > 3 else float("inf"))
+    cl_ = wl @ coef
+    corona = lambda rr_, c=None: ((coef[:, 0] * rr_ ** -n + coef[:, 1] * rr_ ** -NF)
+                                  if c is None else (cl_[0] * rr_ ** -n + cl_[1] * rr_ ** -NF))
+    b_l = float(cl_[2])
+    info = {"n": float(n), "nF": NF, "decim": d, "rmax_R": rmax,
+            "sky": [float(x) for x in coef[:, 2]],
+            "tilt_per_R": [[float(coef[c, 3]), float(coef[c, 4])] for c in range(3)],
+            "corona_a": [float(x) for x in coef[:, 0]], "corona_f": [float(x) for x in coef[:, 1]],
+            "sky_rel_err": float(sky_err / max(abs(float(wl @ coef[:, 2])), 1e-12))}
+    if info["sky_rel_err"] > 0.10:
+        progress.log(f"[warn] sky subtraction: sky not measurable (level shifts "
+                     f"{100*info['sky_rel_err']:.0f}% on leave-one-out), nothing subtracted", None)
+        stats["sky_sub"] = dict(info, applied=False, why="sky not measurable")
+        return info
+    if b_l <= 0 or corona(2.0, "l") <= 0 or (coef[:, 2] <= 0).any():
+        progress.log(f"[warn] sky subtraction skipped: fitted sky R {coef[0,2]:.4g} "
+                     f"G {coef[1,2]:.4g} B {coef[2,2]:.4g} not all positive", None)
+        stats["sky_sub"] = dict(info, applied=False, why="sky not positive")
+        return info
+    _rg = np.linspace(1.5, max(rmax, 1.6), 400)
+    _cg = np.array([corona(x, "l") for x in _rg])
+    r_cross = float(_rg[np.argmax(_cg < b_l)]) if (_cg < b_l).any() else float("inf")
+    info["r_cross_R"] = float(r_cross)
+    if r_cross > 0.9 * rmax:
+        progress.log(f"[warn] sky subtraction: corona outshines sky to frame edge "
+                     f"({r_cross:.1f} R, frame {rmax:.1f} R), nothing subtracted", None)
+        stats["sky_sub"] = dict(info, applied=False, why="corona fills the frame")
+        return info
+    # what it changes: the sky against the corona at 2 and 3 R, per channel
+    for rr_ in (2.0, 3.0):
+        _co = corona(rr_)
+        info[f"sky_over_corona_{rr_:g}R"] = [float(coef[c, 2] / max(_co[c], 1e-30)) for c in range(3)]
+    br_before = []; br_after = []
+    for rr_ in (1.5, 2.0, 2.5, 3.0):
+        cor = corona(rr_)
+        br_after.append(float(cor[2] / cor[0]))
+        br_before.append(float((cor[2] + coef[2, 2]) / (cor[0] + coef[0, 2])))
+    info["BR_1.5_2_2.5_3R_before"] = br_before
+    info["BR_1.5_2_2.5_3R_after"] = br_after
+    # A NEUTRAL FLOOR STAYS (measured on Val's set): subtracted to zero, the far
+    # field where the corona is below the noise becomes 0 and clipped, and every
+    # layer that works in log brightness (NAFE, FNRGF) draws a ring where that
+    # zero begins -- 0.45 in NAFE at 2.87 R. The floor has the corona's colour
+    # (see floor_rgb below, so the sky's colour cast still goes) and three times the far
+    # field's own noise, at least 3 % of the sky.
+    far = sub & (r > max(r_cross, 2.0))
+    if far.sum() < 500:
+        far = sub & (r > np.percentile(r[sub], 80))
+    _res_l = (wl @ np.stack([S[..., c][far] - (A[far[sub]] @ coef[c]) for c in range(3)], 0))
+    _sig = 1.4826 * float(np.median(np.abs(_res_l - np.median(_res_l))))
+    floor = max(3.0 * _sig, 0.03 * b_l)
+    info["neutral_floor"] = float(floor)
+    # IN THE CORONA'S COLOUR, NOT GREY (lab 0.24, Nico's 600 mm stack): the
+    # corona of a low Sun is strongly reddened (R:G:B 1.59 : 0.88 : 0.44 of
+    # luminance there), and a grey floor beside it is a hue edge wherever the
+    # corona fades into it -- a brown ring in the picture. Same luminance, so
+    # every luminance layer is unchanged; only the colour is continuous now.
+    _kc = coef[:, 0] / max(float(wl @ coef[:, 0]), 1e-30)
+    floor_rgb = (floor * _kc) if np.isfinite(_kc).all() and _kc.min() > 0 else np.full(3, floor)
+    info["floor_rgb"] = [float(x) for x in floor_rgb]
+    info["far_noise_lum"] = float(_sig)
+    info["applied"] = True
+    stats["sky_sub"] = info
+    progress.log(f"[ok] sky subtracted: R {coef[0,2]:.4g} G {coef[1,2]:.4g} B {coef[2,2]:.4g} "
+                 f"(+tilt), corona = sky at {r_cross:.1f} R, B/R 2 R {br_before[1]:.2f} -> "
+                 f"{br_after[1]:.2f}, 3 R {br_before[3]:.2f} -> {br_after[3]:.2f}, floor {floor:.4g}", None)
+    if not write:
+        return info
+    out = np.load(hp)
+    yf_all = (np.arange(H, dtype=np.float64) - cy) / R
+    xf = ((np.arange(W, dtype=np.float64) - cx) / R)[None, :]
+    for y0 in range(0, H, 512):
+        y1 = min(y0 + 512, H)
+        yf = yf_all[y0:y1, None]
+        for ch in range(3):
+            plane = coef[ch, 2] + coef[ch, 3] * xf + coef[ch, 4] * yf - floor_rgb[ch]
+            out[y0:y1, :, ch] -= plane.astype(np.float32)
+    np.clip(out, 0.0, None, out=out)
+    np.save(hp, out)
+    lum2 = (0.2126 * out[:, :, 0] + 0.7152 * out[:, :, 1] + 0.0722 * out[:, :, 2]).astype(np.float32)
+    np.save(os.path.join(wd, "hdr_lum.npy"), lum2)
+    return info
+
+
 def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     """Divide out the smooth brightness AND colour gradient across the frame.
 
@@ -3246,7 +3498,7 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     ECLIPSEFORGE_NO_SKYGRAD=1 skips the whole step. It exists because this is a
     PER-CHANNEL division extrapolated over the entire frame from an annulus
     beyond the corona, so any error in it lands as a colour cast on the inner
-    corona, where nothing constrains the fit. On the tester's 2024 560 mm set the
+    corona, where nothing constrains the fit. On Clifton's 2024 560 mm set the
     fitted spans are R 1.141x G 1.104x B 1.054x -- RED steepest, the opposite of
     the Rayleigh ordering the paragraph above offers as the evidence that what
     is being fitted is atmosphere. The switch turns the question into one run.
@@ -3255,8 +3507,7 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     if os.environ.get("ECLIPSEFORGE_NO_SKYGRAD") == "1":
         stats["sky_gradient"] = {"applied": False,
                                  "skipped_by_env": True}
-        progress.log("sky gradient: SKIPPED by ECLIPSEFORGE_NO_SKYGRAD=1 — "
-                     "diagnostic run, the per-channel division is not applied",
+        progress.log("[warn] sky gradient skipped (ECLIPSEFORGE_NO_SKYGRAD=1)",
                      None)
         return
     hp = os.path.join(wd, "hdr_rgb.npy")
@@ -3299,8 +3550,8 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
     r_fit = max(float(extent_R or 0.0), 4.0)
     m = (r > r_fit * Rd)
     if m.sum() < 20000:
-        progress.log(f"sky gradient: too little sky beyond {r_fit:.1f} R to fit "
-                     f"({int(m.sum())} px) — skipped", None)
+        progress.log(f"[warn] sky gradient skipped: too little sky beyond {r_fit:.1f} R "
+                     f"({int(m.sum())} px)", None)
         return
     # six terms need plenty of sky to be stable; fall back to a plane if not
     quad = int(m.sum()) >= 100000
@@ -3361,13 +3612,13 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
                              "per_channel": [float(np.exp(x)) for x in spans]}
     # a sky model has no business spanning more than a factor of two
     if amp > 0.7:
-        progress.log(f"sky gradient: fitted model spans {np.exp(amp):.2f}x — "
-                     f"implausible for sky, not applied", None)
+        progress.log(f"[warn] sky gradient not applied: model spans {np.exp(amp):.2f}x, "
+                     f"implausible", None)
         stats["sky_gradient"]["applied"] = False
         return
     if amp < 0.02 or sig < 8.0:
-        progress.log(f"sky gradient: {np.exp(amp):.3f}x across the frame "
-                     f"({sig:.0f} sigma) — below the threshold, left alone", None)
+        progress.log(f"sky gradient: {np.exp(amp):.3f}x ({sig:.0f} sigma), below "
+                     f"threshold, left alone", None)
         stats["sky_gradient"]["applied"] = False
         return
     # Evaluated in row blocks: six full-resolution term arrays per channel would
@@ -3389,10 +3640,9 @@ def remove_sky_gradient(wd, cy, cx, R, extent_R, stats, progress):
             + 0.0722 * out[:, :, 2]).astype(np.float32)
     np.save(os.path.join(wd, "hdr_lum.npy"), lum2)
     stats["sky_gradient"]["applied"] = True
-    progress.log(f"sky gradient removed per channel: R {np.exp(spans[0]):.3f}x "
-                 f"G {np.exp(spans[1]):.3f}x B {np.exp(spans[2]):.3f}x across the "
-                 f"frame ({'quadratic' if quad else 'plane'}, tilt {ang:+.0f} deg), "
-                 f"fitted beyond {r_fit:.1f} R ({sig:.0f} sigma)", None)
+    progress.log(f"[ok] sky gradient removed: R {np.exp(spans[0]):.3f}x "
+                 f"G {np.exp(spans[1]):.3f}x B {np.exp(spans[2]):.3f}x "
+                 f"({'quadratic' if quad else 'plane'}, fitted beyond {r_fit:.1f} R)", None)
 
 
 def neutralise_corona_colour(wd, cy, cx, R, stats, progress):
@@ -3443,14 +3693,14 @@ def neutralise_corona_colour(wd, cy, cx, R, stats, progress):
     r = np.hypot(yy, xx) / max(R / d, 1e-6)
     m = (r > 1.05) & (r < 1.60)
     if m.sum() < 2000:
-        progress.log("corona white balance: too few pixels in the 1.05-1.6 R "
-                     "annulus to measure — left in raw sensor colour", None)
+        progress.log("[warn] corona white balance: too few px in 1.05-1.6 R, "
+                     "raw sensor colour kept", None)
         return
     med = np.median(S[m].reshape(-1, 3), axis=0).astype(np.float64)
     del S
     if not np.isfinite(med).all() or med.min() <= 0:
-        progress.log("corona white balance: the annulus has no usable signal — "
-                     "left in raw sensor colour", None)
+        progress.log("[warn] corona white balance: no usable signal in 1.05-1.6 R, "
+                     "raw sensor colour kept", None)
         return
     lum = 0.2126 * med[0] + 0.7152 * med[1] + 0.0722 * med[2]
     g = (lum / med).astype(np.float32)     # unit-luminance, so brightness holds
@@ -3458,8 +3708,8 @@ def neutralise_corona_colour(wd, cy, cx, R, stats, progress):
     # than that is a broken channel or a mono frame read as colour, and dividing
     # by it would invent colour rather than correct it.
     if float(g.max() / max(g.min(), 1e-6)) > 8.0:
-        progress.log(f"corona white balance: implausible gains "
-                     f"{g[0]:.2f}/{g[1]:.2f}/{g[2]:.2f} — not applied", None)
+        progress.log(f"[warn] corona white balance not applied: implausible gains "
+                     f"{g[0]:.2f}/{g[1]:.2f}/{g[2]:.2f}", None)
         stats["corona_wb"] = {"gains": [float(x) for x in g], "applied": False}
         return
     out = np.load(hp)
@@ -3471,10 +3721,8 @@ def neutralise_corona_colour(wd, cy, cx, R, stats, progress):
     rgb_before = float(med[0] / max(0.5 * (med[1] + med[2]), 1e-9))
     stats["corona_wb"] = {"gains": [float(x) for x in g], "applied": True,
                           "r_over_gb_before": rgb_before}
-    progress.log(f"corona white balance: no camera white balance in these "
-                 f"files, so the inner corona (1.05-1.6 R) is used as the white "
-                 f"reference — R/GB was {rgb_before:.2f}, gains R {g[0]:.3f} "
-                 f"G {g[1]:.3f} B {g[2]:.3f}", None)
+    progress.log(f"[ok] corona white balance from 1.05-1.6 R: R/GB was "
+                 f"{rgb_before:.2f}, gains R {g[0]:.3f} G {g[1]:.3f} B {g[2]:.3f}", None)
 
 
 def shift_bayer_even(a, dy, dx):
@@ -3523,8 +3771,49 @@ def resolve_flat_dir(folder, flat_dir=None):
     if s.lower() in ("off", "none", "no", "-"):
         return None
     if s:
-        return os.path.abspath(os.path.expanduser(s))
+        p = os.path.abspath(os.path.expanduser(s))
+        if not holds_lights(folder, p):
+            return p
+        # the light frames themselves are not flats (2026-10-07: a run on
+        # Clifton's 250 mm set built its "master flat" from the eclipse frames)
     return _flat.find_flat_dir(folder)
+
+
+def holds_lights(folder, d):
+    """True when calibration folder `d` is the light folder, or holds any of
+    its raw files (same name and size). Such a folder is refused as flats,
+    bias or darks, and the conventional subfolder is used instead."""
+    try:
+        if not d or not os.path.isdir(d):
+            return False
+        if os.path.realpath(d) == os.path.realpath(folder):
+            return True
+        lights = {(os.path.basename(p), os.path.getsize(p)) for p in list_raws(folder)}
+        if not lights:
+            return False
+        return any((os.path.basename(p), os.path.getsize(p)) in lights for p in list_raws(d))
+    except Exception:
+        return False
+
+
+def find_short_dir(folder):
+    """A subfolder of short exposures kept apart from the bracket (0.24 lab):
+    the first one whose name has "short" or "prom" in it and holds frames. Its
+    frames feed the prominence layer and nothing else."""
+    try:
+        for name in sorted(os.listdir(folder)):
+            p = os.path.join(folder, name)
+            n = name.lower()
+            if (os.path.isdir(p) and ("short" in n or "prom" in n)
+                    and not n.startswith("eclipseforge")):
+                try:
+                    if list_raws(p):
+                        return p
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None
 
 
 def resolve_calib_dir(folder, which, arg=None):
@@ -3540,7 +3829,9 @@ def resolve_calib_dir(folder, which, arg=None):
     if s.lower() in ("off", "none", "no", "-"):
         return None
     if s:
-        return os.path.abspath(os.path.expanduser(s))
+        p = os.path.abspath(os.path.expanduser(s))
+        if not holds_lights(folder, p):
+            return p
     return (_dark.find_bias_dir(folder) if which == "bias"
             else _dark.find_dark_dir(folder))
 
@@ -3550,7 +3841,7 @@ def resolve_calib_dir(folder, which, arg=None):
 # Near the horizon the atmosphere is a weak prism: it lifts blue more than red,
 # so the three colour images of one exposure land a few pixels apart along one
 # direction. White balance cannot touch that -- it scales each channel, it does
-# not move one. Measured on the 600 mm reference set (Sun low, August 2026):
+# not move one. Measured on Nico's 600 mm set (Sun low, 12 Aug 2026, Spain):
 # the lunar limb fitted separately per channel sits 4.5 px apart in blue
 # against red (2.1 px red-green, 2.4 px blue-green) along one line at about
 # -48 deg in image coordinates, the same in a single 1/100 s tier (3.6 px) as in
@@ -3594,10 +3885,10 @@ def measure_colour_planes(stacks_bayer, secs, demosaic_method, progress):
             if ok:
                 rows.append(row)
         except Exception as e:
-            progress.log(f"colour planes: tier {_exp_name(s)} not measured ({e})", None)
+            progress.log(f"[warn] colour planes: tier {_exp_name(s)} not measured ({e})", None)
     if len(rows) < 2:
-        progress.log("colour planes: fewer than two tiers gave a limb in every "
-                     "channel -- nothing applied", None)
+        progress.log("[warn] colour planes: < 2 tiers with a limb in every channel, "
+                     "nothing applied", None)
         return None
     out = {"tiers": rows}
     worst = 0.0
@@ -3609,21 +3900,19 @@ def measure_colour_planes(stacks_bayer, secs, demosaic_method, progress):
         out[nm] = {"dy": round(my, 3), "dx": round(mx, 3),
                    "dr": round(float(np.median([r[nm][2] for r in rows])), 3)}
     out["spread_px"] = round(worst, 3)
-    txt = ("red %+.2f/%+.2f px, blue %+.2f/%+.2f px (dy/dx against green, "
-           "median of %d tiers, tiers agree to %.2f px)"
+    txt = ("R %+.2f/%+.2f px, B %+.2f/%+.2f px vs G (dy/dx, "
+           "%d tiers, spread %.2f px)"
            % (out[0][0], out[0][1], out[2][0], out[2][1], len(rows), worst))
     if worst > CPLANE_MAX_SPREAD:
-        progress.log("colour planes: " + txt + " -- the tiers disagree, nothing "
-                     "applied", None)
+        progress.log("[warn] colour planes: " + txt + ", tiers disagree, nothing applied", None)
         out["applied"] = False
         return out
     if max(np.hypot(*out[0]), np.hypot(*out[2])) < CPLANE_MIN_PX:
-        progress.log("colour planes: " + txt + " -- below %.1f px, nothing to "
-                     "correct" % CPLANE_MIN_PX, None)
+        progress.log("colour planes: " + txt + ", below %.1f px, not "
+                     "corrected" % CPLANE_MIN_PX, None)
         out["applied"] = False
         return out
-    progress.log("colour planes: " + txt + "; red and blue moved onto green "
-                 "before the merge", None)
+    progress.log("[ok] colour planes: " + txt + ", R and B moved onto G", None)
     out["applied"] = True
     return out
 
@@ -3650,13 +3939,13 @@ def _cp_clip(cmax, cp):
     return ndimage.maximum_filter(cmax, size=2 * k + 1) if k > 0 else cmax
 
 
-def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
+def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         earthshine=False, despeckle=True, frames="all", export_tiers=False,
-        tier_linear=False, flat_dir=None, feather="plain",
+        tier_linear=False, flat_dir=None, feather="taper",
         wb_source="camera", demosaic_method="mhc",
         photometry="linfit", bias_dir=None, dark_dir=None,
-        photo_solve="chain", tier_mode="exposure",
-        fnrgf_preset="ours", stack_combine="mean",
+        photo_solve="network", tier_mode="exposure",
+        fnrgf_preset="published", stack_combine="clip",
         align_filter="isotropic", align_corr="semi",
         intra_lock="corona", partialconv=True, colour_planes="auto"):
     from . import flat as _flat
@@ -3695,6 +3984,13 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _flat_dir = resolve_flat_dir(folder, flat_dir)
     _bias_dir = resolve_calib_dir(folder, "bias", bias_dir)
     _dark_dir = resolve_calib_dir(folder, "dark", dark_dir)
+    for _what, _arg, _got in (("flats", flat_dir, _flat_dir), ("bias", bias_dir, _bias_dir),
+                              ("darks", dark_dir, _dark_dir)):
+        _a = (_arg or "").strip()
+        if _a and _a.lower() not in ("off", "none", "no", "-") and holds_lights(
+                folder, os.path.abspath(os.path.expanduser(_a))):
+            progress.log(f"[warn] {_what} folder ignored: it holds the light frames; "
+                         + (f"using {os.path.basename(_got)}/" if _got else f"no {_what} applied"), None)
     stats = {"version": __version__, "folder": folder, "n_files": len(paths),
              "options": {"denoise": denoise, "earthshine": bool(earthshine),
                          "despeckle": bool(despeckle), "frames": frames,
@@ -3748,11 +4044,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     if str(tier_mode or "exposure").strip().lower() == "frame":
         for k, p in enumerate(sorted(paths, key=lambda q: (meta[q]["sec"], q))):
             tiers[float(meta[p]["sec"]) * (1.0 + k * 1e-9)] = [p]
-        progress.log(f"one tier per frame: {len(tiers)} frames, grouped by "
-                     f"nothing. The exposure times are still read and still "
-                     f"scale the merge, but no two frames are averaged together "
-                     f"on the strength of a header agreeing with another "
-                     f"header.", None)
+        progress.log(f"one tier per frame: {len(tiers)} frames, no grouping", None)
     else:
         for p in paths:
             tiers.setdefault(meta[p]["sec"], []).append(p)
@@ -3801,9 +4093,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         if paths and _isf(paths[0]):
             _ro = _row(paths[0])
             stats["fits_row_order"] = _ro
-            progress.log(f"FITS row order: {_ro} — flipped to top-down"
+            progress.log(f"FITS row order: {_ro}, flipped to top-down"
                          if not _ro.startswith("TOP") else
-                         f"FITS row order: {_ro} — used as stored", None)
+                         f"FITS row order: {_ro}, used as stored", None)
     except Exception:
         pass
 
@@ -3825,7 +4117,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _clip_stack = str(stack_combine or "mean").strip().lower() == "clip"
     if _clip_stack:
         progress.log(f"per-tier combine: kappa-sigma clipped mean "
-                     f"(kappa {STACK_KAPPA:g}) instead of a plain mean", None)
+                     f"(kappa {STACK_KAPPA:g})", None)
     # Master flat, built once and divided out of every frame of every tier.
     # Built BEFORE any light frame is decoded: the build itself holds four
     # frame-sized accumulators, and overlapping that with a tier's worth of
@@ -3838,8 +4130,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                                                    progress, wd)
             stats["flat"] = dict(_fi, dir=_flat_dir)
         except Exception as e:
-            progress.log(f"flat correction skipped — the master flat could not "
-                         f"be built ({e})", None)
+            progress.log(f"[warn] flat correction skipped: master flat not built ({e})", None)
             stats["flat"] = {"dir": _flat_dir, "error": str(e)}
             flat_master = None
         if flat_master is None:
@@ -3863,8 +4154,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     stats["calib"] = {"bias_dir": _bias_dir, "dark_dir": _dark_dir}
     if _bias_dir or _dark_dir:
         if os.environ.get("ECLIPSEFORGE_NO_DARK") not in (None, "", "0"):
-            progress.log("bias/dark correction disabled by "
-                         "ECLIPSEFORGE_NO_DARK", None)
+            progress.log("[warn] bias/dark correction disabled (ECLIPSEFORGE_NO_DARK)", None)
             stats["calib"]["error"] = "disabled by switch"
         else:
             try:
@@ -3880,8 +4170,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 stats["calib"] = dict(_ci, bias_dir=_bias_dir,
                                       dark_dir=_dark_dir)
             except Exception as e:
-                progress.log(f"bias/dark correction skipped — the masters "
-                             f"could not be built ({e})", None)
+                progress.log(f"[warn] bias/dark correction skipped: masters not built ({e})", None)
                 stats["calib"] = {"bias_dir": _bias_dir, "dark_dir": _dark_dir,
                                   "error": str(e)}
                 bias_master = dark_rate = None
@@ -3903,13 +4192,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 stats["wb_gains"] = [float(x) for x in _wb]
                 _dwb = getattr(rf, "daylight_wb", np.ones(3, np.float32))
                 progress.log(
-                    f"white balance: {_wbname} — R {_wb[0]:.4f} B {_wb[2]:.4f} "
-                    f"(G = 1). Daylight, for comparison, is R {_dwb[0]:.4f} "
-                    f"B {_dwb[2]:.4f}. This is a SETTING; it scales the raw "
-                    f"channels before the camera matrix, so it moves the "
-                    f"colour of everything in the frame together.", None)
+                    f"white balance: {_wbname}, R {_wb[0]:.4f} B {_wb[2]:.4f} "
+                    f"(daylight R {_dwb[0]:.4f} B {_dwb[2]:.4f})", None)
                 progress.log(f"demosaic: "
-                             f"{'VNG (as PixInsight)' if demosaic_method == 'vng' else 'Malvar-He-Cutler'}",
+                             f"{'VNG' if demosaic_method == 'vng' else 'Malvar-He-Cutler'}",
                              None)
                 # FITS and TIFF have no white balance to give (see
                 # neutralise_corona_colour). Recorded here because this is the
@@ -3966,30 +4252,38 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 # tell you.
                 _sw = {
                     "linear_max":
-                        f"the sensor's linearity limit ({_lm:.0f})"
-                        if _lm is not None else "the sensor's linearity limit",
+                        f"sensor linearity limit ({_lm:.0f})"
+                        if _lm is not None else "sensor linearity limit",
                     "observed":
-                        "THIS FRAME'S OWN MAXIMUM — the body reported no usable "
-                        "linearity limit and its white level sat above the data, "
-                        "so the highest photosite in the frame was taken as the "
-                        "ceiling. Right whenever something in the frame is "
-                        "genuinely blown, which on a totality frame it is; a "
-                        "bracket with nothing saturated in its first frame gets "
-                        "no such correction",
+                        "frame maximum (no usable linearity limit)",
                     "container":
-                        "the file's container range (not a raw sensor file)",
+                        "container range (not a raw file)",
                     # ... and the two a FITS frame can report (0.22.78). Both
                     # fell through to "the reported white level", which is not
                     # what happened and hid the one that is a guess.
                     "SATURATE keyword":
-                        "the SATURATE keyword in the FITS header",
-                }.get(_ss, ("the FITS header's " + _ss) if "plateau" in _ss
+                        "FITS SATURATE keyword",
+                }.get(_ss, ("FITS header " + _ss) if "plateau" in _ss
                       else (_ss if _ss.startswith("bit depth")
-                            else "the reported white level "
-                                 "(no linearity limit given)"))
+                            else "reported white level "
+                                 "(no linearity limit)"))
                 progress.log(
-                    f"saturation level {rf.sat_level:.0f} ADU above black, from "
+                    ("[odd] " if _ss == "observed" else "")
+                    + f"saturation level {rf.sat_level:.0f} ADU above black, from "
                     + _sw, None)
+            # THE OBSERVED CEILING FROM THE WHOLE BRACKET (TODO 0-c, lab 0.24).
+            # color_info comes from the FIRST frame opened, the shortest
+            # exposure -- the one least likely to reach saturation, so the
+            # observed-ceiling cross-check in RawFile could never fire there.
+            # A later frame whose own data sits above the reported ceiling
+            # raises it for the run (it can only ever raise it).
+            if (getattr(rf, "sat_source", "") == "observed"
+                    and float(rf.sat_level) > float(color_info["sat_level"]) * 1.001):
+                progress.log(f"[odd] saturation level raised to {rf.sat_level:.0f} ADU from "
+                             f"{os.path.basename(p)} ({_exp_name(s)}): data above reported ceiling", None)
+                color_info["sat_level"] = float(rf.sat_level)
+                stats["sat_level"] = float(rf.sat_level)
+                stats["sat_source"] = "observed (" + os.path.basename(p) + ")"
             raw_bayers.append((p, rf.bayer, rf.sat_level))
             del rf
         # A flat from another body, another crop mode or another orientation is
@@ -3998,11 +4292,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # sentence instead of raising a broadcast error at the division.
         _lshape = raw_bayers[0][1].shape if raw_bayers else tuple(color_info["shape"])
         if flat_master is not None and flat_master.shape != tuple(_lshape):
-            progress.log(f"flat correction DISABLED — the master flat is "
-                         f"{flat_master.shape[1]}x{flat_master.shape[0]} px and "
-                         f"the {_exp_name(s)} frames are {_lshape[1]}x"
-                         f"{_lshape[0]}; flats have to come from the "
-                         f"same camera in the same crop mode", None)
+            progress.log(f"[warn] flat correction disabled: master "
+                         f"{flat_master.shape[1]}x{flat_master.shape[0]} px, "
+                         f"{_exp_name(s)} frames {_lshape[1]}x{_lshape[0]} px", None)
             stats["flat"]["error"] = "flat/light frame size mismatch"
             flat_master = None
         stats["flat"]["applied"] = flat_master is not None
@@ -4011,11 +4303,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # broadcast error at the subtraction.
         for _nm, _arr in (("bias", bias_master), ("dark", dark_rate)):
             if _arr is not None and _arr.shape != tuple(_lshape):
-                progress.log(f"{_nm} correction DISABLED — the master is "
-                             f"{_arr.shape[1]}x{_arr.shape[0]} px and the "
-                             f"{_exp_name(s)} frames are {_lshape[1]}x"
-                             f"{_lshape[0]}; calibration frames have to come "
-                             f"from the same camera in the same crop mode",
+                progress.log(f"[warn] {_nm} correction disabled: master "
+                             f"{_arr.shape[1]}x{_arr.shape[0]} px, "
+                             f"{_exp_name(s)} frames {_lshape[1]}x{_lshape[0]} px",
                              None)
                 stats["calib"][f"{_nm}_error"] = f"{_nm}/light size mismatch"
                 if _nm == "bias":
@@ -4060,11 +4350,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             _nw = int(_calib_defects.sum())
             stats["warm_pixels"] = _nw
             progress.log(
-                f"dark: {_nw} photosites ({100.0 * _nw / _calib_defects.size:.3f}%) "
-                f"carry dark current well above their neighbours. NOT repaired "
-                f"and not the same thing as a defect: their own rate is "
-                f"subtracted per photosite, which is the correct fix. The "
-                f"defect map below is for what that cannot fix.", None)
+                f"dark: {_nw} warm photosites ({100.0 * _nw / _calib_defects.size:.3f}%), "
+                f"corrected by their own dark rate", None)
         if hot is None and despeckle:
             # ... but only if this tier can actually show a defect. A hot pixel
             # is a pixel far above its neighbours, and in a saturated frame
@@ -4077,20 +4364,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             _sf = float(np.mean([float((b >= sl).mean())
                                  for _, b, sl in raw_bayers[:4]]))
             if _sf > 0.5:
-                progress.log(f"sensor defect map: not from the {_exp_name(s)} "
-                             f"tier — {100 * _sf:.0f}% of it is saturated, which "
-                             f"cannot show a hot pixel; trying the next tier",
+                progress.log(f"sensor defect map: {_exp_name(s)} tier {100 * _sf:.0f}% "
+                             f"saturated, trying the next tier",
                              None)
             else:
                 hot = hot_pixel_map([b for _, b, _ in raw_bayers[:4]],
                                     read_noise=_calib_read_noise)
                 nhot = int(hot.sum()) if hot is not None else 0
-                progress.log(f"sensor defect map: {nhot} hot/dead photosites "
+                progress.log(f"[ok] sensor defect map: {nhot} hot/dead photosites "
                              f"({100.0 * nhot / max(hot.size, 1):.4f}%)"
-                             + (f", threshold from the measured read noise "
-                                f"({min(_calib_read_noise):.2f}-"
-                                f"{max(_calib_read_noise):.2f} ADU) rather than "
-                                f"one fitted from this tier"
+                             + (f", threshold from bias read noise "
+                                f"{min(_calib_read_noise):.2f}-{max(_calib_read_noise):.2f} ADU"
                                 if _calib_read_noise else ""), None)
                 # BOTH NUMBERS, because the bench cannot say which is right on
                 # a given sensor. A synthetic tier makes the single-frame fit
@@ -4104,12 +4388,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                                   "last_fit_rn", None)
                     if _ff and all(np.isfinite(v) for v in _ff):
                         progress.log(
-                            "  read noise: measured from the bias "
+                            "  read noise: bias "
                             + "/".join(f"{v:.2f}" for v in _calib_read_noise)
-                            + " ADU; the single-frame fit on this tier would "
-                              "have used " + "/".join(f"{v:.2f}" for v in _ff)
-                            + " ADU. The threshold is 6x these, so the ratio is "
-                              "how far the old count was off.", None)
+                            + " ADU, single-frame fit " + "/".join(f"{v:.2f}" for v in _ff)
+                            + " ADU", None)
                         stats["read_noise_fitted"] = [round(float(v), 3)
                                                       for v in _ff]
                         stats["read_noise_measured"] = [round(float(v), 3)
@@ -4118,7 +4400,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                     "shortest light tier, read noise from the bias"
                     if _calib_read_noise else "shortest light tier")
                 if nhot > 0.002 * hot.size:  # implausible -> distrust and disable
-                    progress.log("defect count implausibly high — skipping repair",
+                    progress.log("[warn] defect count implausibly high, repair skipped",
                                  None)
                     hot = np.zeros_like(hot)
                     nhot = 0
@@ -4178,17 +4460,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         _drop = [p for p in files if _sf[p] > _lim]
         if _drop and len(_drop) < len(files):
             for p in _drop:
-                progress.log(f"{_exp_name(s)}: dropping {os.path.basename(p)} — "
-                             f"{100 * _sf[p]:.2f}% of the frame is saturated vs "
-                             f"{100 * _med:.2f}% for this tier; this is not a "
-                             f"totality frame", None)
+                progress.log(f"[warn] {_exp_name(s)}: {os.path.basename(p)} dropped, "
+                             f"{100 * _sf[p]:.2f}% saturated vs {100 * _med:.2f}% tier median", None)
             files = [p for p in files if p not in _drop]
             for p in _drop:
                 scores.pop(p, None); centers.pop(p, None)
         elif _drop:
-            progress.log(f"WARNING: every frame of the {_exp_name(s)} tier looks "
-                         f"like partial phase ({100 * _med:.2f}% saturated); "
-                         f"keeping them, but the geometry will be unreliable", None)
+            progress.log(f"[warn] {_exp_name(s)}: every frame looks like partial phase "
+                         f"({100 * _med:.2f}% saturated), kept, geometry unreliable", None)
 
         ranked = sorted(scores, key=scores.get, reverse=True)
         best = ranked[0]
@@ -4235,9 +4514,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         _fdev = max((np.hypot(centers[p][0] - cy, centers[p][1] - cx)
                      for p in use), default=0.0)
         _fpc = _fdev > 0.15 * _sz
-        for p in use:
-            if p == best:
-                continue
+
+        def _shift_of(p):
             if _fpc:
                 crop, yp, xp = crop_around(lums[p], centers[p][0], centers[p][1], _sz)
                 crop = crop[:ref_crop.shape[0], :ref_crop.shape[1]]
@@ -4248,12 +4526,76 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             _smov = sats[p][yp:yp + ref_crop.shape[0], xp:xp + ref_crop.shape[1]]
             (dy, dx), err, _mode = corona_shift(ref_crop, crop, _sref, _smov,
                                                 lock=_intra_lock)
+            # put the coarse re-centring back in
+            return dy + y0 - yp, dx + x0 - xp, _mode
+
+        # FRAME BRIGHTNESS (transparency), lab 0.24. Haze or thin cloud passing,
+        # extinction changing with a low Sun, a bracket cycled across totality:
+        # one frame of a tier can come out dimmer than the others, and the
+        # tier-to-tier solve only sees the tier's average. Every frame is
+        # measured on the bright, unclipped corona of the reference (its 60th-
+        # 99th percentile there) after alignment, against the tier's MEDIAN
+        # frame -- not the sharpness reference, which a dimmed frame can itself
+        # become -- corrected, and reported. A frame more than 15 % off the
+        # median is left out while at least two others remain: that is cloud,
+        # and cloud scatters as well as dims.
+        _fg_on = os.environ.get("ECLIPSEFORGE_NO_FRAMEGAIN", "") in ("", "0")
+        _shifts, _gain, _drop = {}, {}, set()
+        if _fg_on and len(use) >= 2:
+            _ref_l = lums[best]
+            _ref_ok = ~sats[best]
+            if _ref_ok.sum() > 1000:
+                _lo, _hi = np.percentile(_ref_l[_ref_ok], [60, 99])
+                _ref_ok = _ref_ok & (_ref_l > _lo) & (_ref_l < _hi)
+                _kk = {best: 1.0}
+                for p in use:
+                    if p == best:
+                        continue
+                    _shifts[p] = _shift_of(p)
+                    _dy, _dx = _shifts[p][0], _shifts[p][1]
+                    _sh = ndimage.shift(lums[p], (_dy, _dx), order=3, mode="nearest")
+                    _ok = (_ref_ok & (_sh > 0)
+                           & ~(ndimage.shift(sats[p].astype(np.float32), (_dy, _dx), order=0,
+                                             mode="nearest") > 0.5))
+                    _kk[p] = (float(np.exp(np.median(np.log(_sh[_ok] / _ref_l[_ok]))))
+                              if _ok.sum() > 500 else 1.0)
+                    del _sh, _ok
+                _med = float(np.median(list(_kk.values())))
+                _gain = {p: _kk[p] / _med for p in _kk}
+                for p in sorted(_gain, key=lambda q: -abs(np.log(_gain[q]))):
+                    if abs(np.log(_gain[p])) > np.log(1.15) and len(use) - len(_drop) - 1 >= 2:
+                        _drop.add(p)
+                        progress.log(f"[warn] {_exp_name(s)}: {os.path.basename(p)} "
+                                     f"{100 * (_gain[p] - 1):+.0f}% vs tier median (cloud/haze), left out", None)
+                _vals = [g for q, g in _gain.items() if q not in _drop]
+                _spr = 100 * (max(_vals) / min(_vals) - 1) if _vals else 0.0
+                quality[s]["frame_gain"] = {os.path.basename(q): (None if q in _drop else round(g, 4))
+                                            for q, g in _gain.items()}
+                if _spr > 1.0:
+                    progress.log(f"{_exp_name(s)}: frame brightness spread {_spr:.1f}%, "
+                                 f"corrected per frame", None)
+        _n_added = 1
+        _gb = _gain.get(best, 1.0)
+        if best in _drop:
+            acc_h *= 0; acc_b *= 0; _n_added = 0
+            if _clip_stack:
+                _clip_h = []; _clip_b = []
+        elif abs(_gb - 1.0) > 0.002:
+            acc_h /= np.float32(_gb); acc_b /= np.float32(_gb)
+            if _clip_stack:
+                _clip_h = [acc_h.copy()]; _clip_b = [acc_b.copy()]
+        for p in use:
+            if p == best or p in _drop:
+                continue
+            dy, dx, _mode = _shifts[p] if p in _shifts else _shift_of(p)
             _lock[_mode] += 1
-            dy += y0 - yp          # put the coarse re-centring back in
-            dx += x0 - xp
             _intra.append(float(np.hypot(dy, dx)) * 2.0)
             _sh = ndimage.shift(lums[p], (dy, dx), order=3, mode="nearest")
             _sb = shift_bayer_even(bayers[p], dy * 2, dx * 2)
+            _g = _gain.get(p, 1.0)
+            if abs(_g - 1.0) > 0.002:
+                _sh /= np.float32(_g); _sb /= np.float32(_g)
+            _n_added += 1
             acc_h += _sh
             acc_b += _sb
             if _clip_stack:
@@ -4270,19 +4612,16 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             quality[s]["intra_lock"] = dict(_lock)
             if _lock["moon"]:
                 progress.log(f"{_exp_name(s)}: {_lock['moon']} of "
-                             f"{_lock['moon'] + _lock['corona']} frames aligned "
-                             f"on the lunar edge (too little corona in the "
-                             f"window for a corona lock)", None)
+                             f"{_lock['moon'] + _lock['corona']} frames aligned on the lunar "
+                             f"edge (too little corona)", None)
             # _intra is full-res (x2 at the point it is appended), _sz is the
             # half-res window, so this used to fire at half the intended motion
             if max(_intra) > 0.5 * _sz:
-                progress.log(f"WARNING: {_exp_name(s)} frames move up to "
-                             f"{max(_intra):.0f}px within the tier — beyond what "
-                             f"the {_sz * 2}px alignment window covers reliably",
+                progress.log(f"[warn] {_exp_name(s)}: frames move up to {max(_intra):.0f} px, "
+                             f"beyond the {_sz * 2} px alignment window",
                              None)
             elif max(_intra) > 40:
-                progress.log(f"{_exp_name(s)}: frames move up to "
-                             f"{max(_intra):.0f}px within the tier", None)
+                progress.log(f"{_exp_name(s)}: frames move up to {max(_intra):.0f} px", None)
         # PER-PIXEL REJECTION, OR NONE AT ALL.
         #
         # Up to 0.23.1 this was `acc / len(use)` and nothing else: every frame
@@ -4312,7 +4651,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # Kappa is deliberately loose. With two or three frames the sample sigma
         # is a poor estimate and a tight kappa starts rejecting signal; the
         # point here is to catch a particle strike, not to trim a distribution.
-        if _clip_stack and len(use) >= 3:
+        if _clip_stack and _n_added >= 3:
             _n0 = 0
             for _frames, _tag in ((_clip_h, "h"), (_clip_b, "b")):
                 _out, _nrej = _clipped_mean(_frames, STACK_KAPPA)
@@ -4328,20 +4667,19 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # rate 2.5x too high. On the reference bracket that read 0.67%
             # where the cut is calibrated to reject 0.27%, which is the number
             # that made this look wrong when it was right.
-            _tot = len(use) * (acc_h.size + acc_b.size)
+            _tot = _n_added * (acc_h.size + acc_b.size)
             quality[s]["clipped_frac"] = float(_n0) / max(_tot, 1)
             if _n0:
-                progress.log(f"{_exp_name(s)}: clipped mean rejected "
-                             f"{100.0 * _n0 / max(_tot, 1):.5f}% of frame-pixels "
-                             f"({_n0} of {_tot})", None)
+                progress.log(f"{_exp_name(s)}: clipped mean removed "
+                             f"{100.0 * _n0 / max(_tot, 1):.5f}% of frame-pixels ({_n0} of {_tot})", None)
         else:
-            stacks_half[s] = acc_h / len(use)
-            stacks_bayer[s] = acc_b / len(use)
+            stacks_half[s] = acc_h / max(_n_added, 1)
+            stacks_bayer[s] = acc_b / max(_n_added, 1)
         if _clip_stack:
             _clip_h = _clip_b = None
         sat_half[s] = sat_u
         n_done += 1
-        progress.log(f"tier {s:g}s: best {quality[s]['best']}, {len(use)}/{len(files)} "
+        progress.log(f"tier {s:g}s: best {quality[s]['best']}, {_n_added}/{len(files)} "
                      f"frames stacked (sharpness spread x{quality[s]['spread']:.2f})",
                      0.03 + 0.37 * n_done / len(secs))
         del lums, sats, bayers
@@ -4381,8 +4719,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     else:
         cym, cxm = find_center(stacks_half[mid])
         _Rseed = 0.10 * min(stacks_half[mid].shape)
-        progress.log("disc edge not detected — falling back to a brightness "
-                     "centroid and a frame-fraction radius seed", None)
+        progress.log("[warn] disc edge not detected: brightness centroid and "
+                     "frame-fraction radius used", None)
     S = min(crop_pc, min(stacks_half[mid].shape))
     _, y0, x0 = crop_around(stacks_half[mid], cym, cxm, S)
 
@@ -4425,17 +4763,16 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             _oy, _ox = y0, x0
         _org[_s] = (_oy, _ox)
     if _percentre:
-        progress.log(f"tiers are spread {2 * _dev:.0f}px apart (full-res) — more "
-                     f"than the {2 * S}px correlation window handles, so each is "
-                     f"windowed on its own disc", None)
+        progress.log(f"tiers spread {2 * _dev:.0f} px (full-res), beyond the {2 * S} px "
+                     f"window: one window per tier", None)
     else:
-        progress.log(f"tiers sit within {2 * _dev:.0f}px (full-res); one shared "
+        progress.log(f"tiers within {2 * _dev:.0f} px (full-res): one shared "
                      f"correlation window", None)
 
     # ---- THE THREE ALIGNMENT SELECTORS, and what each measured.
     #
     # All three come from Druckmullerova's registration work and none of them
-    # existed here before 0.23.2. Benched on tiers built from the reference set's own merged
+    # existed here before 0.23.2. Benched on tiers built from Nico's own merged
     # corona and his own master flat, so the lunar edge, the per-tier saturation
     # edge and the sensor's dust and PRNU are all present, with the shift
     # injected by an exact FFT phase ramp. Two numbers: rms error on a known
@@ -4469,7 +4806,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _tangential = str(align_filter or "isotropic").strip().lower() == "tangential"
     _corr = str(align_corr or "semi").strip().lower()
     # BETWEEN-TIER LINKS STAY ON THE LUNAR-EDGE PREP. 0.23.8 moved them to the
-    # corona prep as well and it FAILED on the reference set's 600 mm set: network residual
+    # corona prep as well and it FAILED on Nico's 600 mm set: network residual
     # 1.17 -> 83 px (half-res), the long tiers thrown 55-236 px, output
     # unusable. The evidence for the move was synthetic and the synthetics had
     # no tier whose inner corona is SATURATED OUT TO A LARGE RADIUS, which is
@@ -4601,7 +4938,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # names as the hard one. A large but finite high-pass keeps almost all
         # of the gain without that exposure.
         #
-        # REVERTED IN 0.22.28. On the reference set's real 600 mm run the network residual
+        # REVERTED IN 0.22.28. On Nico's real 600 mm run the network residual
         # went 1.17 -> 2.67 px (half-res), per-tier limb spread 8 -> 12 px,
         # track scatter 1/2 -> 2/4 px, and the step took 1m25s instead of 13s.
         # The table above is real but it was measured on the wrong thing:
@@ -4668,9 +5005,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                                sh[1] + _org[_a][1] - _org[_b][1]], float)
             pairs.append((i, i + lag, sh, 1.0 / (err + 0.05)))
     for _t in sorted(_dead):
-        progress.log(f"{_exp_name(_t)}: no usable signal in the correlation "
-                     f"window (saturated, or nothing above the noise) — this "
-                     f"tier cannot be aligned by correlation", None)
+        progress.log(f"[warn] {_exp_name(_t)}: no usable signal in the correlation "
+                     f"window, not aligned by correlation", None)
     if _dead:
         stats["align_dead_tiers"] = [_exp_name(t) for t in sorted(_dead)]
     n = len(secs)
@@ -4721,8 +5057,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             if _f is not None:
                 if _tier != mid:
                     progress.log(f"prominence search: limb found on the "
-                                 f"{_exp_name(_tier)} tier (the middle tier "
-                                 f"would not fit)", None)
+                                 f"{_exp_name(_tier)} tier (middle tier failed)", None)
                 break
         if _f is None:
             raise RuntimeError(f"no limb fit on any of {len(_cand)} tiers "
@@ -4740,10 +5075,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             counts.append(f"{_exp_name(s)}:{len(a)}")
             if len(a) >= 2:
                 cand.append((len(a), cov[s], i, a))
-        progress.log("prominence anchors per tier — " + " ".join(counts), None)
+        progress.log("prominence anchors per tier: " + " ".join(counts), None)
         if not cand:
-            progress.log("no tier yielded 2+ prominence anchors; "
-                         "alignment falls back to corona correlation alone", None)
+            progress.log("[warn] no tier with 2+ prominence anchors: corona "
+                         "correlation only", None)
         if cand:
             cand.sort(reverse=True)
             _, _, pi, anchors = cand[0]
@@ -4771,9 +5106,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 if na_ >= 2 and spread <= PROM_MAX_SPREAD:
                     raw.append((pi, i, (dy, dx), 1.0 / (spread + 0.4)))
             if not raw:
-                progress.log("prominence links all rejected (anchors disagreed "
-                             f"by more than {PROM_MAX_SPREAD:.1f} px); "
-                             "corona correlation alone", None)
+                progress.log(f"[warn] prominence links rejected (anchor spread > "
+                             f"{PROM_MAX_SPREAD:.1f} px): corona correlation only", None)
             if raw:
                 # put the two weight families on a common scale so neither
                 # silently dominates just because of how its error is defined
@@ -4784,14 +5118,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 prom_info["used"] = len(prom_links)
                 progress.log(
                     # "N/(n-1) tiers linked by them" read as coverage and was
-                    # not: it counts LINKS, not tiers, so the test set's 560mm run
+                    # not: it counts LINKS, not tiers, so Clifton's 560mm run
                     # said "11/11 tiers linked" on a bracket where five tiers
                     # had zero anchors. Say what the number is.
                     f"prominence anchors: {len(anchors)} on the "
                     f"{_exp_name(p_ref)} tier, giving {len(prom_links)} of "
                     f"{n - 1} possible links", None)
     except Exception as e:
-        progress.log(f"prominence linking unavailable ({e}); "
+        progress.log(f"[warn] prominence linking unavailable ({e}): "
                      f"corona correlation only", None)
     stats["prom_align"] = prom_info
 
@@ -4802,7 +5136,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
               if np.isfinite(w) and np.isfinite(sh).all()]
     _drop = len(pairs) + len(prom_links) - len(_links)
     if _drop:
-        progress.log(f"{_drop} alignment link(s) discarded as non-finite", None)
+        progress.log(f"[warn] {_drop} alignment link(s) discarded as non-finite", None)
     A, by, bx, ws = [], [], [], []
     for i, j, sh, w in _links:
         row = np.zeros(n); row[j] = 1; row[i] = -1
@@ -4815,9 +5149,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         ay = np.linalg.lstsq(Aw, np.array(by) * ws, rcond=None)[0]
         ax = np.linalg.lstsq(Aw, np.array(bx) * ws, rcond=None)[0]
     except np.linalg.LinAlgError as e:
-        progress.log(f"WARNING: the alignment network could not be solved ({e}). "
-                     f"Falling back to no cross-tier shift — check the limb in "
-                     f"the render before trusting it.", None)
+        progress.log(f"[fail] alignment network not solved ({e}): no cross-tier "
+                     f"shift applied", None)
         ay = np.zeros(n); ax = np.zeros(n)
         stats["align_failed"] = str(e)
     ay = np.nan_to_num(ay, nan=0.0, posinf=0.0, neginf=0.0)
@@ -4833,13 +5166,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             if i not in _linked:
                 k = min(_linked, key=lambda t: abs(t - i))
                 ay[i], ax[i] = ay[k], ax[k]
-                progress.log(f"{_exp_name(secs[i])}: no usable alignment link — "
-                             f"taking the shift measured for {_exp_name(secs[k])}",
+                progress.log(f"[warn] {_exp_name(secs[i])}: no usable alignment link, "
+                             f"shift taken from {_exp_name(secs[k])}",
                              None)
     elif not _linked:
-        progress.log("WARNING: no tier could be linked to any other. The tiers "
-                     "are merged unshifted; if the mount moved, the limb will "
-                     "be smeared.", None)
+        progress.log("[fail] no tier linked to any other: tiers merged unshifted", None)
     abs_shift = {s: (float(ay[i]), float(ax[i])) for i, s in enumerate(secs)}
     # both axes: a network that is perfect in y and 15px inconsistent in x used
     # to report a residual of 0. A[:-1] is empty when every frame shares one
@@ -4855,7 +5186,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
 
     # A RESIDUAL THIS LARGE IS A FAILED ALIGNMENT, NOT A STATISTIC.
     #
-    # a tester's 560 mm set (0.20.1) reported
+    # Clifton Brown's 560 mm set (0.20.1) reported
     #
     #     alignment network residual max 512.09px (half-res)
     #
@@ -4887,15 +5218,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                             % (_exp_name(secs[_ix[0]]), _exp_name(secs[_ix[-1]]),
                                max(_ry[int(_b)], _rx[int(_b)])))
         progress.log(
-            "WARNING: THE CROSS-TIER ALIGNMENT FAILED. The link network is "
-            "inconsistent by %.0f px (half-res, %.0f px full-res) against a "
-            "tolerance of %.0f px. That is not a measurement error -- the links "
-            "contradict each other, and least squares has returned the best "
-            "compromise between impossible constraints. Worst: %s. Everything "
-            "downstream is built on those shifts: the merged limb, its fitted "
-            "radius, the disc mask and every radial filter. Treat this run's "
-            "output as unusable and check whether the long tiers have any "
-            "corona to correlate on."
+            "[fail] cross-tier alignment failed: network inconsistent by "
+            "%.0f px (half-res, %.0f px full-res), tolerance %.0f px; "
+            "worst: %s"
             % (res, 2 * res, _tol, "; ".join(_who) or "unidentified"), None)
         stats["align_failed"] = round(float(res), 1)
         stats["align_tolerance"] = round(float(_tol), 1)
@@ -4925,15 +5250,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # exists because "the ring was not there in the last version" is a
         # claim that needs an A/B on the SAME data, not an argument.
         _reg_shift = {s_: (0.0, 0.0) for s_ in secs}
-        progress.log("ring sampling held UNREGISTERED by "
-                     "ECLIPSEFORGE_NO_REGSAMPLE=1 — the pedestal, the radial "
-                     "check and the azimuthal fit see exactly what they saw "
-                     "before 0.22.76", None)
+        progress.log("ring sampling unregistered (ECLIPSEFORGE_NO_REGSAMPLE=1)", None)
     elif "align_failed" in stats:
         _reg_shift = {s: (0.0, 0.0) for s in secs}
-        progress.log("the pedestal, the radial check and the azimuthal fit will "
-                     "sample every tier in the SAME frame, because the shifts "
-                     "they would otherwise use are the ones that just failed "
+        progress.log("[warn] ring sampling unregistered: alignment shifts failed "
                      "their consistency check", None)
 
     # --- photometric calibration ---
@@ -4975,9 +5295,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         if keep_good:
             _links_good[i] = good
         if good.sum() < 1000:
-            progress.log(f"photometric link {_exp_name(secs[i])}->"
-                         f"{_exp_name(secs[j])}: only {int(good.sum())} px "
-                         f"carry signal in both tiers; using exposure time", None)
+            progress.log(f"[warn] photometric link {_exp_name(secs[i])}->"
+                         f"{_exp_name(secs[j])}: only {int(good.sum())} px with signal "
+                         f"in both, exposure time used", None)
             return None
         # REVERTED IN 0.16.2. Read this before changing it again.
         #
@@ -5023,9 +5343,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # a tier cannot really be 2.5x off its own exposure time; this means
             # the comparison region is noise, not signal (very short tiers) --
             # trust the shutter speed instead of the measurement
-            progress.log(f"photometric link {_exp_name(secs[i])}->"
+            progress.log(f"[warn] photometric link {_exp_name(secs[i])}->"
                          f"{_exp_name(secs[j])} rejected (x{np.exp(lr):.2f} "
-                         f"over {int(good.sum())} px) — using exposure time", None)
+                         f"over {int(good.sum())} px), exposure time used", None)
             return None
         return lr, int(good.sum())
 
@@ -5069,19 +5389,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 if v is not None] + _lag2
         _sol, _res = _solve_photo_network(n, _all, ref)
         if _sol is None:
-            progress.log("photometric network not solvable on this bracket "
-                         "(a tier no link reaches, or too few links) — using "
-                         "the chain", None)
+            progress.log("[warn] photometric network not solvable, chain used", None)
         else:
             logf = _sol
             _net = {"links": len(_all), "lag2": len(_lag2),
                     "resid_pct": [round(100.0 * (np.exp(r) - 1.0), 3)
                                   for r in _res]}
         if _net is None:
-            progress.log(f"photometric solve: network requested but this "
-                         f"bracket has no usable redundancy "
-                         f"({len(_lag2)} two-step link(s) measured) — using the "
-                         f"chain, which is the same answer", None)
+            progress.log(f"photometric solve: no redundancy ({len(_lag2)} two-step "
+                         f"link(s)), chain used", None)
             _solve = "chain"
     if _net is None:
         for i in range(ref, n - 1):
@@ -5100,10 +5416,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # averaging them instead of picking a path through them.
         progress.log(
             f"photometric solve: network over {_net['links']} links "
-            f"({_net['lag2']} of them two-step). Residual per link, i.e. how "
-            f"far each measurement sits from what the solve settled on: median "
-            f"{np.median(_rp):.2f}%, worst {_rp.max():.2f}%. Near zero means "
-            f"the links agreed and this is the chain's answer.", None)
+            f"({_net['lag2']} two-step), residual median "
+            f"{np.median(_rp):.2f}%, worst {_rp.max():.2f}%", None)
 
     # --- the pedestal every tier shares ---
     # Ring medians over the OUTER field, where the corona is faint enough that a
@@ -5129,8 +5443,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # Since 0.22.28 the feather is CHOSEN BY MEASUREMENT per dataset rather
     # than defaulted; setting the variable overrides that. See _pick_feather.
     if os.environ.get("ECLIPSEFORGE_NO_PEDESTAL") == "1":
-        progress.log("shared pedestal DISABLED by ECLIPSEFORGE_NO_PEDESTAL=1 — "
-                     "this run reproduces the pre-0.22.15 merge", None)
+        progress.log("[warn] shared pedestal disabled (ECLIPSEFORGE_NO_PEDESTAL=1)", None)
         stats["pedestal_disabled"] = True
     try:
         if os.environ.get("ECLIPSEFORGE_NO_PEDESTAL") == "1":
@@ -5169,10 +5482,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             if not stats.get("black_level_reported", True):
                 _pmax = _PEDESTAL_UNKNOWN_MAX * _satadu
                 progress.log(
-                    f"the file reported no black level, so the shared pedestal "
-                    f"may range to {_pmax:.0f} ADU rather than "
-                    f"{_PEDESTAL_MAX * _satadu:.0f}: what is left in the data "
-                    f"is the whole black level, not a residue of one", None)
+                    f"no black level in file: shared pedestal range up to "
+                    f"{_pmax:.0f} ADU (default {_PEDESTAL_MAX * _satadu:.0f})", None)
             pedestal, _praw, _psig, _b0, _b1 = _fit_pedestal(
                 np.asarray(_pr, float), np.asarray(_sc, float), _pmax)
             if np.isfinite(_b0) and np.isfinite(_b1):
@@ -5185,18 +5496,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 # whenever every leave-one-out subset picks the same grid point.
                 # Dividing by it printed "1238016000000.0 sigma" in a real run.
                 _sgtxt = (f"{abs(_praw) / _psig:.1f} sigma" if _psig > 1e-9
-                          else "every leave-one-tier-out subset agrees")
+                          else "all leave-one-out subsets agree")
                 progress.log(
                     f"shared pedestal {pedestal:+.2f} ADU "
-                    f"(fitted {_praw:+.2f}, {_sgtxt}): tier-to-tier "
-                    f"disagreement in the outer field {100 * _b0:.1f}% -> "
-                    f"{100 * _b1:.1f}%. A black level left a few ADU behind "
-                    f"arrives divided by the exposure time, so it is nothing on "
-                    f"a long tier and everything on a short one.", None)
+                    f"(fitted {_praw:+.2f}, {_sgtxt}), outer-field tier "
+                    f"disagreement {100 * _b0:.1f}% -> {100 * _b1:.1f}%", None)
     except Exception as _e:
         if str(_e) != "disabled":
-            progress.log(f"shared pedestal not measurable ({_e}) — the outer "
-                         f"field is merged as it stands", None)
+            progress.log(f"[warn] shared pedestal not measurable ({_e}), outer "
+                         f"field merged as is", None)
 
     # --- Hill's per-channel linear-fit chain, when selected ---
     # Computed HERE, after cal[] and the shared pedestal, because it replaces
@@ -5213,8 +5521,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                                          pedestal, progress, stats)
         except Exception as _e:
             _hillK = _hillQ = None
-            progress.log(f"per-channel linear-fit photometry failed ({_e}) — using the "
-                         f"scalar chain", None)
+            progress.log(f"[warn] per-channel linear-fit photometry failed ({_e}), "
+                         f"scalar chain used", None)
     if _hillK is not None:
         # Everything downstream that works on LUMINANCE -- the feather trial,
         # the per-tier radial check, the LDIC fit, the tier TIFF export -- takes
@@ -5235,14 +5543,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # rather than duplicate.
         _ped_scalar = pedestal
         progress.log(
-            f"the scalar chain is kept for reference only: it read "
-            f"{', '.join(f'{_cal_scalar[s]:.3f}' for s in secs)}; the Hill "
-            f"chain's equivalent reads "
-            f"{', '.join(f'{cal[s]:.3f}' for s in secs)}. The shared pedestal "
-            f"of {_ped_scalar:+.2f} ADU is applied as well: it comes off "
-            f"before the pairwise fits, so it removes the part common to the "
-            f"whole bracket and the fitted offsets remove only what differs "
-            f"between neighbours.", None)
+            f"scalar chain (reference only): "
+            f"{', '.join(f'{_cal_scalar[s]:.3f}' for s in secs)}; linear-fit "
+            f"equivalent: {', '.join(f'{cal[s]:.3f}' for s in secs)}; shared "
+            f"pedestal {_ped_scalar:+.2f} ADU also applied", None)
 
     # --- does any tier's error VARY WITH RADIUS? ---
     #
@@ -5252,7 +5556,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # where the filters normalise against a local mean and amplify it.
     #
     # This is measured rather than assumed because a rough version of it, run
-    # outside the pipeline on four of the reference set's raws (one raw per tier, my own
+    # outside the pipeline on four of Nico's raws (one raw per tier, my own
     # centre, the stacked tier's shift applied to a single frame), showed two
     # adjacent tiers disagreeing with the other two by -22% and +64% inside
     # 1.25 R while agreeing to a few percent outside it. That rig was too crude
@@ -5297,23 +5601,16 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 stats["tier_radial_worst"] = round(_worst, 3)
                 if np.isfinite(_worst) and _worst > 0.15:
                     progress.log(
-                        f"per-tier radial check: the {_exp_name(secs[_k])} tier "
-                        f"departs from the other tiers by up to "
-                        f"{100 * _worst:.0f}% inside 1.3 R while they agree "
-                        f"outside it. The photometric factor is ONE number per "
-                        f"tier, fitted where the tiers overlap, so an error "
-                        f"shaped like this passes through it untouched and the "
-                        f"detail filters amplify it just outside the limb. "
-                        f"Recorded, not corrected — the profiles are in the "
-                        f"diagnostics bundle.", None)
+                        f"[warn] per-tier radial check: {_exp_name(secs[_k])} departs "
+                        f"up to {100 * _worst:.0f}% inside 1.3 R, not corrected", None)
                 else:
                     progress.log(
                         f"per-tier radial check: tiers agree to "
                         f"{100 * (_worst if np.isfinite(_worst) else 0):.0f}% "
-                        f"inside 1.3 R — no radius-dependent per-tier error",
+                        f"inside 1.3 R",
                         None)
     except Exception as _e:
-        progress.log(f"per-tier radial check skipped ({_e})", None)
+        progress.log(f"[warn] per-tier radial check skipped ({_e})", None)
 
     # ------------------------------------------------------------------
     # LDIC's per-tier AZIMUTHAL affine transform. See _fit_azimuthal_affine.
@@ -5423,33 +5720,24 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 if _both:
                     _wu = max(_both, key=lambda t: t[1])
                     progress.log(
-                        "azimuthal fit, measured both ways: sampling every tier "
-                        "in the same frame (as before 0.22.76) makes the gain "
-                        "look like it varies by up to %.0f%% around the limb; "
-                        "sampling each tier where it actually sits gives %.0f%% "
-                        "on that tier. The difference is the tiers' own "
-                        "misalignment being read as sky. Per tier: %s"
+                        "azimuthal fit, unregistered vs registered sampling: max "
+                        "%.0f%% vs %.0f%%; per tier: %s"
                         % (_wu[1], _wu[2],
                            ", ".join("%s %.0f%%->%.0f%%"
                                      % (_exp_name(float(k)), u, r)
                                      for k, u, r in _both)), None)
             _wk = max(_sp.items(), key=lambda kv: kv[1])
             progress.log(
-                f"azimuthal per-tier correction (Druckmullerova thesis 4.15): "
-                f"the gain varies around the limb by up to {_wk[1]:.0f}% "
-                f"({_exp_name(float(_wk[0]))} tier), which one scalar per tier "
-                f"cannot express. Corrected on {len(_ldic)} of {len(secs)} "
-                f"tiers, mean-preserving so the photometric chain and the "
-                f"shared pedestal are untouched; applied continuously in "
-                f"azimuth and faded out beyond "
-                f"{_ldic_rout / max(_Rseed, 1e-6):.1f} R, where it was no "
-                f"longer fitted.", None)
+                f"[ok] azimuthal per-tier correction: gain varies up to "
+                f"{_wk[1]:.0f}% ({_exp_name(float(_wk[0]))}), corrected on "
+                f"{len(_ldic)}/{len(secs)} tiers, faded beyond "
+                f"{_ldic_rout / max(_Rseed, 1e-6):.1f} R", None)
         else:
-            progress.log("azimuthal per-tier correction: not enough overlap to "
-                         "fit; tiers left as they are", None)
+            progress.log("azimuthal per-tier correction: not enough overlap, tiers "
+                         "unchanged", None)
     except Exception as _e:
         _ldic = {}
-        progress.log(f"azimuthal per-tier correction skipped ({_e})", None)
+        progress.log(f"[warn] azimuthal per-tier correction skipped ({_e})", None)
 
     # --- is any of the above COLOUR-dependent? ---
     # Diagnostic only: refits the per-tier scale, the shared pedestal and the
@@ -5483,23 +5771,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 ped_channel = np.asarray(_chd, np.float32)
                 stats["channel_floors_applied"] = [float(x) for x in ped_channel]
                 progress.log(
-                    f"per-channel black level: R {_chd[0]:+.1f} G {_chd[1]:+.1f} "
-                    f"B {_chd[2]:+.1f} ADU, subtracted on top of the shared "
-                    f"pedestal. This format carries no per-channel black level "
-                    f"in its header, so each plane's own floor survives into "
-                    f"the merge; it is nothing against the inner corona and it "
-                    f"is the whole signal in the outer field, which is what "
-                    f"makes a colour cast that changes with radius. Fitted with "
-                    f"the exposure ladder free, so an achromatic timing error "
-                    f"cannot land here; the part indistinguishable from one "
-                    f"({_chi.get('deltas_ladder_part')}) is discarded, not "
-                    f"applied. Ladder deviation from the stated times: "
-                    f"{_chi.get('ladder_dev_pct')} %.", None)
+                    f"[ok] per-channel black level: R {_chd[0]:+.1f} G {_chd[1]:+.1f} "
+                    f"B {_chd[2]:+.1f} ADU subtracted; ladder part "
+                    f"{_chi.get('deltas_ladder_part')} discarded, ladder deviation "
+                    f"{_chi.get('ladder_dev_pct')}%", None)
             elif stats.get("fit_channel_floors") and _chi.get("why"):
                 progress.log(f"per-channel black level not fitted: "
                              f"{_chi['why']}", None)
     except Exception as _e:
-        progress.log(f"per-channel photometry check skipped ({_e})", None)
+        progress.log(f"[warn] per-channel photometry check skipped ({_e})", None)
     _links_good = None      # one half-res boolean per link; nothing needs them now
 
     stats["quality"] = {str(k): v for k, v in quality.items()}
@@ -5530,7 +5810,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     #
     #     link_i = (s_i+1 / s_i)^(g-1)   ->   g = 1 + mean( ln link / ln step )
     #
-    # Measured on the 250 mm test set, the same nine frames both ways:
+    # Measured on Clifton's 250 mm set, the same nine frames both ways:
     #
     #                      tier factors      fitted g   limb fit rms
     #   from the CR2s      0.944 .. 1.015      ~1.00       0.95 px
@@ -5553,33 +5833,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         stats["linearity_gamma"] = round(_gam, 3)
         if abs(_gam - 1.0) > 0.08:
             progress.log(
-                f"WARNING: these frames are NOT scene-linear. The photometric "
-                f"links are tilted as if the data carried a gamma of about "
-                f"{_gam:.2f} — on linear data every link sits at 1.000 by "
-                f"construction and this comes out 1.00. "
-                + ("A raw developer's tone curve does exactly this. Inverting "
-                   "sRGB on load undoes the encoding, not Adobe's base curve, "
-                   "and that curve cannot be inverted from the file: Lightroom "
-                   "has no scene-linear TIFF export. Use the raw files. A flat "
-                   "built from the same exports carries the same curve and does "
-                   "not divide out either, which is why the falloff it reports "
-                   "does not match the one measured from raws. "
-                   if not _israw else
-                   "On raw input this should not happen: check for a black "
-                   "level left in the data, or a camera profile applied before "
-                   "these files were written. ")
-                + "Everything below — the photometric factors, the merge, the "
-                  "limb fit — is computed as if the data were linear, so treat "
-                  "this run as unreliable.", None)
+                f"[warn] frames not scene-linear: photometric links imply gamma "
+                f"{_gam:.2f}; "
+                + ("use the raw files" if not _israw else
+                   "check black level and camera profile")
+                + "; run unreliable", None)
     progress.log("photometric calibration: " +
                  ", ".join(f"{np.exp(l):.3f}" for l in logf), 0.53)
     span_ev = np.log2(max(secs) / min(secs))
     if span_ev < 6:
-        progress.log(f"WARNING: the bracket spans only {span_ev:.1f} EV "
-                     f"({min(secs):g}s to {max(secs):g}s). A totality corona "
-                     "bracket normally spans 10-14 EV; this looks like a "
-                     "partial-phase, diamond-ring or beads sequence, which this "
-                     "pipeline is not built for.", None)
+        progress.log(f"[warn] bracket spans only {span_ev:.1f} EV "
+                     f"({min(secs):g}s to {max(secs):g}s), totality needs 10-14 EV", None)
     # THE PER-LINK RESIDUALS, NOT ONLY THE CUMULATIVE FACTORS.
     #
     # `cal` is a running product down the chain, so one bad link and a hundred
@@ -5597,8 +5861,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # line of text -- so nothing downstream, and no test, could look at them.
     stats["photometric_links"] = [round(float(x), 5) for x in _lnk]
     if _lnk.size:
-        progress.log("photometric links (1.000 = the exposure ratio predicts "
-                     "this tier exactly): " +
+        progress.log("photometric links (1.000 = exposure ratio): " +
                      ", ".join(f"{x:.3f}" for x in _lnk), None)
         _meas = _lnk[np.abs(np.log(np.maximum(_lnk, 1e-9))) > 1e-9]   # drop fallbacks
         if _meas.size >= 6:
@@ -5611,21 +5874,13 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # of the median only has to rule out rounding.
             if (_lean > 0.8 or _lean < 0.2) and abs(np.log(_med)) > np.log(1.02):
                 progress.log(
-                    f"WARNING: {int(round(_lean * _meas.size)) if _lean > 0.5 else int(round((1 - _lean) * _meas.size))}"
-                    f" of {_meas.size} measured links lean the same way "
-                    f"(median {_med:.3f}). That is a systematic error, not "
-                    f"scatter, and it compounds down the chain to "
-                    f"{_med ** _meas.size:.4f}. The usual cause is a black "
-                    f"level left in the data — a pedestal does not scale with "
-                    f"exposure, so it biases every link in the same direction. "
-                    f"Check that the frames are black-subtracted.", None)
+                    f"[warn] {int(round(_lean * _meas.size)) if _lean > 0.5 else int(round((1 - _lean) * _meas.size))}"
+                    f" of {_meas.size} links lean the same way (median {_med:.3f}, "
+                    f"compounds to {_med ** _meas.size:.4f}): check black subtraction", None)
     bad = [f"{s:g}s x{cal[s]:.2f}" for s in secs if not 0.25 < cal[s] < 4.0]
     if bad:
-        progress.log("WARNING: tiers disagree photometrically far beyond their "
-                     "exposure ratio (" + ", ".join(bad) + "). Usually means "
-                     "clipped highlights, changing cloud/haze, or exposure "
-                     "metadata that does not match the actual exposure. "
-                     "The merge will be unreliable.", None)
+        progress.log("[warn] tiers disagree photometrically beyond exposure ratio ("
+                     + ", ".join(bad) + "): merge unreliable", None)
 
     # --- per-tier lunar limb, in the ALIGNED frame ---
     # The corona alignment puts the Sun in register; the Moon is a different
@@ -5666,10 +5921,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # merged fit is large. A flat percentage cannot know that.
         stats["R_consensus_spread"] = _sp
         if _sp > 0.15 * stats["R_consensus"]:
-            progress.log(f"WARNING: the tiers disagree about the lunar radius "
-                         f"({min(Rms):.0f}-{max(Rms):.0f}px). They should all see "
-                         f"the same Moon; this usually means frames of different "
-                         f"scenes are mixed in.", None)
+            progress.log(f"[warn] tiers disagree on the lunar radius "
+                         f"({min(Rms):.0f}-{max(Rms):.0f} px): possibly mixed scenes", None)
         else:
             progress.log(f"lunar radius consensus across tiers: "
                          f"{stats['R_consensus']:.0f}px (spread {_sp:.0f}px)", None)
@@ -5690,18 +5943,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         stats["moon_radius_px"] = Rmoon
         progress.log(f"per-tier lunar limb spread: {span:.0f}px (R_moon {Rmoon:.0f}px)",
                      0.54)
-        # 226 px of spread on a 525 px Moon (the test set's 560mm run) is 43%: the
-        # tiers are not looking at the same place. the reference set's 600mm set sits at
-        # 1.3%, the test set's own 250mm at 1.0% and his 360mm at 3.3%, so 8% is
+        # 226 px of spread on a 525 px Moon (Clifton's 560mm run) is 43%: the
+        # tiers are not looking at the same place. Nico's 600mm set sits at
+        # 1.3%, Clifton's own 250mm at 1.0% and his 360mm at 3.3%, so 8% is
         # comfortably clear of anything a working run produces.
         if Rmoon and span > 0.08 * Rmoon:
             progress.log(
-                f"WARNING: the tiers' lunar limbs are spread over {span:.0f}px, "
-                f"{100 * span / Rmoon:.0f}% of the lunar radius. They are the "
-                f"same Moon seconds apart, so this is a cross-tier alignment "
-                f"failure, not lunar motion. The merged limb is a smear of "
-                f"{span:.0f}px and its fitted radius, the disc mask and every "
-                f"radial filter inherit it.", None)
+                f"[warn] tier lunar limbs spread {span:.0f} px "
+                f"({100 * span / Rmoon:.0f}% of R): cross-tier alignment failure", None)
             stats["limb_spread_bad"] = round(float(span), 1)
         # Masking each tier to its own disc is the right idea and it is what
         # makes the merged limb an edge instead of a 25 px ramp -- but acting on
@@ -5736,7 +5985,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             if use_moon_mask:
                 tier_moon = track
         except Exception as e:
-            progress.log(f"moon-mask trial skipped ({e})", None)
+            progress.log(f"[warn] moon-mask trial skipped ({e})", None)
         if not use_moon_mask:
             # Clears the MASK only. The exposure-exponent trial below is a
             # separate question and reads `track` directly -- it used to be
@@ -5746,7 +5995,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # be allowed to outvote the short ones. See _pick_weight_alpha.
         # THIRD BISECT SWITCH. ECLIPSEFORGE_WALPHA=1.0 holds the exponent at 1.0
         # and skips the trial. The trial is a 0.22.5-era feature and it fires on
-        # some brackets and not others -- on the 600 mm reference set it picks 0.55 and
+        # some brackets and not others -- on Nico's 600 mm set it picks 0.55 and
         # reports "+106% coherent detail at 1.02-1.12 R", which is its purpose:
         # it tilts weight toward the SHORT tiers, which are also the noisiest.
         # Its guard only checks that the mid and outer shells keep their radial
@@ -5758,8 +6007,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         if _wenv:
             try:
                 _walpha = float(_wenv)
-                progress.log(f"merge weight trial SKIPPED — exposure exponent "
-                             f"held at {_walpha:.2f} by ECLIPSEFORGE_WALPHA",
+                progress.log(f"merge weight exponent held at {_walpha:.2f} "
+                             f"(ECLIPSEFORGE_WALPHA)",
                              None)
                 stats["merge_weight"] = {"alpha": _walpha, "forced": True}
             except ValueError:
@@ -5771,7 +6020,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                     progress)
                 stats["merge_weight"] = _winfo
             except Exception as e:
-                progress.log(f"merge weight trial skipped ({e})", None)
+                progress.log(f"[warn] merge weight trial skipped ({e})", None)
 
     # --- full-res merge ---
     wb = np.asarray(color_info["wb"], np.float32)
@@ -5813,9 +6062,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     _l, _r = int(np.ceil(_l)), int(np.ceil(_r))
     _H, _W = H2, W2
     if (_t + _b) > 0.6 * _H or (_l + _r) > 0.6 * _W:
-        progress.log(f"WARNING: alignment would trim {_t + _b}x{_l + _r}px, more "
-                     f"than half the frame — not trimming; check the frame "
-                     f"motion warnings above", None)
+        progress.log(f"[warn] alignment trim {_t + _b}x{_l + _r} px exceeds half "
+                     f"the frame, not trimmed", None)
         _t = _b = _l = _r = 0
     if _t or _b or _l or _r:
         _t2, _l2 = _t - _t % 2, _l - _l % 2        # keep the Bayer phase
@@ -5823,9 +6071,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         stats["autocrop_px"] = {"top": _t2, "bottom": int(_b), "left": _l2,
                                 "right": int(_r),
                                 "kept": f"{_W - _l2 - int(_r)}x{_H - _t2 - int(_b)}"}
-        progress.log(f"trimming the alignment border: {_t2}/{_b} top/bottom, "
+        progress.log(f"alignment border trimmed: {_t2}/{_b} top/bottom, "
                      f"{_l2}/{_r} left/right -> "
-                     f"{_W - _l2 - int(_r)}x{_H - _t2 - int(_b)}px", None)
+                     f"{_W - _l2 - int(_r)}x{_H - _t2 - int(_b)} px", None)
     else:
         crop_origin = (0, 0)
     _kh = H2 - crop_origin[0] - int(_b)
@@ -5854,7 +6102,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # So the feather is a SETTING (GUI: "Merge weight"), and the trial prints
     # what it measured next to it, with its own disagreement stated. A control
     # the user can see and change in a second beats a guess that silently picks
-    # wrong -- which is what shipped a pink rim on the test set's data twice.
+    # wrong -- which is what shipped a pink rim on Clifton's data twice.
     _fm = (os.environ.get("ECLIPSEFORGE_FEATHER") or feather or
            _FEATHER_DEFAULT).lower()
     if _fm not in ("plain", "taper", "masked"):
@@ -5869,41 +6117,40 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         if np.isfinite(_fratio):
             stats["feather_ratio"] = round(_fratio, 4)
             progress.log(
-                f"merge weight: {FEATHER_NAMES.get(_fm, _fm)} (setting). "
-                f"The trial measures the "
-                f"plain feather at {100 * _fratio:.0f}% of the leak-free level "
-                f"at 1.02 R and would suggest '{_adv}' — ADVICE ONLY, and this "
-                f"estimator has been wrong before: it read 99% on a bracket "
-                f"the offline bench puts at 13%. Trust the picture, not this "
-                f"number.", None)
+                ("[odd] " if _adv != _fm else "")
+                + f"merge weight: {FEATHER_NAMES.get(_fm, _fm)} (setting); trial: "
+                f"plain feather {100 * _fratio:.0f}% of leak-free at 1.02 R, "
+                f"suggests '{_adv}' (advisory)", None)
         else:
-            progress.log(f"merge weight: {FEATHER_NAMES.get(_fm, _fm)} "
-                         f"(setting); the trial could "
-                         f"not measure a ratio on this bracket", None)
+            progress.log(f"[warn] merge weight: {FEATHER_NAMES.get(_fm, _fm)} "
+                         f"(setting); trial ratio not measurable", None)
     except Exception as _e:
-        progress.log(f"merge weight: {FEATHER_NAMES.get(_fm, _fm)} (setting); "
+        progress.log(f"[warn] merge weight: {FEATHER_NAMES.get(_fm, _fm)} (setting); "
                      f"trial skipped ({_e})",
                      None)
     # DO NOT write the choice back into os.environ. 0.22.28 did, so that the
     # merge loop could pick it up -- and the app is ONE LONG-RUNNING PROCESS.
     # The first folder's trial set the variable, every later folder in the same
     # session read it at startup, skipped its own trial, and reported "feather
-    # held at 'plain' by ECLIPSEFORGE_FEATHER". the 600 mm reference set chose plain,
-    # and the test set's 360 mm -- which needs the leak-free weight -- then inherited
+    # held at 'plain' by ECLIPSEFORGE_FEATHER". Nico's 600 mm set chose plain,
+    # and Clifton's 360 mm -- which needs the leak-free weight -- then inherited
     # it and came out with the pink rim the trial exists to prevent.
     # `_fm` is passed to _feather_weight explicitly below, so nothing needs the
     # environment; writing to it only leaked state between runs.
 
     _cp = None
     if str(colour_planes) == "auto":
-        progress.log("colour planes: measuring the red and blue offset against "
-                     "green on the lunar limb...", None)
+        progress.log("colour planes: measuring R/B offset against G on the "
+                     "lunar limb...", None)
         _cp = measure_colour_planes(stacks_bayer, secs, demosaic_method, progress)
         if _cp is not None:
             stats["colour_planes"] = {k: v for k, v in _cp.items()
                                       if not isinstance(k, int)}
     acc = np.zeros((H2, W2, 3), np.float32)
     wsum = np.zeros((H2, W2), np.float32)
+    # the merge's own photon noise, propagated through the weights (see the
+    # note where merge_noise.npy is written)
+    vacc = np.zeros((H2, W2), np.float32)
     _angmap = None
     # Pixels the SHORTEST tier already cannot hold. If the longest tier cannot
     # hold them either then no tier can, and without a fallback they leave the
@@ -6032,9 +6279,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 # INDEX here and looked k and q up in a 60-entry table, which
                 # made a smooth function into a 60-step staircase: a hard gain
                 # discontinuity every 6 degrees, running from the disc to the
-                # frame edge. On the 250 mm test set, where k spans 82%, the
+                # frame edge. On Clifton's 250 mm set, where k spans 82%, the
                 # steps between neighbouring segments reach ~17% and the whole
-                # frame filled with radial wedges. Reported by a tester on 0.22.32.
+                # frame filled with radial wedges. Reported by Nico on 0.22.32.
                 _yy = np.arange(H2, dtype=np.float32)[:, None] - 2.0 * cym
                 _xx = np.arange(W2, dtype=np.float32)[None, :] - 2.0 * cxm
                 # A 16384-entry index, not a per-pixel trig evaluation: eight
@@ -6123,7 +6370,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # is what lets the exponent buy the limb without paying out there; one
         # global exponent cannot separate the two.
         #
-        # MEASURED by rebuilding the merge from the reference set's own exported tiers (all
+        # MEASURED by rebuilding the merge from Nico's own exported tiers (all
         # 14) and looking at azimuthal scatter about a smooth profile, which in
         # a shell that should be smooth is noise:
         #
@@ -6164,7 +6411,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # The plain blur hands this tier weight where it is clipped, and
             # a clipped pixel under-reports -- that is the documented trade
             # above, and the luminance error is what covers the rings. But the
-            # three channels do not clip together. Measured on the test set's 360 mm
+            # three channels do not clip together. Measured on Clifton's 360 mm
             # raws (1/8 s at 1.02-1.08 R): R and G on the plateau in 90-96% of
             # photosites, B in 17-48%, because the raw channels sit at
             # G:R:B = 1:1:0.25. So the leaked value has R and G capped and B
@@ -6172,7 +6419,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # R/G 0.83 -> 0.90 and B/G 0.40 -> 0.59 at 1.02 R, and the full
             # 12-tier merge, where four clipped tiers leak at up to 4.6x the
             # weight, doubled B/G in a 35 px band at the limb: the diffuse
-            # magenta ring reported on that set. The exact edge does not do it.
+            # magenta ring Nico reported. The exact edge does not do it.
             #
             # Here the clipped pixel keeps ITS OWN brightness -- so the
             # luminance leak, and with it the ring cover, is unchanged
@@ -6195,7 +6442,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 rgb[_inv] = _own
                 del _cmp, _lc, _own, _lt, _g
             del _inv
-        w = np.float32(s ** _walpha) * _wf
+        # TODO 21: the weight asks the MEASURED exposure (s * cal[s]) when the
+        # headers clearly disagree with the data, the stated one otherwise
+        _wexp = s * float(cal.get(s, 1.0)) if _weight_exposure_mode(cal, progress) == "measured" else s
+        w = np.float32(_wexp ** _walpha) * _wf
         mw = moon_weight(s)
         if mw is not None:
             w *= mw
@@ -6223,13 +6473,20 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                              len(tiers[s]), tier_linear, progress)
         acc += w[:, :, None] * rgb
         wsum += w
+        # var(x) of a tier's rate x = ADU * rpa is x * rpa / (gain * n): photon
+        # noise in ADU, scaled to rate units; the gain is calibrated later
+        _rpa = (float(np.mean(_hillK[s])) / s) if _hillK is not None else 1.0 / (s * cal[s])
+        _nfr = max(len(tiers[s]), 1)
+        _lt = np.clip(0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2], 0, None)
+        vacc += (w * w) * _lt * np.float32(_rpa / _nfr)
+        del _lt
         del rgb, w, wsat, cmax, _valid
         progress.log(f"merged tier {s:g}s", 0.55 + 0.3 * (k + 1) / n)
     # WHERE NO TIER HAS ANY WEIGHT, THE MERGE USED TO PRODUCE BLACK.
     #
     # `hdr = acc / max(wsum, 1e-9)` is 0/0 at every pixel that is clipped in all
     # tiers, and 0 is not a plausible value for the brightest thing in the frame
-    # -- it is a hole. It appeared on the 250 mm test set in 0.22.35: the core
+    # -- it is a hole. Nico hit it on Clifton's 250 mm set in 0.22.35: the core
     # of a prominence came out as a black sliver inside the prominence.
     #
     # It appeared with 0.22.35 and was not caused by it. Measured on that set's
@@ -6266,18 +6523,33 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             _hidx = _fill_idx[_sel]
             acc.reshape(-1, 3)[_hidx] = _fill_rgb[_sel]
             wsum.ravel()[_hidx] = 1.0
+            _nowt = np.zeros(wsum.shape, bool)
+            _nowt.ravel()[_hidx] = True
+            vacc.ravel()[_hidx] = 0.0
             del _hidx
         del _sel
     del _fill_idx, _fill_rgb
     stats["all_clipped_px"] = _nfill
     if _nfill:
         progress.log(
-            f"{_nfill} px are saturated in EVERY tier, the shortest "
-            f"({_exp_name(secs[0])}) included — filled from that tier instead "
-            f"of being left at zero, which printed as a black hole inside the "
-            f"prominence. Those pixels are a LOWER BOUND on the real "
-            f"brightness; only a shorter exposure can measure them", None)
+            f"[odd] {_nfill} px saturated in every tier (shortest "
+            f"{_exp_name(secs[0])}): filled from that tier, lower bound only", None)
     hdr = acc / np.maximum(wsum[:, :, None], 1e-9)
+    # THE MERGE'S OWN NOISE (TODO 1e, lab 0.24). detail.photon_floor models the
+    # noise as C/sqrt(L) with one C from the far field, i.e. as if every pixel
+    # had been exposed like the far field. Near the limb the merge is carried
+    # by the SHORT tiers and holds far fewer photons than its brightness says:
+    # measured 14x too low at 1.03 R. Propagated here instead -- sum w^2 var /
+    # (sum w)^2 -- as a relative sigma; detail.py scales it to photon_floor in
+    # the far field and uses whichever is larger.
+    _vmerge = vacc / np.maximum(wsum * wsum, 1e-18)
+    _lmerge = (0.2126 * hdr[:, :, 0] + 0.7152 * hdr[:, :, 1] + 0.0722 * hdr[:, :, 2])
+    _relnoise = np.where(_lmerge > 0, np.sqrt(np.maximum(_vmerge, 0)) / np.maximum(_lmerge, 1e-12), 0.0)
+    del vacc, _vmerge, _lmerge
+    try:
+        _nowt
+    except NameError:
+        _nowt = None
     # (_kh, _kw) can differ from (H2, W2) with crop_origin still (0,0) when the
     # trim is bottom/right only. The tier TIFFs were already being sliced in
     # that case while the render was not, so the two came out different sizes
@@ -6291,7 +6563,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # channel here always means an OFFSET was subtracted that should not have
     # been, and the only offsets in the chain are the shared pedestal and the
     # linear fit's per-channel q. It is worth saying out loud rather than
-    # clipping in silence: on the test set's 560 mm set this was 100% of the red
+    # clipping in silence: on Clifton's 560 mm set this was 100% of the red
     # channel beyond 4 R, and it printed as a cyan ring nobody could explain
     # from the log.
     _neg = hdr < 0
@@ -6299,16 +6571,25 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     if _nfrac > 1e-4:
         _worst = int(np.argmax([float(_neg[:, :, c].mean()) for c in range(3)]))
         progress.log(
-            f"WARNING: {100 * _nfrac:.1f}% of the merged samples are NEGATIVE "
-            f"(worst channel {'RGB'[_worst]}, {100 * _neg[:, :, _worst].mean():.0f}% "
-            f"of it). A merge of non-negative data cannot do that, so an offset "
-            f"has been over-subtracted — the shared pedestal ({pedestal:+.2f} "
-            f"ADU) or, if the linear-fit chain is on, one of its per-channel "
-            f"offsets. Clamped at zero so the picture is not a colour cast, but "
-            f"the photometry in that region is not trustworthy.", None)
+            f"[warn] {100 * _nfrac:.1f}% of merged samples negative "
+            f"(worst {'RGB'[_worst]} {100 * _neg[:, :, _worst].mean():.0f}%, "
+            f"pedestal {pedestal:+.2f} ADU): clamped at zero", None)
         stats["merge_negative_frac"] = round(_nfrac, 5)
     np.clip(hdr, 0.0, None, out=hdr)
     np.save(os.path.join(wd, "hdr_rgb.npy"), hdr.astype(np.float32))
+    # the two hand-overs to the detail layers (TODO 0-b, 1e), cropped like hdr
+    try:
+        _cy0, _cx0 = crop_origin
+        _sl = (slice(_cy0, _cy0 + hdr.shape[0]), slice(_cx0, _cx0 + hdr.shape[1]))
+        np.save(os.path.join(wd, "merge_noise.npy"), _relnoise[_sl].astype(np.float16))
+        _nwp = os.path.join(wd, "nowt_mask.npy")
+        if _nowt is not None:
+            np.save(_nwp, _nowt[_sl])
+        elif os.path.exists(_nwp):
+            os.remove(_nwp)
+    except Exception as _e:
+        progress.log(f"[warn] merge noise map not written ({_e})", None)
+    del _relnoise
     lum = (0.2126 * hdr[:, :, 0] + 0.7152 * hdr[:, :, 1] + 0.0722 * hdr[:, :, 2]).astype(np.float32)
     np.save(os.path.join(wd, "hdr_lum.npy"), lum)
 
@@ -6323,7 +6604,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     inner_secs = [x for x in secs[:4] if x <= 24.0 * secs[0]] or secs[:1]
     if inner_secs != secs[:4]:
         progress.log(f"inner stack: {len(inner_secs)} tier(s) within 24x the "
-                     f"shortest exposure (to {_exp_name(inner_secs[-1])})", None)
+                     f"shortest (to {_exp_name(inner_secs[-1])})", None)
     accn = None; accw = None
     for s in inner_secs:
         rgb = _cp_apply(_demosaic(stacks_bayer[s], demosaic_method), _cp)
@@ -6383,8 +6664,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             progress.log(f"inner-stack lunar disc from the track: "
                          f"({_cy:.0f},{_cx:.0f}) R={_cr:.0f}px", None)
     except Exception as e:
-        progress.log(f"inner-stack track geometry unavailable ({e})", None)
-    progress.log("short-exposure inner stack done", 0.90)
+        progress.log(f"[warn] inner-stack track geometry unavailable ({e})", None)
+    progress.log("[ok] short-exposure inner stack done", 0.90)
 
     # --- disc center + limb radius: coarse fit on HDR luminance (robust),
     # then band-restricted refinement on the short stack (crisp limb) ---
@@ -6423,33 +6704,29 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         cands.sort(key=lambda t: t[0])
         fit = cands[0][1]
         cyf, cxf, R, rms, nk, nt, limb_prof = fit
-        progress.log(f"limb half-level fit: centre ({cyf:.1f},{cxf:.1f}) R={R:.1f}px, "
-                     f"rms {rms:.2f}px over {nk}/{nt} rays "
-                     f"(seed fit said R={RA:.0f})", None)
+        progress.log(f"limb half-level fit: centre ({cyf:.1f},{cxf:.1f}) R={R:.1f} px, "
+                     f"rms {rms:.2f} px over {nk}/{nt} rays "
+                     f"(seed R={RA:.0f})", None)
         # THE ACCEPTANCE TEST ABOVE ALLOWS rms < 0.08 R, WHICH IS VERY LOOSE.
-        # the test set's 560mm fit came in at 32.77 px on R=587 -- 5.6%, comfortably
+        # Clifton's 560mm fit came in at 32.77 px on R=587 -- 5.6%, comfortably
         # accepted, and the circle it describes is nothing like the Moon. The
         # three usable datasets sit at 0.41%, 0.30% and 1.16%, so there is a
         # wide empty band between "a real limb" and what the filter admits.
         # Warn in it rather than silently taking the fit.
         if R > 0 and rms > 0.02 * R:
             progress.log(
-                f"WARNING: the limb fit's rms is {rms:.1f}px, {100 * rms / R:.1f}% "
-                f"of the fitted radius. A real lunar limb fits to well under 1%; "
-                f"this circle does not describe an edge. Usually the merged limb "
-                f"is smeared by a cross-tier alignment error. The disc mask and "
-                f"every radial filter are built on this circle.", None)
+                f"[warn] limb fit rms {rms:.1f} px = {100 * rms / R:.1f}% "
+                f"of R (real limb < 1%): limb smeared", None)
             stats["limb_fit_rms_bad"] = round(float(rms), 2)
     else:
-        progress.log("WARNING: the half-level limb fit failed on every seed and "
-                     "image. Falling back to the gradient fit, which is much less "
-                     "reliable — check the disc mask before trusting this render.",
+        progress.log("[warn] half-level limb fit failed on every seed: gradient "
+                     "fit used, check the disc mask",
                      None)
         cyf, cxf, R = cyA, cxA, RA
         if not (0.02 * Hs < R < 0.25 * Hs):
             R = 0.10 * Hs
-            progress.log(f"gradient fit radius implausible too — using R={R:.0f}px; "
-                         "the disc mask will need manual trimming", None)
+            progress.log(f"[warn] gradient fit radius implausible: R={R:.0f} px used, "
+                         "trim the disc mask manually", None)
         rms = 0.01 * R
         fit = None
         limb_prof = np.full(720, R, np.float32)
@@ -6463,7 +6740,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # only a soft warning.
     # A FLAT 15% IS THE WRONG TEST, and a real run showed why.
     #
-    # a tester's 360 mm set (0.15.1): the tiers agreed on R = 456 px with a
+    # Clifton Brown's 360 mm set (0.15.1): the tiers agreed on R = 456 px with a
     # SPREAD OF 2 px, and the merged fit came out 470.2 px -- 3.1%, so this said
     # nothing. But against a 2 px spread, 14 px is seven sigma. The merged limb
     # ramp was 25 px where his other set's was 10, the alignment residual 7.9 px
@@ -6481,15 +6758,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # Against the three real datasets available:
     #
     #   set                consensus  spread  merged fit  |diff|  fires?
-    #   reference 600mm           617 px    7 px    619.1 px   2.1 px   no
-    #   the tester 250mm         298 px    7 px    300.2 px   2.2 px   no
-    #   the tester 360mm         456 px    2 px    470.2 px  14.2 px   YES
+    #   Nico 600mm            617 px    7 px    619.1 px   2.1 px   no
+    #   Clifton 250mm         298 px    7 px    300.2 px   2.2 px   no
+    #   Clifton 360mm         456 px    2 px    470.2 px  14.2 px   YES
     #
     _rc = stats.get("R_consensus")
     _rcs = float(stats.get("R_consensus_spread") or 0.0)
     # R_consensus_spread is a p90-p10 RANGE, not a standard deviation, and the
     # test below wants sigma. Treating the range as sigma made the threshold
-    # 2.6x too high, which is how the tester's 2024 560 mm set slipped through: 15
+    # 2.6x too high, which is how Clifton's 2024 560 mm set slipped through: 15
     # px range, 28 px disagreement -- under two of the real sigma, but the code
     # asked for four of the range and never fired. He reported it as "the moon
     # mask is too large and covers prominences", which is exactly what a limb 28
@@ -6498,20 +6775,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     if _rc and R > 0 and abs(R - _rc) > max(4.0 * _sig, 0.01 * _rc) \
             and abs(R - _rc) / _rc <= 0.15:
         progress.log(
-            f"WARNING: the merged limb fit says R={R:.0f}px but the tiers agree "
-            f"on R={_rc:.0f}px to within {_rcs:.0f}px -- a {abs(R - _rc):.0f}px "
-            f"disagreement, and the fit is the one that runs LARGE. "
-            f"The 50% crossing sits outside the true limb whenever the edge is "
-            f"soft, and the merged limb ramp above says how soft: across four "
-            f"real datasets the bias tracks the ramp and nothing else "
-            f"(0.3%/8px, 0.8%/9px, 3.2%/21px, 11.9%/69px), matching neither "
-            f"the alignment residual nor the tier disagreement. So a wide ramp "
-            f"means either a merge smeared by misalignment OR a genuinely soft "
-            f"limb -- focus, seeing, or a slow lens -- and the two are told "
-            f"apart by the alignment residual and per-tier limb spread above. "
-            f"Either way R sets the radial profile MGN divides out, FNRGF's "
-            f"rings and the deband, so a circle this size prints concentric "
-            f"arcs in all of them, and the disc mask covers real corona.", None)
+            f"[warn] merged limb fit R={R:.0f} px runs {abs(R - _rc):.0f} px "
+            f"large vs tier consensus R={_rc:.0f} px (spread {_rcs:.0f} px)", None)
         stats["limb_fit_disputed"] = round(float(abs(R - _rc)), 1)
         # ...and now correct it, instead of only complaining.
         #
@@ -6520,11 +6785,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # amount that tracks the merged limb ramp and nothing else.
         #
         #   set                 consensus  spread   merged fit   bias   ramp
-        #   reference 600mm            617 px    7 px      619.1     +2.1     8
-        #   the tester 250mm          298 px    7 px      300.3     +2.3     9
-        #   the tester 360mm          456 px    2 px      470.4    +14.4    21
-        #   the tester 2024 560mm     525 px   15 px      553.0    +28.0    28
-        #   a second tester 560mm (2024)   525 px  226 px      587.3    +62.3    69
+        #   Nico 600mm             617 px    7 px      619.1     +2.1     8
+        #   Clifton 250mm          298 px    7 px      300.3     +2.3     9
+        #   Clifton 360mm          456 px    2 px      470.4    +14.4    21
+        #   Clifton 2024 560mm     525 px   15 px      553.0    +28.0    28
+        #   Clifton 560mm (2024)   525 px  226 px      587.3    +62.3    69
         #
         # The cause is not in dispute: the 50% crossing between disc and
         # near-limb corona sits OUTSIDE the true limb whenever the edge is soft,
@@ -6552,14 +6817,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             rms = float(np.hypot(rms, _sig))
             stats["limb_fit_corrected_px"] = round(_off, 1)
             progress.log(
-                f"limb fit corrected {_off:+.1f}px to the tiers' consensus "
-                f"R={R:.0f}px, keeping the per-azimuth shape. The merged "
-                f"half-level crossing runs large on a soft edge; across five "
-                f"real datasets the bias is always positive and tracks the "
-                f"merged limb ramp. This is the circle MGN's radial profile, "
-                f"FNRGF's rings, the deband and the disc mask are all built "
-                f"on, so it is corrected here rather than left to the disc "
-                f"mask trim slider.", None)
+                f"[ok] limb fit corrected {_off:+.1f} px to tier consensus "
+                f"R={R:.0f} px (per-azimuth shape kept)", None)
     if _rc and R > 0 and abs(R - _rc) / _rc > 0.15:
         # This used to say "Using the tiers' value" unconditionally, and then
         # only actually use it past 30% or with no per-azimuth fit -- so between
@@ -6567,22 +6826,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         # one line a user reads when the disc mask comes out wrong. Each branch
         # now says what it did.
         _took = fit is None or abs(R - _rc) / _rc > 0.30
-        _head = (f"WARNING: the merged limb fit says R={R:.0f}px but the "
-                 f"individual tiers agree on R={_rc:.0f}px "
-                 f"({100 * (R / _rc - 1):+.0f}%). ")
+        _head = (f"[warn] merged limb fit R={R:.0f} px vs tiers "
+                 f"R={_rc:.0f} px "
+                 f"({100 * (R / _rc - 1):+.0f}%): ")
         if _took:
-            progress.log(_head + "Using the tiers' value — the merge probably "
-                         "contains frames of different scenes.", None)
+            progress.log(_head + "tiers' value used (possibly mixed scenes)", None)
             R = float(_rc)
             limb_prof = np.full(720, R, np.float32)
             rms = 0.02 * R
             fit = None
         else:
-            progress.log(_head + "KEEPING the merged fit: it is a per-azimuth "
-                         "measurement and the disagreement is under 30%, where "
-                         "the tiers' single number is not clearly the better "
-                         "one. Check the disc mask on the preview — if it is "
-                         "the wrong size, the tiers were right.", None)
+            progress.log(_head + "merged fit kept (under 30%), check the disc mask", None)
     progress.log(f"lunar limb: center ({cyf:.1f},{cxf:.1f}) R={R:.1f}px", 0.91)
     # The real limb is not a circle: lunar relief, seeing, and the moon's drift
     # between tiers make it wander a few px about the fitted circle. Masks keyed
@@ -6614,11 +6868,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         if _lw:
             ramp = 2.0 * float(_lw["limb_width_p90"])
     except Exception as _e:
-        progress.log(f"limb ramp not measurable ({_e}); disc mask falls back to "
-                     f"the circle-fit rms, which may leave a rim", None)
+        progress.log(f"[warn] limb ramp not measurable ({_e}): disc mask from "
+                     f"circle-fit rms", None)
     if ramp <= 0:
-        progress.log("limb ramp not measurable; disc mask falls back to the "
-                     "circle-fit rms, which may leave a rim", None)
+        progress.log("[warn] limb ramp not measurable: disc mask from the "
+                     "circle-fit rms", None)
     margin = float(np.clip(max(0.8 * rms, 0.9 * ramp), 1.5, 0.08 * R))
     Rmask = float(R + margin)
     progress.log(f"merged limb ramp {ramp:.0f}px (p90) -> disc mask margin "
@@ -6637,14 +6891,29 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         try:
             neutralise_corona_colour(wd, cyf, cxf, R, stats, progress)
         except Exception as e:
-            progress.log(f"corona white balance skipped ({e})", None)
-    # now that the corona's extent is measured, the sky beyond it can be fitted
+            progress.log(f"[warn] corona white balance skipped ({e})", None)
+    # THE SKY, SUBTRACTED (TODO 22, lab 0.24): an additive sky plane fitted
+    # with the corona's own fall-off. Where it is applied it also takes the
+    # sky's gradient (the plane's tilt), so the multiplicative gradient fit
+    # below is not run on top of it -- on a sky-free far field it would fit noise.
+    _skysub_done = False
     try:
-        remove_sky_gradient(wd, cyf, cxf, R, stats.get("corona_extent_R"),
-                            stats, progress)
-        lum = np.load(os.path.join(wd, "hdr_lum.npy"))
+        _ssi = subtract_sky(wd, cyf, cxf, R, stats, progress)
+        _skysub_done = bool(_ssi and _ssi.get("applied"))
+        if _skysub_done:
+            lum = np.load(os.path.join(wd, "hdr_lum.npy"))
     except Exception as e:
-        progress.log(f"sky gradient removal skipped ({e})", None)
+        progress.log(f"[warn] sky subtraction skipped ({e})", None)
+    # now that the corona's extent is measured, the sky beyond it can be fitted
+    if _skysub_done:
+        progress.log("sky gradient: covered by the sky-plane subtraction", None)
+    else:
+        try:
+            remove_sky_gradient(wd, cyf, cxf, R, stats.get("corona_extent_R"),
+                                stats, progress)
+            lum = np.load(os.path.join(wd, "hdr_lum.npy"))
+        except Exception as e:
+            progress.log(f"[warn] sky gradient removal skipped ({e})", None)
     # AFTER the sky fit, for the same reason that fit runs after the white
     # balance: the renderer applies this to the picture the sky fit produced,
     # so the profile has to describe that picture and not the one before it.
@@ -6687,7 +6956,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                 "merged limb 20-80%% %.1f px"
                 % (aq.get("cov_limb", float("nan")),
                    # "rim nan px" is what a GOOD result printed: with the tiers
-                   # agreeing (cov 0.036 on the test set's 360mm) there is no
+                   # agreeing (cov 0.036 on Clifton's 360mm) there is no
                    # disagreement rim to measure a width from, and the nan was
                    # the honest answer wearing an alarming face. Say it.
                    ("%.0f px" % aq["rim_width_px"]
@@ -6697,7 +6966,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             # TIERS THAT DISAGREE IN VALUE AT THE LIMB ARE A SECOND, SEPARATE
             # CAUSE OF RINGING -- and this number is the one that finds it.
             #
-            # a tester's 250 mm set rings, and none of the alignment guards
+            # Clifton Brown's 250 mm set rings, and none of the alignment guards
             # fire on it: network residual 0.66 px, limb spread 3 px, limb-fit
             # rms 0.95 px, track scatter 0/0. Geometrically it is a clean run.
             # What it has is limb variance 0.793 against 0.075, 0.067 and 0.052
@@ -6711,12 +6980,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             #   1.02-1.15 R   19.4 / 9.9     10.9 / 2.5     13.9 / 2.7     15.1 / 4.6
             #   1.15-1.40 R    4.5 / 3.7      1.7 / 2.0      2.1 / 0.7      3.2 / 1.5
             #   1.40-1.80 R    3.2 / 3.0      0.6 / 1.5      0.9 / 0.6      1.9 / 1.3
-            #                 (250mm set / 600mm reference set)
+            #                 (Clifton 250mm / Nico 600mm)
             #
-            # The ringing lives in a band 1.02-1.15 R wide and is 2 to 5.3x
-            # the reference set's, while the merged luminance it is built from
-            # oscillates only 1.4% there. So the filters are amplifying a real
-            # tier disagreement by about ten, not inventing it.
+            # The ringing lives in a band 1.02-1.15 R wide and is 2 to 5.3x his,
+            # while the merged luminance it is built from oscillates only 1.4%
+            # there. So the filters are amplifying a real tier disagreement by
+            # about ten, not inventing it.
             #
             # NAFE is the tell: it is 5.3x worse and it is the one layer that
             # does not use the limb fit or the disc mask at all. So this is not
@@ -6736,33 +7005,18 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
             _cv = aq.get("cov_limb")
             if _cv is not None and np.isfinite(_cv) and _cv > 0.30:
                 progress.log(
-                    "WARNING: the tiers disagree by %.2f (coefficient of "
-                    "variation) at the limb, where a well-behaved set sits near "
-                    "0.05-0.08. They are aligned -- this is a disagreement in "
-                    "BRIGHTNESS, not position, in a rim %.0f px wide just "
-                    "outside the limb. Every detail filter normalises against a "
-                    "local mean, so a disagreement there is amplified into "
-                    "concentric rings: measured at 2-5x the reference set in "
-                    "1.02-1.15 R. The cause is not established -- an earlier "
-                    "build named veiling glare here and that was withdrawn in "
-                    "0.22.17, because the number it rested on came from a "
-                    "contaminated sample."
+                    "[warn] tiers disagree by %.2f (CoV) at the limb (typical "
+                    "0.05-0.08), rim %.0f px: expect concentric rings"
                     % (_cv, aq.get("rim_width_px", float("nan"))), None)
                 stats["limb_variance_bad"] = round(float(_cv), 3)
             _nt = aq.get("cov_limb_unmeasurable")
             if _nt is not None:
                 progress.log(
-                    "the tier-agreement test at the limb is not measurable on "
-                    "this bracket: only %.0f tier(s) hold unclipped signal "
-                    "between 1.00 and 1.10 R and the coefficient of variation "
-                    "needs three. Reported as absent rather than as a number "
-                    "built on a partly clipped tier -- that is what produced a "
-                    "false 0.79 on the 250 mm test set for three releases. A "
-                    "shorter tier at the top of the bracket is what would make "
-                    "it measurable." % _nt, None)
+                    "[warn] tier agreement at the limb not measurable: %.0f "
+                    "unclipped tiers at 1.00-1.10 R, 3 needed" % _nt, None)
         del al
     except Exception as e:
-        progress.log(f"alignment quality not measured ({e})", None)
+        progress.log(f"[warn] alignment quality not measured ({e})", None)
 
     progress.log(f"disc mask radius {Rmask:.1f}px (limb {R:.1f} + {Rmask - R:.1f})", None)
     json.dump({"cy": float(cyf), "cx": float(cxf), "R": float(R),
@@ -6808,11 +7062,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                   crop_origin[1]:crop_origin[1] + lum.shape[1]]
         np.save(lp, _ll)
         del _ll
-        progress.log("long-exposure earthshine stack done", 0.925)
+        progress.log("[ok] long-exposure earthshine stack done", 0.925)
     else:
         if os.path.exists(lp):
             os.remove(lp)
-        progress.log("earthshine disabled — skipping long-exposure stack", 0.925)
+        progress.log("earthshine disabled, no long-exposure stack", 0.925)
 
     # --- COLOR stack for Halpha prominence detection ---
     # ONE tier only: the moon drifts against the corona between tiers, so
@@ -6851,8 +7105,8 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         pgeo = {"cy": float(pf[0]), "cx": float(pf[1]), "R": float(pf[2]),
                 "prof": [float(x) for x in pf[6]]}
         progress.log(f"prominence-tier limb: centre ({pf[0] * 2:.0f},{pf[1] * 2:.0f}) "
-                     f"R={pf[2] * 2:.0f}px — {np.hypot(pf[0] * 2 - cyf, pf[1] * 2 - cxf):.0f}px "
-                     f"from the merged limb (lunar motion between tiers)", None)
+                     f"R={pf[2] * 2:.0f} px, {np.hypot(pf[0] * 2 - cyf, pf[1] * 2 - cxf):.0f} px "
+                     f"from the merged limb", None)
     else:
         pgeo = None
     del plum
@@ -6891,10 +7145,63 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                                   order=1, mode="constant", cval=0)
             return sub[pad:-pad, pad:-pad], valid[pad:-pad, pad:-pad]
 
-        _pl.build_stack(wd, _pl_tiers, _pl_tier_box, cyf, cxf, R,
-                        lum.shape[0], lum.shape[1], progress)
+        if _pl.layer_mode():
+            # THE 0.24 PROMINENCE LAYER: the fast tiers AND any frames in a
+            # short-exposure subfolder (find_short_dir), each registered on the
+            # Sun -- see promlayer.build_short_stack. The short frames are used
+            # for this and for nothing else: they carry no corona worth merging.
+            _items = []
+            for _s in _pl_tiers:
+                def _tget(box, _s=_s):
+                    _rgb, _valid = _pl_tier_box(_s, box)
+                    return _rgb, _valid < 0.5
+                _items.append({"name": f"tier {_s:g}s", "sec": float(_s), "get": _tget})
+            _sd = find_short_dir(folder)
+            _sp = list_raws(_sd) if _sd else []
+            if _sp:
+                progress.log(f"prominence layer: {len(_sp)} frame(s) from "
+                             f"'{os.path.basename(_sd)}' added to the fast tiers", None)
+                stats["short_frames"] = {"dir": os.path.basename(_sd), "n": len(_sp)}
+            for _p in _sp:
+                try:
+                    _sec = float(read_exif(_p)[0])
+                except Exception:
+                    continue
+
+                def _fget(box, _p=_p, _sec=_sec):
+                    by0, by1, bx0, bx1 = box
+                    oy, ox = crop_origin
+                    rf = open_frame(_p)
+                    Y0 = (by0 + oy) - (by0 + oy) % 2; X0 = (bx0 + ox) - (bx0 + ox) % 2
+                    Y1, X1 = Y0 + (by1 - by0) + 2, X0 + (bx1 - bx0) + 2
+                    Hb, Wb = rf.bayer.shape
+                    cfa = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+                    clipm = np.ones((Y1 - Y0, X1 - X0), bool)
+                    yA, yB, xA, xB = max(Y0, 0), min(Y1, Hb), max(X0, 0), min(X1, Wb)
+                    if yB > yA and xB > xA:
+                        cfa[yA - Y0:yB - Y0, xA - X0:xB - X0] = rf.bayer[yA:yB, xA:xB]
+                        cm = cfa_clip_max(cfa)
+                        clipm = cm >= 0.9 * float(rf.sat_level)
+                        clipm[:yA - Y0, :] = True; clipm[yB - Y0:, :] = True
+                        clipm[:, :xA - X0] = True; clipm[:, xB - X0:] = True
+                    del rf
+                    rgb = _cp_apply(_demosaic(cfa, demosaic_method), _cp)
+                    rgb *= wb[None, None, :]
+                    rgb = (rgb.reshape(-1, 3) @ cam2rgb.T).reshape(rgb.shape).astype(np.float32)
+                    rgb /= np.float32(_sec)
+                    dy0, dx0 = (by0 + oy) - Y0, (bx0 + ox) - X0
+                    hh, ww = by1 - by0, bx1 - bx0
+                    return rgb[dy0:dy0 + hh, dx0:dx0 + ww], clipm[dy0:dy0 + hh, dx0:dx0 + ww]
+                _items.append({"name": os.path.basename(_p), "sec": _sec, "get": _fget})
+            if not _pl.build_short_stack(wd, _items, cyf, cxf, R, lum.shape[0], lum.shape[1],
+                                         progress):
+                _pl.build_stack(wd, _pl_tiers, _pl_tier_box, cyf, cxf, R,
+                                lum.shape[0], lum.shape[1], progress)
+        else:
+            _pl.build_stack(wd, _pl_tiers, _pl_tier_box, cyf, cxf, R,
+                            lum.shape[0], lum.shape[1], progress)
     except Exception as _e:
-        progress.log(f"prominence stack for the layer export not built ({_e})", None)
+        progress.log(f"[warn] prominence layer stack not built ({_e})", None)
     del stacks_bayer, stacks_half
 
     # --- detail layers ---
@@ -6975,10 +7282,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
                "fnrgf_preset": str(fnrgf_preset),
                # THESE THREE WERE NEVER WRITTEN, and the server compares all
                # three: intra_lock against a default of "moon" (so the 0.23.8
-               # default "corona" never matched), photo_solve against "chain",
-               # tier_mode against "exposure". Every Start on a folder stacked
-               # with Corona Align or the network solve re-stacked the whole
-               # folder, silently.
+               # default "corona" never matched), photo_solve against "chain"
+               # (so "network" never matched), tier_mode against "exposure".
+               # Every Start on a folder stacked with Corona Align or the
+               # network solve re-stacked the whole folder, silently --
+               # 31 minutes each on the 600 mm set instead of a layer rebuild.
+               # Found 21 Sep 2026 from the cached opts.json, which lacks them.
                "intra_lock": str(intra_lock),
                "photo_solve": str(photo_solve),
                "tier_mode": str(tier_mode),
@@ -6993,16 +7302,41 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
     # a real run the whole Pellett layer was simply absent from the list, and
     # the "steps under 1s" remainder quietly absorbed it. Close the interval
     # before measuring it.
-    progress.log("assembling the run report", None)
+    progress.log("assembling the run report...", None)
     _tm = _timing_summary(progress)
     if _tm:
         stats["timing"] = _tm
-        progress.log("run time " + _fmt_dur(_tm["total_s"]) + " — slowest: "
-                     + "; ".join(f"{m} {_fmt_dur(d)}" for d, m in _tm["slowest"]),
-                     None)
+        progress.log("run time " + _fmt_dur(_tm["total_s"]), None)
     txt = _report.write(wd, stats)
-    for line in txt.split("\n"):
-        progress.log(line, None)
+    progress.log("[ok] report written: " + os.path.join(wd, "report.txt"), None)
+    # A few headline numbers from stats; the full report is in the file.
+    try:
+        _st = (stats.get("tiers") or []) if txt else []
+        if _st:
+            _sx = [float(t["sec"]) for t in _st]
+            progress.log(f"{len(_st)} tiers, {sum(int(t['n']) for t in _st)}/"
+                         f"{sum(int(t['n_avail']) for t in _st)} frames, "
+                         f"{_exp_name(min(_sx))} to {_exp_name(max(_sx))} "
+                         f"({np.log2(max(_sx) / min(_sx)):.1f} EV)", None)
+        _g = stats.get("geometry") or {}
+        if _g:
+            progress.log(f"limb: centre ({_g['cy']:.1f},{_g['cx']:.1f}) "
+                         f"R={_g['R']:.1f} px, rms {_g['rms']:.2f} px", None)
+        if stats.get("align_residual") is not None:
+            progress.log(f"alignment residual {stats['align_residual']:.2f} px "
+                         f"(half-res)", None)
+        _fl = stats.get("flat") or {}
+        if _fl.get("applied"):
+            _ft = "applied"
+        elif _fl.get("dir"):
+            _ft = "not applied (" + str(_fl.get("error", "no flat built")) + ")"
+        else:
+            _ft = "none"
+        progress.log("flat: " + _ft, None)
+        if stats.get("W"):
+            progress.log(f"image {stats['W']}x{stats['H']} px", None)
+    except Exception:
+        pass
     # Written every run, before the "complete" line, so a tester reporting a
     # problem already has the one file that makes it diagnosable. See
     # diagnostics.py for what is and is not in it -- the short version is
@@ -7012,8 +7346,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="fine",
         _diag.write_bundle(wd, folder, stats, progress)
     except Exception:
         pass
-    progress.log("pipeline complete — summary above, also in "
-                 ".eclipseforgehdr/report.txt", 1.0)
+    progress.log("[ok] pipeline complete", 1.0)
     progress.done = True
 
 
@@ -7203,10 +7536,10 @@ def prepare_contact(folder, raw_path, progress):
             _m = np.load(_mf)
             if _m.shape == rf.bayer.shape:
                 rf.bayer /= _m
-                progress.log("contact frame: flat correction applied", None)
+                progress.log("[ok] contact frame: flat correction applied", None)
             del _m
         except Exception as e:
-            progress.log(f"contact frame: flat not applied ({e})", None)
+            progress.log(f"[warn] contact frame: flat not applied ({e})", None)
     rgb = _demosaic(rf.bayer, _o.get("demosaic", "mhc"))
     _cwb, _ = pick_wb(rf, _o.get("wb_source", "camera"))
     rgb *= _cwb[None, None, :]
@@ -7223,7 +7556,7 @@ def prepare_contact(folder, raw_path, progress):
     # THE LIMB FIT CANNOT BE TRUSTED ON A CONTACT FRAME, SO IT IS CHECKED.
     #
     # A totality frame is a dark disc inside a corona, which is what fit_limb
-    # was written for. A 2nd/3rd-contact frame is not that. 99.4% of the reference set's
+    # was written for. A 2nd/3rd-contact frame is not that. 99.4% of Nico's
     # P1072722 is below the noise -- the sky is dark, the corona is short-
     # exposed to nothing, and the only structure in the frame is the blazing
     # crescent. A limb finder given that fits the CRESCENT'S arc, because it is
@@ -7248,12 +7581,9 @@ def prepare_contact(folder, raw_path, progress):
     _mv = float(np.hypot(dy, dx))
     _bad = (_mv > 0.25 * geo["R"]) or not (0.8 < _rat < 1.25)
     if _bad:
-        progress.log(f"contact frame: the limb fit wants to move it {_mv:.0f}px and "
-                     f"scale it x{_rat:.3f} (it fitted R={R:.0f}px against the "
-                     f"composite's {geo['R']:.0f}px). That is far more than a tracked "
-                     f"sequence needs, so the fit found the bead rather than the Moon "
-                     f"and is being ignored — the frame is overlaid AS SHOT. Use the "
-                     f"ring offset and size sliders if it needs nudging.", None)
+        progress.log(f"[warn] contact frame: limb fit move {_mv:.0f} px, scale "
+                     f"x{_rat:.3f} (R={R:.0f} vs {geo['R']:.0f} px) implausible, "
+                     f"overlaid as shot", None)
         dy, dx, sc = 0.0, 0.0, 1.0
     else:
         sc = _rat
@@ -7272,7 +7602,7 @@ def prepare_contact(folder, raw_path, progress):
     # OUTSIDE the lunar limb -- the Moon is what is hiding the rest of it. So if
     # the aligned frame's bright arc lands inside the composite's disc, the
     # registration failed, whatever the fit residuals said. This is cheap, it is
-    # geometry rather than taste, and it is what was missing when the reference set's ring
+    # geometry rather than taste, and it is what was missing when Nico's ring
     # came out 327px off centre with nothing in the log to say so.
     try:
         _al = 0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2]
@@ -7288,19 +7618,15 @@ def prepare_contact(folder, raw_path, progress):
             _sol, *_ = np.linalg.lstsq(_A, _X * _X + _Y * _Y, rcond=None)
             _fx, _fy = _sol[0] / 2, _sol[1] / 2
             _fr = float(np.sqrt(max(_sol[2] + _fx * _fx + _fy * _fy, 0.0)))
-            progress.log(f"contact frame: its bright arc fits a circle of R={_fr:.0f}px "
-                         f"centred {np.hypot(_fy - geo['cy'], _fx - geo['cx']):.0f}px from "
-                         f"the composite disc (limb R={geo['R']:.0f}px); arc sits at "
-                         f"{_med:.0f}px from that centre", None)
+            progress.log(f"contact frame: arc circle R={_fr:.0f} px, centre "
+                         f"{np.hypot(_fy - geo['cy'], _fx - geo['cx']):.0f} px from the disc "
+                         f"(limb R={geo['R']:.0f} px), arc at {_med:.0f} px", None)
             if _med < 0.90 * geo["R"]:
-                progress.log("contact frame: THE RING LANDS INSIDE THE LUNAR DISC. A "
-                             "crescent of photosphere cannot be there, so this frame is "
-                             "not registered to the composite. The ring sliders cannot "
-                             "correct an error this size — the limb fit on the contact "
-                             "frame is what needs looking at.", None)
+                progress.log("[warn] contact frame: ring lands inside the lunar disc, "
+                             "not registered; check the contact-frame limb fit", None)
         del _al, _s, _m
     except Exception as _e:
-        progress.log(f"contact frame: could not check the ring geometry ({_e})", None)
+        progress.log(f"[warn] contact frame: ring geometry not checked ({_e})", None)
     top = np.percentile(lum, 99.9)
     disp = np.clip(rgb / max(top, 1e-6), 0, 1) ** (1 / 2.2)
     # match the composite frame size if the sensor crop differs slightly
@@ -7308,7 +7634,7 @@ def prepare_contact(folder, raw_path, progress):
     out = np.zeros((Hc, Wc, 3), np.float32)
     out[:min(H, Hc), :min(W, Wc)] = disp[:min(H, Hc), :min(W, Wc)]
     np.save(os.path.join(wd, "contact_rgb.npy"), out.astype(np.float16))
-    progress.log("contact frame ready", 1.0)
+    progress.log("[ok] contact frame ready", 1.0)
 
 
 def fit_limb_band(lum, cy0, cx0, R0, band=36, n_ang=720):

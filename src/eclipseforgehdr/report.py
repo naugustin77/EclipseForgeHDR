@@ -514,6 +514,38 @@ def build(stats):
               f"({_fl['rejected'][0]['file']} {_fl['rejected'][0]['why']})")
     elif _fl.get("dir"):
         A(f"flat field   : NOT applied — {_fl.get('error', 'unavailable')}")
+    # frame brightness inside the tiers (transparency), lab 0.24
+    _fgs = [(k, v.get("frame_gain")) for k, v in (stats.get("quality") or {}).items()
+            if isinstance(v, dict) and v.get("frame_gain")]
+    if _fgs:
+        _spr = []; _out = 0
+        for _k, _g in _fgs:
+            _vals = [x for x in _g.values() if x is not None]
+            _out += sum(1 for x in _g.values() if x is None)
+            if _vals:
+                _spr.append(100 * (max(_vals) / min(_vals) - 1))
+        if _spr:
+            A(f"frame bright.: spread within a tier up to {max(_spr):.1f}% "
+              f"(median {float(np.median(_spr)):.1f}%), corrected per frame"
+              + (f"; {_out} frame(s) left out as cloud/haze (>15% off the median)" if _out else ""))
+    # sky subtraction (TODO 22, lab 0.24)
+    _ss = stats.get("sky_sub") or {}
+    if _ss:
+        if _ss.get("applied"):
+            _sk = _ss.get("sky") or [0, 0, 0]
+            _b0 = (_ss.get("BR_1.5_2_2.5_3R_before") or [0, 0, 0, 0])
+            _b1 = (_ss.get("BR_1.5_2_2.5_3R_after") or [0, 0, 0, 0])
+            A(f"sky          : subtracted (R {_sk[0]:.4g}, G {_sk[1]:.4g}, B {_sk[2]:.4g} plus a tilt), "
+              f"fitted with the corona's fall-off; the corona equals the sky at "
+              f"{_ss.get('r_cross_R', 0):.1f} R; B/R at 2 R {_b0[1]:.2f} -> {_b1[1]:.2f}, at 3 R "
+              f"{_b0[3]:.2f} -> {_b1[3]:.2f}; floor {_ss.get('neutral_floor', 0):.4g} kept, in the corona's colour")
+        else:
+            A(f"sky          : not subtracted -- {_ss.get('why', 'skipped')}")
+    # the short-exposure subfolder, listed beside the calibration frames
+    _sf = stats.get("short_frames") or {}
+    if _sf.get("n"):
+        A(f"short frames : {_sf['n']} from '{_sf.get('dir', '')}/' -- prominence "
+          "layer only, not in the corona stack")
 
     A("")
     A("MEASURED")
@@ -670,11 +702,6 @@ def build(stats):
             A("white balance: camera (as shot) multipliers and the camera->sRGB "
               "matrix, per frame")
         A("hot pixels   : not repaired")
-    _lr = stats.get("layer_recipe")
-    if isinstance(_lr, dict) and _lr.get("build"):
-        A("detail layers: recipe %s — prominence gate and mask also from the merge's "
-          "red excess; MGN's prominence holes feathered (%s px)"
-          % (_lr["build"], stats.get("prom_feather_px", "-")))
         A("frames used  : every frame of every group, averaged; a raw-saturated "
           "pixel is left out")
         A("merge weight : a hat on the pixel value — zero at the noise floor, "
@@ -685,7 +712,6 @@ def build(stats):
           "exposure-time term")
     else:
         A(f"denoise      : {o.get('denoise', '?')}")
-        A(f"earthshine   : {'on' if o.get('earthshine') else 'off'}")
         _sel = [("intra-tier   ", "intra_lock", "corona",
                  {"corona": "Corona Align (the Moon is ignored)",
                   "moon": "Moon Align (the lunar edge, pre-0.23.8)",
@@ -713,9 +739,12 @@ def build(stats):
                 ("colour planes", "colour_planes", "auto",
                  {"off": "as recorded",
                   "auto": "red and blue aligned to green (measured on the limb)"})]
+        # the defaults changed on 2026-10-07; a key missing from an old cache
+        # still means the old behaviour, so the fallback stays the old value
+        _now = {"stack_combine": "clip", "fnrgf_preset": "published", "photo_solve": "network"}
         for _lab, _key, _dflt, _names in _sel:
             _v = str(o.get(_key, _dflt))
-            _note = "" if _v == _dflt else "   [not the default]"
+            _note = "" if _v == _now.get(_key, _dflt) else "   [not the default]"
             A(f"{_lab}: {_names.get(_v, _v)}{_note}")
         _cpm = stats.get("colour_planes")
         if isinstance(_cpm, dict) and "R" in _cpm:
@@ -735,6 +764,25 @@ def build(stats):
             A(f"frames used  : "
               f"{_fm.get(o.get('frames', 'all'), o.get('frames', 'all'))}")
 
+    _lr = stats.get("layer_recipe")
+    if isinstance(_lr, dict):
+        _st = _lr.get("structure") or {}
+        _ex = _st.get("extent_R")
+        if _ex and _st.get("bands_px"):
+            A("structure    : radial against tangential power per band, measured on "
+              "this stack for the MGN fade (bands up to 64 px only):")
+            A("             : " + ", ".join(
+                "%d-%d px %s" % (b[0], b[1], "to the edge" if e is None else
+                                 ("nowhere" if e <= 0 else "to %.1f R" % e))
+                for b, e in zip(_st["bands_px"], _ex)))
+        _sm = _lr.get("summary")
+        if isinstance(_sm, list) and _sm:
+            A("detail layers: recipe %s — %s" % (_lr.get("build", "?"), _sm[0]))
+            for _ln in _sm[1:]:
+                A("             : " + _ln)
+        else:
+            # a report written by recipes 1-3, which carried no summary
+            A("detail layers: recipe %s (0.23.9)" % _lr.get("build", "?"))
     A("")
     A("METHODS")
     A("-" * 60)

@@ -8,6 +8,13 @@ from scipy import ndimage
 
 from .nafe import nafe_vn
 
+NAFE_BUILD = False     # 2026-10-08: NAFE removed (blobs with Denoise Off); True builds it again
+
+
+class _NafeOff(Exception):
+    pass
+
+
 # NAFE-VN defaults. w and gamma are the published working values -- Habbal,
 # Druckmuller 2013 (ApJS 207:25) and Druckmuller & Druckmullerova 2014 (LNCS
 # 8466 p.262). Published working values, now checked against both primaries:
@@ -29,6 +36,10 @@ NAFE_K = 128          # histogram levels. NOT A PAPER VALUE -- both papers bin
                       # once leaned on is real -- 2013 p.2, 2014 p.265 -- but it
                       # argues the CONTINUOUS approximation is safe, which is an
                       # argument for many levels, not for 128.)
+                      # 0.23.9 recipes 1-3 used 512 with the flattened input and
+                      # a corona-scaled axis (NAFE_K_LF); recipe 4 is back to
+                      # 0.23.8's input and this value -- see LAYER_BUILD.
+NAFE_K_LF = 512       # levels for the ECLIPSEFORGE_NAFE_INPUT=lf variant
 NAFE_W = 0.2          # the paper's eq.2 weight; the stored layer is E, so this
                       # is unused here -- nafeMix in render.py is the live w
 NAFE_GAMMA = 2.4      # DEAD: only used on nafe_vn's combine=True branch, and the
@@ -137,7 +148,7 @@ NAFE_GRID = 8
 # does not faithfully represent; the kernel correction does not. One change,
 # and the sweep is worth repeating on real data.
 # FNRGF: three published behaviours that were implemented and unreachable until
-# 0.23.2. Each was then MEASURED on the reference set's 600 mm bracket, and the measurements
+# 0.23.2. Each was then MEASURED on Nico's 600 mm bracket, and the measurements
 # disagree with the literature on one of them. Defaults follow the measurement.
 #
 # THE RING ARTIFACT the first two address is described by the filter's own
@@ -176,19 +187,144 @@ FNRGF_IMPULSE = 0     # OFF, against the literature, on measurement.
                       # which is the case the thesis is describing.
 FNRGF_NOISE_FRAC = 0.10   # ON. sqrt(Vn) as a fraction of the measured
                       # outer-field residual (thesis eqs. 6.11-6.13; her band is
-                      # 10-15%, matching NAFE's independent tests on AIA data).
-                      # Held at her LOWER bound because we denoise before this
-                      # runs, so the noise it sees is less than the thesis
-                      # assumes. Structure spread against outer-field spread,
-                      # higher is better:
-                      #
-                      #     0.00  0.841     0.10  0.847     0.30  0.893
-                      #     0.05  0.843     0.15  0.855
-                      #
-                      # Monotone and small. Taken because the direction is right
-                      # and the floor it supplements is one this file already
-                      # describes as the wrong shape. 0 disables it.
+                      # 10-15%). 0.23.9 recipes 1-3 used 2.0, which cut the
+                      # layer's amplitude to 0.57 at 3-4 R. That is not a noise
+                      # filter: Vn is added to the variance of every segment, so
+                      # it lowers structure and noise alike -- and the outer
+                      # corona's structure is real at 64-256 px out to 4 R
+                      # (along-ray coherence 0.42-0.95 on the reference set).
+                      # Nico: "FNRGF lost contrast". Back to 0.10 in recipe 4;
+                      # ECLIPSEFORGE_FNRGF_VN overrides. 0 disables it.
 NAFE_FLATTEN_R = 0.08
+NAFE_TAIL = 0.10      # LAYER_BUILD 11: the 0.1 % beyond each end of the level axis is
+                      # rolled (tanh) into this extra fraction of it instead of clipped
+
+# --- 0.23.9: what the detail layers do about NOISE, measured ----------------
+# On the 600 mm reference stack, per band and per radius, the ratio of
+# spectral power in radial streaks to power in tangential arcs (isotropic
+# noise gives 1, coronal structure is radial and gives >> 1):
+#
+#     r/R    2-4px   4-8px   8-16px  16-32px  32-64px
+#     1.40    1.01    0.97    1.04     3.68     7.28
+#     1.80    1.01    0.99    0.95     1.78    19.06
+#     2.40    1.01    0.97    0.99     1.12     3.67
+#     3.20    0.99    1.03    1.01     1.01     1.01
+#
+# Below 16 px this stack carries NO coherent structure at any radius; beyond
+# 2.4 R nothing below 32 px; beyond 3 R nothing at all up to 64 px. That is
+# the signal-to-noise of ~40 frames through a 95 mm aperture, and no filter
+# changes it. What a filter can do is stop presenting that noise as detail:
+#
+#  * MGN band-limits its coarse terms. Morgan & Druckmuller's term at scale w
+#    is (I - B_w) / S_w, and I - B_w carries every pixel of noise whatever w
+#    is, so all six terms pass the same grain and the layer is grainy at every
+#    radius. From MGN_BANDLIMIT_MIN_R up, the residual is taken from the image
+#    pre-blurred at MGN_BANDLIMIT x the scale: each scale sees its own band.
+#    Reference set, grain (sub-3 px rms) / mid-band (3-12 px rms):
+#        1.1-1.5 R   0.0180/0.0318  ->  0.0124/0.0287
+#        1.5-2 R     0.0093/0.0147  ->  0.0049/0.0117
+#        3-4 R       0.0125/0.0063  ->  0.0062/0.0035
+#    Structure at 1.1-1.5 R within 10%, grain down a third to a half.
+#  * MGN fades its fine scales with radius (MGN_FADE), following the table:
+#    scales under 4 px go from 1.3 to 2.5 R, under 8 px from 1.6 to 3 R, under
+#    16 px from 2 to 4 R, 16 px and up never (recipe 2 measures these ends on
+#    the stack itself, see structure_extent). A faded term contributes
+#    nothing, so the layer tapers. Outer grain 0.0125 -> 0.0004; nothing
+#    inside 1.3 R moves.
+#  * FNRGF and the tangential filter take their input through a radius-growing
+#    isotropic blur (OUTER_BLUR_R at OUTER_BLUR_RANGE[1], zero inside
+#    OUTER_BLUR_RANGE[0]). Isotropic on purpose: a first version smoothed along
+#    the radius only, and MGN turned the smoothed noise into radial streaks
+#    that were not there. FNRGF grain 1.5-2 R 0.018 -> 0.008, 3-4 R 0.40 -> 0.02.
+#  * NAFE's level axis is the corona's own range (see build_layers); the old
+#    axis was set by the limb residual and left the noise adaptivity inert.
+# All are lab constants with environment overrides for A/B runs; a layer-only
+# rebuild (LAYER_BUILD) applies them to a cached stack without re-stacking.
+#
+# RECIPE 4 SWITCHES ALL OF THE ABOVE OFF, after Nico's verdict on recipe 3:
+# outer corona washed out, inner not sharp beyond a small radius, FNRGF flat,
+# MGN empty past a small radius. A second, independent test -- along-ray
+# coherence: average the band-passed image over 32-64 px of radius and
+# correlate adjacent segments (noise -> 0, rays -> 1), layerlab/ray_coherence.py
+# -- agrees with the table above that 2-16 px carries nothing coherent at
+# 1.3-4 R (corr 0.01-0.06). But it also shows what the recipes cut that WAS
+# real:
+#
+#     r/R     16-32px  32-64px  64-128px  128-256px    (corr, 64 px segments)
+#     1.6      0.34     0.27     0.69      0.78
+#     2.4      0.08     0.56     0.75      0.95
+#     3.2      0.09     0.15     0.75      0.95
+#     4.0      0.00     0.02     0.42      0.83
+#
+#  * the fade mapped an MGN scale sigma to the period band sigma..2 sigma. A
+#    Gaussian high-pass at sigma passes periods up to ~5 sigma, so the 5 and
+#    9.9 px terms carry the 16-32 px band, coherent to 2.4 R -- fading them
+#    from 1.3 and 2.0 R cut it ("not sharp beyond a small radius");
+#  * the band-limit pre-blurred the 19.9 and 39.8 px terms at 5 and 10 px,
+#    which takes 11-38% off 64 px periods;
+#  * the FNRGF noise dose lowered the whole outer field, structure included;
+#  * NAFE's fade followed the 16-32 px band, but NAFE carries every scale, so
+#    it removed the 64-256 px streamers beyond 2.9 R with the noise.
+# The table above (structure_extent) never looked past 64 px, which is where
+# the outer corona is. Kept, with the fade and the blur, behind their
+# switches: ECLIPSEFORGE_MGN_BL=0.25 ECLIPSEFORGE_MGN_FADE=1
+# ECLIPSEFORGE_OUTER_BLUR=0.006 ECLIPSEFORGE_FNRGF_VN=2 ECLIPSEFORGE_NAFE_INPUT=lf
+# reproduce recipe 3.
+MGN_BANDLIMIT = 0.0         # pre-blur sigma as a fraction of the scale; 0 = off (recipe 4)
+MGN_BANDLIMIT_MIN_R = 0.013 # scales from here up are band-limited (8 px at R=618)
+MGN_FADE = False            # fade fine scales with radius (recipe 4: off)
+OUTER_BLUR_R = 0.0          # recipe 4: off; 0.006 in recipes 1-3. FNRGF/tangential input blur sigma at OUTER_BLUR_RANGE[1], in R (3.7 px at R=618)
+OUTER_BLUR_RANGE = (1.3, 3.0)
+NAFE_INPUT = "flatten"      # "flatten" = 0.23.8's input (recipe 4); "lf" = recipes 1-3
+PROM_FEATHER_PX = 4.0       # 0.23.11 lab: soft edge on MGN's prominence holes, see _prom_feather
+ALONG_SIGMA_R = 0.010       # along-filament smoothing, sigma in units of R (see build_layers)
+LAYER_BUILD = 18            # 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
+                            # them from a cached stack when a run's number is older
+
+
+def _envf(name, default):
+    try:
+        return float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def radial_scale_blur(L, r, R, s_max, r_a=1.3, r_b=3.0, valid=None):
+    """Isotropic Gaussian blur whose sigma grows linearly with radius: 0 up to
+    r_a * R, s_max at r_b * R and beyond. Built from four fixed-sigma blurs
+    blended by radius (scale-space interpolation), so it costs four filters
+    whatever the image size. `valid` (True = keep) makes it a normalized
+    convolution, so the disc does not bleed into the corona next to it."""
+    s_max = float(s_max)
+    if s_max <= 0.0:
+        return L
+    L = np.asarray(L, np.float32)
+    frac = np.clip((r / R - r_a) / max(r_b - r_a, 1e-6), 0.0, 1.0).astype(np.float32)
+    sig = frac * s_max
+    levels = [0.0, s_max / 3.0, 2.0 * s_max / 3.0, s_max]
+    if valid is not None:
+        m = valid.astype(np.float32)
+        Lm = L * m
+    out = np.zeros_like(L)
+    wtot = np.zeros_like(L)
+    for i, s in enumerate(levels):
+        if s <= 0.0:
+            b = L
+        elif valid is None:
+            b = ndimage.gaussian_filter(L, s)
+        else:
+            b = ndimage.gaussian_filter(Lm, s) / np.maximum(ndimage.gaussian_filter(m, s), 1e-3)
+        lo = levels[i - 1] if i > 0 else -1.0
+        hi = levels[i + 1] if i + 1 < len(levels) else s_max + 1.0
+        w = np.where(sig <= s, np.clip((sig - lo) / max(s - lo, 1e-6), 0, 1),
+                     np.clip((hi - sig) / max(hi - s, 1e-6), 0, 1)).astype(np.float32)
+        out += w * b
+        wtot += w
+        del b, w
+    out /= np.maximum(wtot, 1e-6)
+    if valid is not None:
+        out = np.where(valid, out, L)
+    return out.astype(np.float32)
 
 # --- progress weighting for the detail stage -------------------------------
 # The stage used to split its band of the progress bar evenly by step, and the
@@ -224,19 +360,26 @@ NAFE_FLATTEN_R = 0.08
 # summary, which is how these get corrected against real cameras.
 _DETAIL_BAND = (0.935, 1.0)
 _DETAIL_W = {                 # in pipeline order -- dict order is the order
-    "denoise":    18.0,
-    "mgn":       198.0,
-    "fnrgf":      23.0,
-    "nafe":       56.0,
-    "inner_bg":   68.0,       # geometry, photon floor, Fourier background
-    "inner_raw": 452.0,       # first multiscale pass
-    "inner_dn":   25.0,       # denoise of the short stack
-    "inner_cln": 457.0,       # second multiscale pass
-    "prom":        4.0,
-    "promdet":     3.0,
-    "mgn_fine":   99.0,       # same filter, three scales instead of six
-    "pellett":    32.0,
-    "earth":      20.0,       # not measured -- placeholder
+    # 2026-10-07: re-ordered to the order the steps actually run in (MGN fine
+    # follows MGN; it sat near the end, so the bar jumped to 95% within
+    # seconds) and partial convolution added -- the largest step of the stage,
+    # missing from the table, so the bar sat at 98% for most of the run.
+    # Seconds from Clifton's 250 mm run (24 Mpx, 2026-10-07 report); partial
+    # convolution set to about half its pre-FFT cost there.
+    "denoise":     2.0,
+    "mgn":         4.0,
+    "mgn_fine":    3.0,
+    "fnrgf":       3.0,
+    "nafe":        4.0,
+    "hill":      400.0,       # partial convolution; its radial bands advance the bar
+    "inner_bg":    3.0,
+    "inner_raw":  35.0,       # first multiscale pass
+    "inner_dn":    2.0,       # denoise of the short stack
+    "inner_cln":  34.0,       # second multiscale pass
+    "prom":        2.0,
+    "promdet":     2.0,
+    "pellett":     3.0,
+    "earth":       2.0,
 }
 
 
@@ -293,7 +436,7 @@ def radial_profile_map(L, r, valid, smooth=2.0):
                                    order=1, mode="nearest").reshape(r.shape)
 
 
-def fourier_background(L, r, cy, cx, r0, order=2, na=360, smooth=6.0):
+def fourier_background(L, r, cy, cx, r0, order=2, na=360, smooth=6.0, dense=False):
     """Low-order-in-azimuth radial background mu(r,theta) of log luminance.
 
     MGN needs its input flattened first, or the corona's own envelope dominates
@@ -316,8 +459,25 @@ def fourier_background(L, r, cy, cx, r0, order=2, na=360, smooth=6.0):
     cov_r = np.zeros(nr, np.float32)
     for i in range(nr):
         rad = r0 + i
-        ys = cy + rad * sa
-        xs = cx + rad * ca
+        # DENSE (MGN ring fix, 2026-10-08): fit each ring from every pixel on
+        # it (one sample per px of arc) instead of 360 samples. With 360 the
+        # fit of an order-6 trend to a noise-normalised layer carried
+        # sigma*sqrt(13/360) of noise per ring, independent from ring to ring
+        # and only 2 px smoothed: subtracted from the layer it printed
+        # concentric arcs, 3-6x the noise's own power at 15-60 px periods in
+        # the far field. The trend is still evaluated on the 360 grid.
+        if dense:
+            nai = max(na, int(2 * np.pi * rad))
+            angi = np.linspace(0, 2 * np.pi, nai, endpoint=False)
+            sai, cai = np.sin(angi), np.cos(angi)
+            colsi = [np.ones(nai)]
+            for m in range(1, order + 1):
+                colsi += [np.cos(m * angi), np.sin(m * angi)]
+            Ai = np.stack(colsi, 1)
+        else:
+            nai, sai, cai, Ai = na, sa, ca, Adm
+        ys = cy + rad * sai
+        xs = cx + rad * cai
         ok = (ys >= 0) & (ys <= H - 1) & (xs >= 0) & (xs <= W - 1)
         nok = int(ok.sum())
         if nok < 24:
@@ -327,11 +487,11 @@ def fourier_background(L, r, cy, cx, r0, order=2, na=360, smooth=6.0):
         # damp the harmonics CONTINUOUSLY as coverage falls, instead of dropping
         # the order in integer steps: a step changes mu discontinuously from one
         # ring to the next and paints a hard concentric circle into the output
-        cov = nok / float(na)
+        cov = nok / float(nai)
         cov_r[i] = cov
         lam = 1e-4 / max(cov, 1e-3) ** 4
         rg = np.diag([0.0] + [lam * ((m + 1) // 2) ** 2 for m in range(1, nc)])
-        A = Adm[ok]
+        A = Ai[ok]
         v = ndimage.map_coordinates(L, [ys[ok], xs[ok]], order=1)
         w = np.ones(nok)
         for _ in range(3):
@@ -353,10 +513,142 @@ def fourier_background(L, r, cy, cx, r0, order=2, na=360, smooth=6.0):
                                    mode="nearest").reshape(H, W)
 
 
+STRUCT_BANDS = ((2, 4), (4, 8), (8, 16), (16, 32), (32, 64))   # px, period
+STRUCT_RINGS = (1.15, 1.4, 1.7, 2.0, 2.4, 2.8, 3.2, 3.6, 4.0)   # in R
+STRUCT_MIN = 1.5        # radial/tangential power ratio that counts as structure
+
+
+def structure_extent(L, r, R, cy, cx, valid, n=256, angles=18):
+    """WHERE THIS STACK CARRIES CORONAL STRUCTURE, PER SCALE (0.23.9).
+
+    For each band of STRUCT_BANDS and each ring of STRUCT_RINGS, patches of n
+    px around the ring are Fourier-transformed and the power with wave-vector
+    across the radial direction (radial streaks -- coronal structure) is
+    divided by the power along it (tangential arcs). Isotropic noise gives 1
+    whatever its correlation; demosaic and denoise texture too, which is what
+    fools a band-pass-slope test such as resolution_floor. The corona is
+    radial and gives well over 1. The extent of a band is the outermost ring
+    where the median ratio over the angles is still >= STRUCT_MIN.
+
+    Returns (extents, table): extents[i] is the extent of band i in R, 0.0
+    when no ring qualifies, or None when the band is still structured at the
+    outermost ring that fits in the frame (no end found -- never fade); table
+    is the ratio per band and ring for the log and the report.
+
+    This is the one measurement here that is ABOUT THE DATA rather than about
+    a formula: a bigger aperture, more frames or better seeing move the
+    extents outward and the fine bands come alive; a small lens moves them
+    in. Plate scale enters through R, exposure through the noise -- nothing
+    is read from EXIF, because seeing, focus, tracking and the merge are what
+    set the outcome and none of them is in a header."""
+    H, W = L.shape
+    fy = np.fft.fftfreq(n)[:, None]
+    fx = np.fft.fftfreq(n)[None, :]
+    fr = np.hypot(fx, fy)
+    fang = np.arctan2(fy, fx)
+    with np.errstate(divide="ignore"):
+        per = 1.0 / fr
+    han = np.hanning(n)[:, None] * np.hanning(n)[None, :]
+    table = {}
+    for rr in STRUCT_RINGS:
+        rows = []
+        for ai in range(angles):
+            ang = 2.0 * np.pi * ai / angles
+            px, py = cx + rr * R * np.cos(ang), cy + rr * R * np.sin(ang)
+            y0, x0 = int(py - n / 2), int(px - n / 2)
+            if y0 < 0 or x0 < 0 or y0 + n > H or x0 + n > W:
+                continue
+            if valid is not None and not valid[y0:y0 + n, x0:x0 + n].all():
+                continue
+            C = L[y0:y0 + n, x0:x0 + n].astype(np.float64)
+            C = (C - ndimage.gaussian_filter(C, 40.0)) * han
+            P = np.abs(np.fft.fft2(C)) ** 2
+            d = np.abs(((fang - ang) + np.pi / 2) % np.pi - np.pi / 2)
+            row = []
+            for a, b in STRUCT_BANDS:
+                band = (per >= a) & (per < b)
+                along = P[band & (d < np.radians(25))].sum()
+                across = P[band & (d > np.radians(65))].sum()
+                row.append(across / max(along, 1e-30))
+            rows.append(row)
+        if len(rows) >= max(4, angles // 3):
+            table[rr] = [float(v) for v in np.median(np.array(rows), axis=0)]
+    extents = []
+    for bi in range(len(STRUCT_BANDS)):
+        rings = sorted(table)
+        if not rings:
+            extents.append(None)
+            continue
+        last = 0.0
+        for rr in rings:
+            if table[rr][bi] >= STRUCT_MIN:
+                last = rr
+        if last >= rings[-1] - 1e-9:
+            extents.append(None)          # structured out to the edge: never fade
+        else:
+            extents.append(float(last))
+    return extents, table
+
+
+def structure_band(scale_px):
+    """Which STRUCT_BANDS entry an MGN scale (Gaussian sigma) lives in: the
+    residual from a blur of sigma s carries features of about 2 s across."""
+    p = 2.0 * float(scale_px)
+    for i, (a, b) in enumerate(STRUCT_BANDS):
+        if p < b:
+            return i
+    return None
+
+
+def mgn_fade_map(scale_px, r, R, extents=None):
+    """0.23.9: per-scale radial weight for MGN. None = the scale is always on.
+
+    With `extents` (from structure_extent) the fade is MEASURED on this stack:
+    a scale stays at full weight to 0.3 R beyond the outermost ring where its
+    band still shows coronal structure, then fades to zero over 0.9 R. A band
+    with structure to the edge of the frame never fades; a band with none
+    anywhere fades from 1.3 to 2.2 R -- never inside 1.3 R, because the test
+    is blind to the loops and plumes at the limb (tangential tops, prominence
+    residue) and the inner corona is not the place to guess.
+
+    Without `extents`, the thresholds are the reference set's (R = 618 px)."""
+    if extents is not None:
+        bi = structure_band(scale_px)
+        if bi is None or bi >= len(extents):
+            return None
+        ext = extents[bi]
+        if ext is None:
+            return None
+        ra = max(ext + 0.3, 1.3)
+        rb = ra + 0.9
+        return np.clip((rb - r / R) / (rb - ra), 0.0, 1.0).astype(np.float32)
+    u = scale_px * 618.0 / max(float(R), 1.0)
+    if u >= 16.0:
+        return None
+    if u >= 8.0:
+        ra, rb = 2.0, 4.0
+    elif u >= 4.0:
+        ra, rb = 1.6, 3.0
+    else:
+        ra, rb = 1.3, 2.5
+    return np.clip((rb - r / R) / (rb - ra), 0.0, 1.0).astype(np.float32)
+
+
 def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
         gains=(0.907, 0.976, 0.994, 0.998, 0.999, 1.0), k=0.7, noise_k=2.0,
-        global_wt=0.12, global_gamma=3.2, norm_span=None, valid=None):
+        global_wt=0.12, global_gamma=3.2, norm_span=None, valid=None,
+        bandlimit=0.0, bandlimit_min=0.0, fade=None):
     """Multiscale Gaussian Normalization (Morgan & Druckmuller 2014).
+
+    0.23.9 additions, both off by default so the inner-corona passes are what
+    they were (see the NOISE block above for the measurements):
+    `bandlimit`     for scales >= `bandlimit_min` px, the residual I - B_w is
+                    taken from the image pre-blurred at bandlimit * w, so a
+                    coarse term no longer carries every pixel of noise.
+    `fade`          one weight map (or None = always on) per scale, from
+                    mgn_fade_map; each scale's term is multiplied by it, so a
+                    faded scale contributes nothing and the layer tapers
+                    towards flat 0.5 where every scale has faded.
 
     Scales and per-scale gains follow the paper: w = 1.25, 2.5, 5, 10, 20, 40,
     and g_i from its Fig. 4 (the mean local standard deviation of pure noise at
@@ -406,21 +698,46 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
         xn *= m
     fl = None if floor_map is None else floor_map / (hi - lo)
     acc = np.zeros_like(xn)
-    for wsc, g in zip(scales, gains):
+    _fade = list(fade) if fade is not None else [None] * len(list(scales))
+    _any_fade = any(f is not None for f in _fade)
+    wsum = np.zeros_like(xn) if _any_fade else None
+    for wsc, g, fm in zip(scales, gains, _fade):
+        # the image this scale's residual is taken from: the input itself, or
+        # (band-limited) the input pre-blurred at a fraction of the scale
+        if bandlimit > 0.0 and wsc >= bandlimit_min:
+            sb = float(wsc) * float(bandlimit)
+            if m is None:
+                xs = ndimage.gaussian_filter(xn, sb)
+            else:
+                xs = ndimage.gaussian_filter(xn, sb) / np.maximum(
+                    ndimage.gaussian_filter(m, sb), 1e-3) * m
+        else:
+            xs = xn
         if m is None:
             B = ndimage.gaussian_filter(xn, wsc)
-            S = np.sqrt(np.maximum(ndimage.gaussian_filter((xn - B) ** 2, wsc), 1e-12))
+            S = np.sqrt(np.maximum(ndimage.gaussian_filter((xs - B) ** 2, wsc), 1e-12))
         else:
             Vb = np.maximum(ndimage.gaussian_filter(m, wsc), 1e-3)
             B = ndimage.gaussian_filter(xn, wsc) / Vb
-            d = (xn - B) * m
+            d = (xs - B) * m
             S = np.sqrt(np.maximum(ndimage.gaussian_filter(d * d, wsc) / Vb, 1e-12))
             del d, Vb
         S = np.maximum(S, 0.004)
         if fl is not None:
             S = np.maximum(S, noise_k * fl)
-        acc += g * np.arctan(k * (xn - B) / S)
-        del B, S
+        term = g * np.arctan(k * (xs - B) / S)
+        if _any_fade:
+            if fm is None:
+                acc += term
+                wsum += 1.0
+            else:
+                acc += fm * term
+                wsum += fm
+        else:
+            acc += term
+        del B, S, term
+        if xs is not xn:
+            del xs
     # DIVIDE BY THE NUMBER OF SCALES USED, NOT THE SUM OF ALL SUPPLIED GAINS.
     #
     # The paper's Eq. 5 is  I = h*C'_g + ((1-h)/n) * sum_i g_i C'_i,  with n the
@@ -438,7 +755,17 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
     # case resolution_floor() was written for -- lost up to half the layer, and
     # `mgnContrast` silently absorbed it.
     _g = list(gains)[:len(list(scales))]
+    # ALWAYS the paper's 1/n with n = the number of scales supplied (recipe 3).
+    # Recipe 1-2 divided by the per-pixel count of scales still active, and
+    # that undid the fade: where only fading scales were left -- the fine-only
+    # layer behind the detail-balance slider -- the last one stayed at FULL
+    # amplitude right up to the radius where its weight hit zero, then the
+    # layer dropped to flat 0.5 in one step: a noisy disc with a hard edge at
+    # 3 R with Detail balance at 1. Dividing by n lets a faded term go to
+    # zero like any other term going quiet, so the layer tapers.
     acc /= max(len(_g), 1)
+    if _any_fade:
+        del wsum
     out = (0.5 + acc / np.pi)
     if global_wt > 0:
         out = global_wt * xn ** (1 / global_gamma) + (1 - global_wt) * out
@@ -490,8 +817,74 @@ HILL_LIMB_PAD = 5.0     # px beyond the render's disc mask that the masks treat 
 HILL_GAINS = (1.0, 0.6, 0.2, 0.1, 0.05)
 
 
+def _wrap_gauss(a, st):
+    """gaussian_filter1d(a, st, axis=1, mode="wrap"), by FFT for long kernels:
+    the same truncated kernel (radius int(4 st + 0.5)), folded onto the circle."""
+    rad = int(4.0 * float(st) + 0.5)
+    n = a.shape[1]
+    if 2 * rad + 1 <= 48:
+        return ndimage.gaussian_filter1d(a, st, axis=1, mode="wrap")
+    x = np.arange(-rad, rad + 1, dtype=np.float64)
+    k = np.exp(-0.5 * (x / float(st)) ** 2); k /= k.sum()
+    kc = np.zeros(n, np.float64)
+    np.add.at(kc, x.astype(np.int64) % n, k)
+    from scipy import fft as _sfft
+    out = _sfft.irfft(_sfft.rfft(a.astype(np.float64), axis=1, workers=-1) * _sfft.rfft(kc)[None, :],
+                      n=n, axis=1, workers=-1)
+    return out.astype(np.float32)
+
+
+def _corr_rows(a, ker, cache=None):
+    """correlate1d(a, ker, axis=0, mode="nearest"), by FFT for long kernels.
+    `cache` (a dict per input array) keeps the input's transform, so the
+    moment kernels of one scale share one forward FFT."""
+    L = (len(ker) - 1) // 2
+    if len(ker) <= 33:
+        return ndimage.correlate1d(a, ker, axis=0, mode="nearest")
+    from scipy import fft as _sfft
+    m = a.shape[0] + 2 * L
+    nf = _sfft.next_fast_len(m + 2 * L + 1, real=True)
+    key = (L, nf)
+    if cache is not None and cache.get("key") == key:
+        A = cache["A"]
+    else:
+        ap = np.pad(a.astype(np.float64), ((L, L), (0, 0)), mode="edge")
+        A = _sfft.rfft(ap, n=nf, axis=0, workers=-1)
+        del ap
+        if cache is not None:
+            cache["key"], cache["A"] = key, A
+    kc = np.zeros(nf, np.float64)
+    kc[:2 * L + 1] = np.asarray(ker, np.float64)[::-1]      # correlation = convolution with the flipped kernel
+    out = _sfft.irfft(A * _sfft.rfft(kc)[:, None], n=nf, axis=0, workers=-1)
+    return out[2 * L:2 * L + a.shape[0]].astype(np.float32)
+
+
+def _solve_first(N, D):
+    """First component of the solution of N u = D for stacks of 2x2 or 3x3
+    systems, by Cramer's rule (np.linalg.solve's answer, without its overhead).
+    None when every system is singular."""
+    nn = N.shape[-1]
+    if nn == 2:
+        det = N[..., 0, 0] * N[..., 1, 1] - N[..., 0, 1] * N[..., 1, 0]
+        num = D[..., 0] * N[..., 1, 1] - N[..., 0, 1] * D[..., 1]
+    elif nn == 3:
+        a, b, c = N[..., 0, 0], N[..., 0, 1], N[..., 0, 2]
+        d, e, f = N[..., 1, 0], N[..., 1, 1], N[..., 1, 2]
+        g, h, i = N[..., 2, 0], N[..., 2, 1], N[..., 2, 2]
+        det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+        p, q, r = D[..., 0], D[..., 1], D[..., 2]
+        num = p * (e * i - f * h) - b * (q * i - f * r) + c * (q * h - e * r)
+    else:
+        try:
+            return np.linalg.solve(N, D[..., None])[..., 0, 0]
+        except np.linalg.LinAlgError:
+            return None
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(det != 0, num / det, np.nan)
+
+
 def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
-                       w_ref=None, order=1):
+                       w_ref=None, order=1, frac_span=None):
     """Hill's im_blur: blur f in heliocentric polar coordinates, with the
     convolution PARTIAL so the masked pixels (w = 0) contribute nothing.
 
@@ -567,6 +960,13 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
         edges.append(min(nr, max(edges[-1] + 96, int(edges[-1] * 1.25)),
                          edges[-1] + 512))
     nb = len(edges) - 1
+    # the bar's share of each band: its width, 0 for a band with nothing to
+    # blur (inside the Moon), so the bar does not leap there
+    _bw = []
+    for bi in range(nb):
+        _s = (rc >= edges[bi]) & (rc < edges[bi + 1])
+        _bw.append(float(edges[bi + 1] - edges[bi]) if (_s.any() and (w[_s] > 0).any()) else 0.0)
+    _bc = np.cumsum(_bw) / max(sum(_bw), 1e-9)
     for bi in range(nb):
         r0, r1 = edges[bi], edges[bi + 1]
         a0, a1 = max(0, r0 - pad), min(nr, r1 + pad)
@@ -597,7 +997,7 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
         rmid = 0.5 * (r0 + r1)
         for k, sg in enumerate(sigmas):
             st = max(float(sg) * nth / (2.0 * np.pi * max(rmid, 1.0)), 0.3)
-            G = lambda a: ndimage.gaussian_filter(a, (sg, st), mode=["nearest", "wrap"])
+            G = lambda a: _wrap_gauss(ndimage.gaussian_filter1d(a, sg, axis=0, mode="nearest"), st)
             # MOMENTS ABOUT THE PIXEL, NOT ABOUT THE BAND CENTRE (build 9).
             # The basis {1, rho, rho^2} used to be measured from the band's
             # middle radius, so a 2 px kernel 300 px from it was fitting a
@@ -614,10 +1014,17 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
             gk = np.exp(-0.5 * (xk / sg) ** 2)
             gk /= gk.sum()
 
+            # SPEED (2026-10-07): the tangential blur is the same for every
+            # moment, and separable filters on different axes commute, so it is
+            # taken once per input (2x per scale instead of 8x), by FFT when its
+            # kernel is long. The radial moment kernels go by FFT from 16 px up.
+            TWW = _wrap_gauss(WW, st)
+            TFW = _wrap_gauss(FW, st)
+            _cw, _cf = {}, {}
+
             def C(a, kk):
                 ker = (gk * (xk / sg) ** kk).astype(np.float32)
-                t = ndimage.correlate1d(a, ker, axis=0, mode="nearest")
-                return ndimage.gaussian_filter1d(t, st, axis=1, mode="wrap")
+                return _corr_rows(TWW, ker, _cw) if a is WW else _corr_rows(TFW, ker, _cf)
             n0 = C(WW, 0)
             d0 = C(FW, 0)
             B = d0 / np.maximum(n0, 1e-4)
@@ -634,9 +1041,8 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
                             N[..., i_, j_] = ms[i_ + j_][c0:c1]
                         N[..., i_, i_] += 1e-9
                     D = np.stack([d_[c0:c1] for d_ in ds], -1).astype(np.float64)
-                    try:
-                        u = np.linalg.solve(N, D[..., None])[..., 0, 0]
-                    except np.linalg.LinAlgError:
+                    u = _solve_first(N, D)
+                    if u is None:
                         continue
                     fin = (n0[c0:c1] > 1e-3) & np.isfinite(u)
                     B[c0:c1] = np.where(fin, u, B[c0:c1]).astype(np.float32)
@@ -644,10 +1050,12 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
             outs[k][sel] = ndimage.map_coordinates(B, dst, order=1, mode="nearest")
             cv = n0 if WR is None else n0 / np.maximum(G(WR), 1e-4)
             covs[k][sel] = ndimage.map_coordinates(cv, dst, order=1, mode="nearest")
-            del B, n0, d0, cv
+            del B, n0, d0, cv, TWW, TFW, _cw, _cf
         del FW, WW, WR, dst, rr, tt, sel
         if progress is not None:
-            progress.log(f"  partial convolution: radial band {bi + 1}/{nb}", None)
+            progress.log(f"  partial convolution: radial band {bi + 1}/{nb}",
+                         None if frac_span is None else
+                         frac_span[0] + (frac_span[1] - frac_span[0]) * float(_bc[bi]))
     return outs, covs
 
 
@@ -748,6 +1156,13 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
     Returns None when the H-alpha tier was not stacked, in which case callers
     keep the disc-only mask and behave exactly as before.
     """
+    # THE 0.24 PROMINENCE LAYER: the layers are built on the corona with the
+    # prominence light already taken out (promlayer.clean_corona), so there is
+    # nothing to exclude -- and an exclusion mask is exactly the edge the
+    # partial-convolution masks used to draw round every prominence.
+    from .promlayer import layer_mode as _lm
+    if _lm() and os.path.exists(os.path.join(wd, "corona_lum.npy")):
+        return None
     p = os.path.join(wd, "prom_rgb.npy")
     if not os.path.exists(p):
         return None
@@ -770,7 +1185,7 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
         # A bare percentile ALWAYS FIRES. On a bracket with no prominences to
         # speak of it flags the reddest 1% of the ring -- which is noise and
         # ordinary corona -- and the 8 px dilation turns that into a scatter of
-        # patches. the 250 mm test set: the real H-alpha gate, which does have
+        # patches. Clifton's 250 mm set: the real H-alpha gate, which does have
         # an absolute threshold, finds 349 px outside the disc; this mask was
         # punching out 11000, about 32x more. Those holes printed as a row of
         # smooth blobs in an arc below the Moon once Hill's step 4 zeroed the
@@ -790,11 +1205,10 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
         if progress is not None:
             progress.log(
                 f"  prominence mask: redness median {_med:.2f}, "
-                f"floor {_floor:.2f} (median + 6 sigma), "
-                f"{pct:g}th percentile {_pctv:.2f} -> "
-                f"{'the floor' if _floor > _pctv else 'the percentile'} decides, "
-                f"{int(out.sum()) / 1e3:.1f}k px before dilation", None)
-        # ...and the merge-based detection (promlayer.detect, 0.23.11): the
+                f"floor {_floor:.2f}, p{pct:g} {_pctv:.2f} "
+                f"({'floor' if _floor > _pctv else 'percentile'} used), "
+                f"{int(out.sum()) / 1e3:.1f}k px pre-dilation", None)
+        # ...and the merge-based detection (promlayer.detect, 0.23.10 lab): the
         # redness above reads ONE fast tier and missed 9 of the 15 prominences
         # on the 600 mm set, the 52 px one at 68 deg among them. Union, so
         # nothing either finds is lost.
@@ -805,7 +1219,7 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
                 _add = ring & (_nd > 0.3) & ~out
                 if progress is not None and _add.any():
                     progress.log(f"  prominence mask: +{int(_add.sum()) / 1e3:.1f}k px "
-                                 f"from the merge-based detection", None)
+                                 f"from merge-based detection", None)
                 out = out | (ring & (_nd > 0.3))
         except Exception:
             pass
@@ -1164,7 +1578,7 @@ def _deband(layer, r, valid, cy=None, cx=None, r0=None, order=6):
         trend = radial_profile_map(layer, r, valid)
     else:
         trend = fourier_background(layer, r, cy, cx, int(r0), order=order,
-                                   smooth=2.0)
+                                   smooth=2.0, dense=True)
     out = layer - trend + base
     return np.where(valid, out, 0.5).astype(np.float32)
 
@@ -1174,12 +1588,7 @@ def _soft_norm(x, mask, p_lo=0.5, p_hi=99.7, gain=1.6):
     return 0.5 + 0.5 * np.tanh(gain * ((x - lo) / max(hi - lo, 1e-6) - 0.5))
 
 
-PROM_FEATHER_PX = 4.0       # 0.23.11: soft edge on MGN's prominence holes, see _prom_feather
-LAYER_BUILD = 6             # recipe number of the detail layers; the server rebuilds
-                            # them from a cached stack when a run's number is older.
-                            # 6: MGN prominence holes feathered. 5: prominence gate and
-                            # mask also from the merge (promlayer.detect). <=4: 0.23.10.
-HILL_BUILD = 12     # bump to force a rebuild of cached masks; 8 = arc-length
+HILL_BUILD = 15     # 15 = masks rebuilt on the build-13 master after the recipe-15 revert (2026-10-08); bump to force a rebuild of cached masks; 13 = log base no longer clipped (see below); 8 = arc-length
                     # tangential sigma + second-order NC at the limb (0.23.6);
                     # 9 = pixel-centred fit basis; 10 = raw base + radial
                     # smoothing of the masks (0.23.7); 11 = long-window gate;
@@ -1306,6 +1715,45 @@ def _deradial(m, r, valid):
                         ).astype(np.float32))
 
 
+def along_gate(L, r, cy, cx, R, win_R=0.015, lo=0.08, hi=0.45):
+    """How filament-like each neighbourhood is, 0..1, for the along-filament
+    smoothing. Structure tensor of the background-removed log luminance,
+    rotated into the radial/tangential frame: coherence (one orientation
+    dominates) times radial-ness (the gradient is across the radius, i.e. the
+    structure runs along it). Computed at half size, in Cartesian pixels.
+    Mapped lo..hi -> 0..1 so pure noise (about 0.05) gives 0 and a clear
+    filament (0.4 and up) gives the full smoothing."""
+    k = 2
+    Ls = ndimage.zoom(np.asarray(L, np.float32), 1.0 / k, order=1)
+    cy2, cx2, R2 = cy / k, cx / k, R / k
+    h, w = Ls.shape
+    yy = np.arange(h, dtype=np.float32)[:, None] - cy2
+    xx = np.arange(w, dtype=np.float32)[None, :] - cx2
+    rr = np.maximum(np.sqrt(yy * yy + xx * xx), 1.0)
+    ur, vr = yy / rr, xx / rr
+    F = Ls - ndimage.gaussian_filter(Ls, 20.0 / k)
+    Fb = ndimage.gaussian_filter(F, 1.0)
+    gy, gx = np.gradient(Fb)
+    gr = gy * ur + gx * vr
+    gt = -gy * vr + gx * ur
+    del F, Fb, gy, gx, ur, vr
+    sw = win_R * R2
+    Jrr = ndimage.gaussian_filter(gr * gr, sw)
+    Jtt = ndimage.gaussian_filter(gt * gt, sw)
+    Jrt = ndimage.gaussian_filter(gr * gt, sw)
+    del gr, gt
+    tr = Jrr + Jtt
+    disc = np.sqrt(np.maximum((Jrr - Jtt) ** 2 + 4.0 * Jrt * Jrt, 0.0))
+    coh = np.where(tr > 1e-14, disc / np.maximum(tr, 1e-14), 0.0)
+    radial = np.clip((Jtt - Jrr) / np.maximum(tr, 1e-14), 0.0, 1.0)
+    g = np.clip((coh * radial - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+    del Jrr, Jtt, Jrt, tr, disc, coh, radial
+    g = ndimage.gaussian_filter(g, 2.0)
+    # back to full size, nearest radius: bilinear zoom of a smooth field
+    out = ndimage.zoom(g, (r.shape[0] / g.shape[0], r.shape[1] / g.shape[1]), order=1)
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
 def polar_radial_smooth(masks, w, cy, cx, sig_r, band=384, progress=None):
     """Gaussian-smooth each mask ALONG THE RADIUS, partial under `w`.
 
@@ -1421,12 +1869,10 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
                      or os.environ.get("ECLIPSEFORGE_HILL_NODENOISE") == "1")
         if _raw_base:
             lum_dn = None       # force the reload below, ignoring what we were
-            progress.log("  partial convolution: building on the raw merged "
-                         "luminance (the masks carry their own noise "
-                         "threshold; ECLIPSEFORGE_HILL_DENOISED=1 for the "
-                         "denoised master)", None)
+            progress.log("  partial convolution: input is the raw merged "
+                         "luminance", None)
         if lum_dn is None:
-            lum = np.load(os.path.join(wd, "hdr_lum.npy"))
+            lum = np.load(merge_lum_path(wd))
             ks = DENOISE_PROFILES.get(denoise, DENOISE_PROFILES["fine"])
             H, W = lum.shape
             yy = np.arange(H, dtype=np.float32)[:, None] - cy
@@ -1464,14 +1910,42 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         disc = rr < Rmap
         if prom is None:
             prom = prominence_mask(wd, geo, (H, W), rr, R, progress=progress)
-        progress.log(f"partial-convolution unsharp masks at "
-                     f"{', '.join('%g' % s for s in HILL_SCALES)} px "
-                     f"(polar-oriented, partial)...", frac)
+        progress.log(f"partial convolution: unsharp masks at "
+                     f"{', '.join('%g' % s for s in HILL_SCALES)} px...", frac)
         hk = np.float32(10.0 ** float(
             os.environ.get("ECLIPSEFORGE_HILL_LOGK", "6")))
-        _pk = max(float(np.percentile(lum_dn, 99.95)), 1e-6)
-        xn = np.clip(lum_dn / _pk, 0, 1)
+        # THE LOG BASE IS NORMALISED TO THE CORONA'S OWN MAXIMUM, NOT CLIPPED
+        # (build 13). This was xn = clip(lum / percentile(lum, 99.95), 0, 1):
+        # the brightest 0.05 % of the FRAME -- 22,000 px on a 44 Mpx set, a
+        # band some 25 px wide along the limb where the inner corona is
+        # brightest -- sat flat at 1.0, and so did every mask there (zero
+        # structure in a clipped plateau). Measured on the reference set's
+        # NW limb: hill_log at exactly 1.000 from 1.03 to 1.07 R in that
+        # sector, 0.989 and unclipped in the control sector; with Base
+        # weight above 0 the plateau printed as a bright band with a hard
+        # outer edge (Nico's "sharp rim"), and the masks had nothing to add
+        # inside it. Now the top of the scale is the brightest corona
+        # pixel outside the disc and the prominence patches (a high
+        # percentile of that region, against a stray pixel), nothing above
+        # it is clipped, and the base is renormalised so the corona still
+        # spans 0..1. Prominences, which the masks exclude anyway, are the
+        # only thing that can reach the clip at 1.
+        _cor = ~disc
+        if prom is not None:
+            _cor &= ~prom
+        _pk = (float(np.percentile(lum_dn[_cor], 99.999)) if _cor.any()
+               else float(np.percentile(lum_dn, 99.95)))
+        _pk = max(_pk, 1e-6)
+        xn = np.clip(lum_dn / _pk, 0, None)
         imlog = (np.log1p(hk * xn) / np.log1p(hk)).astype(np.float32)
+        _top = float(imlog[_cor].max()) if _cor.any() else 1.0
+        if _top > 1.0:
+            imlog /= np.float32(_top)
+        imlog = np.clip(imlog, 0.0, 1.0, out=imlog)
+        progress.log("  partial convolution: log base top "
+                     f"{_pk:.4g}, {(_cor & (lum_dn > _pk)).sum()} "
+                     "corona px above it (not clipped)", None)
+        del _cor
         # THE EXPECTED NOISE OF im_log, PER PIXEL, so the renderer can tell a
         # mask coefficient that is structure from one that is noise.
         #
@@ -1496,7 +1970,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         # care of the Moon; the taper below is for the patches only.
         blurs, covs = polar_partial_blur(imlog, w, cy, cx, HILL_SCALES,
                                          progress=progress, w_ref=w_disc,
-                                         order=2)
+                                         order=2, frac_span=(_DF["hill"], _DF["inner_bg"]))
         del w_disc
         good = ~disc if prom is None else (~disc & ~prom)
         Ms, bias, Mraw = [], [], []
@@ -1514,8 +1988,8 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         del blurs
         _radial = float(os.environ.get("ECLIPSEFORGE_HILL_RADIAL", HILL_RADIAL))
         if _radial > 0:
-            progress.log(f"  partial convolution: smoothing each mask along the "
-                         f"radius, sigma {_radial:g} x scale", None)
+            progress.log(f"  partial convolution: radial mask smoothing, "
+                         f"sigma {_radial:g} x scale", None)
             Mraw = polar_radial_smooth(Mraw, good.astype(np.float32), cy, cx,
                                        [_radial * float(s_) for s_ in HILL_SCALES],
                                        progress=progress)
@@ -1570,7 +2044,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
                 del _zl
             # HILL'S STEP 4: "replace any pixels restricted by the mask with
             # zero". Leaving it out is what put a row of dark blobs in an arc
-            # below the Moon on the test set's 250 mm set.
+            # below the Moon on Clifton's 250 mm set.
             #
             # Where the mask is 0 the partial convolution has no data to work
             # with, so `blur` is whatever num/max(den, 1e-4) happens to produce
@@ -1662,23 +2136,34 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
               "sigma_rms": _sg,
               "limb_bias_before": bias, "limb_bias_after": bias2,
               "rms": _rms, "rms_struct": _rms_s}
-        progress.log("  masks: per-scale rms over the corona "
+        progress.log("  partial convolution: mask rms over the corona "
                      + ", ".join("%g px %.2e" % (s, v)
                                  for s, v in zip(HILL_SCALES, st["rms"])), None)
+        # 0.23.9: the "of which structure" line printed 25% on every scale --
+        # that is the floor below, not a measurement: between 1.5 and 4 R the
+        # masks' total spread is 13-24% BELOW what the photon model predicts
+        # for noise alone, so total^2 - noise^2 is negative there. The
+        # Amplification slider now takes its scale from the coarsest mask just
+        # outside the limb (render.Layers.hill_ref), which is structure on the
+        # reference stack (99%), measured here the same way for the log.
+        _top = np.asarray(M[-1, ::4, ::4], np.float32)
+        _rq = rr[::4, ::4]
+        _sh = ((_rq > float(geo.get("Rmask", R + 4.0))) & (_rq < 1.5 * R)
+               & (_top != 0))
+        _ref = float(np.std(_top[_sh])) if _sh.sum() > 1000 else 0.0
+        st["amp_ref"] = _ref
+        progress.log("  partial convolution: amplification scale %.2e "
+                     "(%g px mask, limb to 1.5 R)"
+                     % (_ref, HILL_SCALES[-1]), None)
+        del _top, _rq, _sh
         progress.log(
-            "  of which structure rather than photon noise (the Amplification "
-            "slider is normalised to the 2 px figure) "
-            + ", ".join("%g px %.0f%%" % (s, 100.0 * b / max(a, 1e-12))
-                        for s, a, b in zip(HILL_SCALES, _rms, _rms_s)), None)
-        progress.log(
-            "  limb bias (the mask's own mean at 1.05-1.3 R, in units of its "
-            "structure -- this is the featureless collar) "
+            "  partial convolution: limb bias at 1.05-1.3 R (mask mean / structure) "
             + ", ".join("%g px %+.2f->%+.2f" % (s, a, b)
                         for s, a, b in zip(HILL_SCALES, bias, bias2)), None)
         del M, imlog, w, sig_log
         return st
     except Exception as e:
-        progress.log(f"partial-convolution masks skipped ({e})", None)
+        progress.log(f"[fail] partial convolution: masks not built ({e})", None)
         for f in ("hill.npy", "hill_log.npy", "hill_sigma.npy"):
             p = os.path.join(wd, f)
             if os.path.exists(p):
@@ -1711,7 +2196,17 @@ def _prom_feather(pm, k):
     return np.maximum(f, m.astype(np.float32))
 
 
-def build_layers(wd, progress, denoise="fine", earthshine=False,
+def merge_lum_path(wd):
+    """The luminance the detail layers are built on: the corona without its
+    prominence light when the 0.24 layer is on and was made, else the merge."""
+    from .promlayer import layer_mode, CORONA_LUM
+    p = os.path.join(wd, CORONA_LUM)
+    if layer_mode() and os.path.exists(p):
+        return p
+    return os.path.join(wd, "hdr_lum.npy")
+
+
+def build_layers(wd, progress, denoise="off", earthshine=False,
                  fnrgf_preset="ours", partialconv=True):
     if denoise is True:
         denoise = "fine"
@@ -1724,7 +2219,31 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     cy, cx, R = geo["cy"], geo["cx"], geo["R"]
     margin = float(geo.get("limb_margin", geo.get("Rmask", R + 4.0) - R))
     prof = geo.get("limb_prof")
-    lum = np.load(os.path.join(wd, "hdr_lum.npy"))
+    # THE 0.24 PROMINENCE LAYER (promlayer.py, top of the 0.24 section): every
+    # layer below is built on the merge with its H-alpha light taken out by
+    # colour, and the prominences come back as their own layer.
+    from . import promlayer as _plm
+    for _f in (_plm.CORONA_RGB, _plm.CORONA_LUM):
+        _fp = os.path.join(wd, _f)
+        if os.path.exists(_fp):
+            try:
+                os.remove(_fp)
+            except OSError:
+                pass
+    if _plm.layer_mode():
+        try:
+            progress.log("prominence layer: corona without prominences...", None)
+            lstats["prom_corona"] = _plm.clean_corona(wd, geo, progress)
+            lstats["prom_light"] = _plm.build_light(wd, geo, progress)
+        except Exception as _e:
+            progress.log(f"[fail] prominence layer not built ({_e}); prominences stay in "
+                         f"the corona", None)
+            for _f in (_plm.CORONA_RGB, _plm.CORONA_LUM):
+                try:
+                    os.remove(os.path.join(wd, _f))
+                except OSError:
+                    pass
+    lum = np.load(merge_lum_path(wd))
     H, W = lum.shape
     yy = np.arange(H, dtype=np.float32)[:, None] - cy
     xx = np.arange(W, dtype=np.float32)[None, :] - cx
@@ -1738,6 +2257,32 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     disc_m = r < Rmap
 
     nf = photon_floor(lum, r)
+    # THE MERGE'S OWN NOISE (TODO 1e, lab 0.24): where the propagated noise of
+    # the merge is larger than C/sqrt(L) -- near the limb, where the short tiers
+    # carry the merge -- it is the floor. Scaled to photon_floor in the far
+    # field, where the two describe the same exposure.
+    _mnp = os.path.join(wd, "merge_noise.npy")
+    if os.path.exists(_mnp) and os.environ.get("ECLIPSEFORGE_NO_MERGENOISE", "") in ("", "0"):
+        try:
+            _mn = np.load(_mnp).astype(np.float32)
+            if _mn.shape == nf.shape:
+                _mn = ndimage.gaussian_filter(_mn, 4.0) / np.log(10.0)    # relative -> sigma of log10
+                _rmax = r.max()
+                _sky = (r > 0.75 * _rmax) & (r < 0.95 * _rmax) & (_mn > 0)
+                if _sky.sum() > 1000:
+                    _k = float(np.median(nf[_sky]) / max(np.median(_mn[_sky]), 1e-12))
+                    _mn *= np.float32(_k)
+                    _lr = (r > R) & (r < 1.05 * R)
+                    _before = float(np.median(nf[_lr])) if _lr.any() else 0.0
+                    nf = np.maximum(nf, _mn).astype(np.float32)
+                    _after = float(np.median(nf[_lr])) if _lr.any() else 0.0
+                    lstats["merge_noise"] = {"scale": _k, "floor_1.0_1.05R_before": _before,
+                                             "floor_1.0_1.05R_after": _after}
+                    progress.log(f"noise floor: {_after / max(_before, 1e-12):.1f}x "
+                                 f"the single-exposure model at 1.00-1.05 R", None)
+            del _mn
+        except Exception as _e:
+            progress.log(f"[warn] merge noise map not used ({_e})", None)
     L = np.log10(np.clip(lum, 1.0, None))
     if do_dn:
         progress.log(f"denoising HDR master (multiscale, profile: {denoise})...", _DF["denoise"])
@@ -1746,6 +2291,39 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     else:
         Ldn = L
         lum_dn = lum
+
+    # ALONG-FILAMENT SMOOTHING (2026-10-07). Coronal filaments run radially, so
+    # along the radius they change slowly while photon noise does not; across
+    # them (tangentially) both change. A Gaussian along the radius only, in
+    # polar coordinates, removes noise without touching the filaments. Measured
+    # on Clifton's 250 mm set at R 151: filament/noise (tangential over radial
+    # band-pass, 1.3-2 R) 1.40 -> 1.76 at 1.5 px with sigma = 0.01 R. Every
+    # detail layer below is built on this; the brightness base is not.
+    _al = _envf("ECLIPSEFORGE_ALONG", ALONG_SIGMA_R)
+    if _al > 0:
+        progress.log(f"along-filament smoothing (sigma {_al * R:.1f} px along the radius, "
+                     f"gated by coherence)...", None)
+        _aw = np.clip((r / R - 1.02) / 0.06, 0.0, 1.0).astype(np.float32)
+        _aw[disc_m] = 0.0
+        # THE GATE (Nico, 2026-10-07: "the background has this weird elongated
+        # grain"): a plain radial blur turns leftover grain into radial streaks
+        # wherever there is no filament to follow. So the smoothing is scaled
+        # by how filament-like the neighbourhood is -- the structure-tensor
+        # coherence in the radial/tangential frame, computed in CARTESIAN
+        # pixels (a polar grid fakes a radial anisotropy at large radius) on the
+        # background-removed log merge at half size. 0 in the gaps and the far
+        # field, up to 1 on a clean filament. Between, the blur is partial.
+        _gt = along_gate(Ldn, r, cy, cx, R)
+        _as = polar_radial_smooth([np.asarray(Ldn, np.float32)], _aw, cy, cx, [_al * R])[0]
+        _aw *= _gt
+        Ldn = (Ldn + _aw * (_as - Ldn)).astype(np.float32)
+        _gs = {"gate_median_1.3_2R": float(np.median(_gt[(r > 1.3 * R) & (r < 2.0 * R)])),
+               "gate_median_2_3R": float(np.median(_gt[(r > 2.0 * R) & (r < 3.0 * R)]))}
+        del _as, _aw, _gt
+        lum_dn = (10.0 ** Ldn).astype(np.float32)
+        lstats["along_filament"] = dict({"sigma_px": round(_al * R, 2), "sigma_R": _al}, **_gs)
+        progress.log(f"  along-filament gate: median {_gs['gate_median_1.3_2R']:.2f} at 1.3-2 R, "
+                     f"{_gs['gate_median_2_3R']:.2f} at 2-3 R", None)
 
     progress.log("MGN detail extraction...", _DF["mgn"])
     # 1) mask the disc out of the statistics entirely (normalized convolution)
@@ -1766,7 +2344,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     lstats["mgn_scales"] = {"px": [round(x, 2) for x in _sc],
                             "resolution_floor_px": round(_fl, 2)}
     progress.log(f"MGN scales {', '.join('%.1f' % x for x in _sc)} px "
-                 f"(this image resolves down to {_fl:.1f} px)", None)
+                 f"(resolution floor {_fl:.1f} px)", None)
     # The partial-convolution mask: the disc, and the prominences too. See
     # prominence_mask -- +27% and +25% of near-limb coronal structure on the
     # rays that have a prominence, nothing measurable on the rays that do not.
@@ -1785,11 +2363,120 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     # its own now has holes where the prominences are.
     _pm = prominence_mask(wd, geo, (H, W), r, R, progress=progress)
     valid_stat = valid if _pm is None else (valid & ~_pm)
+    # PIXELS NO TIER COULD HOLD (TODO 0-b, lab 0.24): filled from the shortest
+    # tier as a lower bound, not a measurement -- left out of the statistics
+    # (3 px margin). Measured on the 250 mm crop: half the ring power.
+    _nwp = os.path.join(wd, "nowt_mask.npy")
+    if os.path.exists(_nwp) and os.environ.get("ECLIPSEFORGE_NO_MERGENOISE", "") in ("", "0"):
+        try:
+            _nw = np.load(_nwp)
+            if _nw.shape == valid_stat.shape and _nw.any():
+                _nw = ndimage.binary_dilation(_nw, iterations=3)
+                valid_stat = valid_stat & ~_nw
+                lstats["nowt_masked_px"] = int(_nw.sum())
+                progress.log(f"  {int(_nw.sum()) / 1e3:.1f}k px held by no tier, excluded "
+                             f"from statistics", None)
+            del _nw
+        except Exception as _e:
+            progress.log(f"[warn] no-weight mask not used ({_e})", None)
     if _pm is not None:
-        progress.log(f"  prominences masked out of the convolution too "
+        progress.log(f"  prominences masked out of the convolution "
                      f"({_pm.sum() / 1e3:.0f}k px)", None)
         lstats["prom_masked_px"] = int(_pm.sum())
-    mgl = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half), scales=_sc)
+    # 0.23.9: band-limited coarse terms and radius-faded fine scales -- see
+    # the NOISE block at the top of this file. Both overridable for A/B runs.
+    _bl = _envf("ECLIPSEFORGE_MGN_BL", MGN_BANDLIMIT)
+    _bl_min = MGN_BANDLIMIT_MIN_R * R
+    _fade_mode = os.environ.get("ECLIPSEFORGE_MGN_FADE", "1" if MGN_FADE else "0")
+    _do_fade = _fade_mode != "0"
+    # WHERE THIS STACK HAS STRUCTURE, per scale -- measured, and what the fade
+    # follows. Logged as a table because it is the one line in the run that
+    # says what the data resolves, whatever the filters then do with it.
+    # Recipe 4: only when the fade is switched on -- the table decides nothing
+    # otherwise, and read on its own it said "fine bands carry nothing" of a
+    # stack whose outer corona lives at scales it never looked at.
+    _ext, _stab, _rings = None, {}, []
+    if _do_fade:
+        _ext, _stab = structure_extent(Lf, r, R, cy, cx, valid)
+        _rings = sorted(_stab)
+        progress.log("  coronal structure by scale (radial/tangential power, "
+                     "1 = noise, >= %.1f = structure):" % STRUCT_MIN, None)
+        progress.log("    r/R   " + "  ".join("%2d-%2dpx" % b for b in STRUCT_BANDS), None)
+        for rr in _rings:
+            progress.log("    %4.2f  " % rr + "  ".join("%7.2f" % v for v in _stab[rr]), None)
+        _ext_txt = ", ".join(
+            "%d-%d px %s" % (a, b, "to the edge" if e is None else
+                             ("nowhere" if e <= 0 else "to %.1f R" % e))
+            for (a, b), e in zip(STRUCT_BANDS, _ext))
+        progress.log("    structure extends: " + _ext_txt, None)
+    if _do_fade and _fade_mode != "fixed":
+        _fade = [mgn_fade_map(s, r, R, extents=_ext) for s in _sc]
+    elif _do_fade:
+        _fade = [mgn_fade_map(s, r, R) for s in _sc]
+    else:
+        _fade = None
+    _ob = _envf("ECLIPSEFORGE_OUTER_BLUR", OUTER_BLUR_R)
+    _fvn = _envf("ECLIPSEFORGE_FNRGF_VN", FNRGF_NOISE_FRAC)
+    _nin = os.environ.get("ECLIPSEFORGE_NAFE_INPUT", NAFE_INPUT).strip().lower()
+    _nin = "lf" if _nin == "lf" else "flatten"
+    # what the report prints under "detail layers:" -- one line per departure
+    # from 0.23.8, or the plain statement that there is none
+    _sum = []
+    if _bl > 0:
+        _sum.append("MGN coarse terms band-limited at %g x scale from %.1f px" % (_bl, _bl_min))
+    if _do_fade:
+        _sum.append("MGN fine scales faded with radius (%s)"
+                    % ("measured" if _fade_mode != "fixed" else "reference-set table"))
+    if _ob > 0:
+        _sum.append("FNRGF/NAFE input and tangential residual blurred from 0 px at "
+                    "%g R to %.1f px at %g R" % (OUTER_BLUR_RANGE[0], _ob * R, OUTER_BLUR_RANGE[1]))
+    if abs(_fvn - 0.10) > 1e-9:
+        _sum.append("FNRGF added noise sqrt(Vn) %.2fx the outer residual" % _fvn)
+    if _nin == "lf":
+        _sum.append("NAFE on the Fourier-flattened log luminance, corona-scaled axis, "
+                    "%d levels" % NAFE_K_LF)
+    _sum = ((["0.24 prominence layer: layers built on the corona with the H-alpha light "
+              "taken out by colour; prominences as their own layer"]
+             if os.path.exists(os.path.join(wd, "corona_lum.npy")) else [])
+            + ["0.23.8's MGN, FNRGF and NAFE; tangential blur disc-aware (the limb rim); "
+             "prominence gate and mask also from the merge's red excess; "
+             "MGN's prominence holes feathered"]
+            + (["overrides: " + "; ".join(_sum)] if _sum else []))
+    lstats["layer_recipe"] = {
+        "build": LAYER_BUILD,
+        "summary": _sum,
+        "structure": ({"bands_px": [list(b) for b in STRUCT_BANDS],
+                       "extent_R": _ext,
+                       "table": {("%.2f" % k): [round(v, 2) for v in _stab[k]] for k in _rings},
+                       "min_ratio": STRUCT_MIN} if _ext is not None else None),
+        "mgn_bandlimit": _bl, "mgn_bandlimit_min_px": round(_bl_min, 2),
+        "mgn_fade": (("measured" if _fade_mode != "fixed" else "fixed") if _do_fade else False),
+        "outer_blur_R": _ob, "outer_blur_px": round(_ob * R, 2),
+        "outer_blur_range": list(OUTER_BLUR_RANGE),
+        "fnrgf_noise_frac": _fvn,
+        "nafe_levels": NAFE_K_LF if _nin == "lf" else NAFE_K,
+        "nafe_input": _nin,
+        "tangential": "partial (disc-aware) blur"
+                      + (", residual outer-blurred" if _ob > 0 else "")}
+    if _fade is not None:
+        _ftxt = []
+        for s_, fm in zip(_sc, _fade):
+            if fm is None:
+                _ftxt.append("%.1f px: always" % s_)
+            else:
+                # the map is linear in r: recover its two ends for the log
+                _r1 = float(r[fm > 0.999].max() / R) if (fm > 0.999).any() else 0.0
+                _r0 = float(r[(fm > 0.001) & (r > 0)].max() / R) if (fm > 0.001).any() else 0.0
+                _ftxt.append("%.1f px: to %.1f R, off by %.1f R" % (s_, _r1, _r0))
+        progress.log("  MGN: coarse terms band-limited at %g x scale from %.1f px; "
+                     "scale fade (%s): %s" % (_bl, _bl_min,
+                     "measured" if _fade_mode != "fixed" else "reference-set table",
+                     "; ".join(_ftxt)), None)
+    elif _bl > 0:
+        progress.log(f"  MGN: coarse terms band-limited at {_bl:g} x scale from "
+                     f"{_bl_min:.1f} px; no scale fade", None)
+    mgl = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half), scales=_sc,
+              bandlimit=_bl, bandlimit_min=_bl_min, fade=_fade)
     mgl = _deband(mgl, r, valid_stat, cy, cx, R + margin)
     if _pm is not None and PROM_FEATHER_PX > 0:
         _pf = _prom_feather(_pm, PROM_FEATHER_PX)
@@ -1823,18 +2510,20 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     # per-scale terms. Measured, the blend reaches the true ladder: fine/coarse
     # energy ratio 1.09 as shipped, 3.18 at detailScale 1, 3.32 for the real
     # Hill gains -- and the two are indistinguishable side by side.
-    progress.log("MGN, fine scales only (detail-balance slider)...",
+    progress.log("MGN fine scales (detail balance)...",
                  _DF.get("mgn_fine", 99.0))
     _nf = len(_sc) // 2
     mgf = mgn(Lf, floor_map=nf, valid=valid_stat, norm_span=(-half, half),
-              scales=_sc[:_nf], gains=(0.907, 0.976, 0.994)[:_nf])
+              scales=_sc[:_nf], gains=(0.907, 0.976, 0.994)[:_nf],
+              bandlimit=_bl, bandlimit_min=_bl_min,
+              fade=(_fade[:_nf] if _fade is not None else None))
     mgf = _deband(mgf, r, valid_stat, cy, cx, R + margin)
     if _pm is not None and PROM_FEATHER_PX > 0:
         mgf = (mgf * (1.0 - _pf) + 0.5 * _pf).astype(np.float32)
         del _pf
     np.save(os.path.join(wd, "mgn_fine.npy"), mgf.astype(np.float32))
     lstats["mgn_fine_scales"] = [round(x, 2) for x in _sc[:_nf]]
-    del nf, L, Lf, mgf
+    del nf, L, mgf          # Lf stays: NAFE takes it too (0.23.9)
 
     progress.log("FNRGF detail extraction...", _DF["fnrgf"])
     # EVERY ARGUMENT HERE WAS A DEFAULT UNTIL 0.23.2, INCLUDING THREE THAT
@@ -1862,24 +2551,38 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         _fn_kw = dict(order=30, atte_ave=0.05, atte_dev=0.1)
     else:
         _fn_kw = dict(order=6, atte_ave=0.0, atte_dev=0.0)
-    D = fnrgf_robust(lum_dn, r, cy, cx, int(R) + 4,
+    # 0.23.9: the input goes through the radius-growing blur first (nothing
+    # inside OUTER_BLUR_RANGE[0] R is touched), and sqrt(Vn) is dosed to do
+    # something -- see FNRGF_NOISE_FRAC.
+    if _ob > 0.0:
+        _Lob = radial_scale_blur(np.log10(np.clip(lum_dn, 1.0, None)), r, R,
+                                 _ob * R, OUTER_BLUR_RANGE[0], OUTER_BLUR_RANGE[1],
+                                 valid=valid)
+        lum_fn = (10.0 ** _Lob).astype(np.float32)
+        del _Lob
+        progress.log(f"  FNRGF/tangential input: radius-growing blur, 0 px inside "
+                     f"{OUTER_BLUR_RANGE[0]:g} R to {_ob * R:.1f} px at "
+                     f"{OUTER_BLUR_RANGE[1]:g} R", None)
+    else:
+        lum_fn = lum_dn
+    D = fnrgf_robust(lum_fn, r, cy, cx, int(R) + 4,
                      mask=_pm, impulse=FNRGF_IMPULSE,
-                     noise_frac=FNRGF_NOISE_FRAC, **_fn_kw)
+                     noise_frac=_fvn, **_fn_kw)
     _nl = getattr(fnrgf_robust, "last_noise", None)
     _nm = getattr(fnrgf_robust, "last_masked", 0)
     progress.log(
         f"  FNRGF: order {_fn_kw['order']}"
         + (f", attenuation {_fn_kw['atte_ave']:.2f}/{_fn_kw['atte_dev']:.2f} per "
            f"harmonic" if _fn_kw["atte_ave"] else ", hard order cutoff")
-        + (f"; prominence samples dropped from {_nm} ring(s)" if _nm else "")
-        + (f"; added noise sqrt(Vn) {FNRGF_NOISE_FRAC:.2f}x the outer-field "
-           f"residual ({_nl[0]:.4f} dex over {_nl[2]} rings)"
+        + (f"; prominence samples dropped in {_nm} ring(s)" if _nm else "")
+        + (f"; noise sqrt(Vn) {_fvn:.2f}x outer-field "
+           f"residual ({_nl[0]:.4f} dex, {_nl[2]} rings)"
            if _nl and np.isfinite(_nl[0]) else ""), None)
     lstats["fnrgf"] = {"preset": _fnp, "order": _fn_kw["order"],
                        "atte_ave": _fn_kw["atte_ave"],
                        "atte_dev": _fn_kw["atte_dev"],
                        "impulse": FNRGF_IMPULSE,
-                       "noise_frac": FNRGF_NOISE_FRAC,
+                       "noise_frac": _fvn,
                        "masked_rings": int(_nm),
                        "sigma_outer": (round(_nl[0], 5)
                                        if _nl and np.isfinite(_nl[0]) else None)}
@@ -1893,8 +2596,15 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     # neighbours of similar brightness, so the dark lunar plateau drops out of
     # the corona's statistics because it is dark, not because a circle was
     # drawn around it. Where the limb fit is imperfect this layer is unaffected.
-    progress.log("NAFE (variable neighbourhood)...", _DF["nafe"])
+    # NAFE REMOVED (2026-10-08, Nico): see render.NAFE_ENABLED. Not built; a
+    # nafe.npy left by an older build is not loaded by the renderer.
+    if NAFE_BUILD:
+        progress.log("NAFE (variable neighbourhood)...", _DF["nafe"])
+    else:
+        progress.log("NAFE: not built (removed 2026-10-08)", None)
     try:
+        if not NAFE_BUILD:
+            raise _NafeOff()
         # combine=False: store E, the equalized field, NOT the paper's eq. 2
         # output B = (1-w) T_gamma + w E. B is their final display image and is
         # four fifths gamma transform at w = 0.2 -- as a detail layer it was a
@@ -1940,7 +2650,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         #
         # WHERE THE KERNEL CANNOT REACH. `gaussian_filter` truncates at 4 sigma
         # and runs separably, so its support is a SQUARE of half-width 4*_s --
-        # 198 px at the reference set's geometry against a disc 618 px in radius. Past that
+        # 198 px at Nico's geometry against a disc 618 px in radius. Past that
         # distance from the mask edge, `_den` is not small, it is EXACTLY 0, and
         # so is `_num`. Clamping _den and dividing then handed NAFE the disc
         # interior UNFLATTENED, on which a rank equaliser saturates: measured on
@@ -1952,46 +2662,222 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         # and the fallback costs nothing: where the kernel reaches nothing, use
         # the global mean of the non-disc region, which is the best available
         # estimate of what the local mean would have been.
-        _s = max(NAFE_FLATTEN_R * R, 4.0)
-        _w = (~disc_m).astype(np.float32)
-        _num = ndimage.gaussian_filter(Ldn * _w, _s)
-        _den = ndimage.gaussian_filter(_w, _s)
-        _glob = float(np.sum(Ldn * _w) / max(float(np.sum(_w)), 1.0))
-        del _w
-        # 1e-3 not 1e-6: below about a thousandth of full weight the quotient is
-        # a handful of far-field pixels amplified by three orders of magnitude,
-        # which is noise, not a local mean.
-        _thin = _den < 1e-3
-        np.maximum(_den, 1e-6, out=_den)
-        _num /= _den
-        del _den
-        _nthin = int(_thin.sum())
-        if _nthin:
-            _num[_thin] = _glob
-        del _thin
-        _Lnf = (Ldn - _num).astype(np.float32)
-        del _num
-        if _nthin:
-            progress.log(f"  NAFE flatten: {100.0 * _nthin / _Lnf.size:.1f}% of "
-                         f"the frame lies further than {4 * _s:.0f}px from open "
-                         f"sky (deep inside the disc); the global mean is used "
-                         f"there rather than zero", None)
-        nv = nafe_vn(_Lnf, K=NAFE_K, gamma=NAFE_GAMMA, combine=False,
-                     sigma_sp=max(NAFE_NEIGH_R * R, 1.0),   # nafe_vn divides by `grid` itself
-                     noise_mult=NAFE_NOISE_MULT,
-                     eps_frac=NAFE_EPS, kernel="gauss", grid=NAFE_GRID)
-        np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
-        del _Lnf
-        lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E",
-                          "flatten_px": round(max(NAFE_FLATTEN_R * R, 4.0), 1),
-                          "flatten": "normalized convolution, disc excluded",
-                          "noise_mult": NAFE_NOISE_MULT,
-                          "neigh_px": round(max(NAFE_NEIGH_R * R, 1.0), 1),
-                          }
+        # 0.23.9: THE INPUT IS THE FOURIER-FLATTENED LOG LUMINANCE, the same
+        # `Lf` MGN uses, and THE LEVEL AXIS IS THE CORONA'S OWN RANGE.
+        #
+        # What the isotropic flatten did at the limb, measured on the
+        # reference set as the layer's mean in shells outside the disc mask:
+        # +0.13 at 0-4 px, +0.35 at 16-24 px, -0.20 at 52-76 px -- a bright
+        # band and a dark trough round the whole Moon, because a 49 px
+        # Gaussian cannot follow the corona's curvature at the limb and the
+        # rank then equalises that residual. Per-radius mean plus two
+        # harmonics can. Same shells with Lf: +0.12, -0.06, -0.04.
+        #
+        # And the axis: nafe_vn spans its levels from the 0.1-99.9 percentiles
+        # of what it is given. With the old flatten that span was 2.45 dex --
+        # set by the limb residual and the disc -- against a corona whose own
+        # residual is 0.4 dex, so one of K=128 bins was 0.0079 dex, 25x the
+        # pixel noise (0.0003 dex). Two consequences: the value window eps
+        # (0.10 of the axis = 0.245 dex) restricted nothing within the
+        # corona, and the noise smoothing sigma (2..12 sigma_A) was always
+        # below half a bin, i.e. NAFE_NOISE_MULT has never had an effect on
+        # this data. Corona-scaled axis and K=512: one bin is 0.0008 dex, the
+        # window is 0.04 dex, and the noise term is live for the first time.
+        # THE AXIS MUST HOLD THE WHOLE CORONA (recipe 3). Recipe 1 spanned
+        # the 0.5-99.5 percentiles of r < 4 R -- a range the outer field
+        # dominates by pixel count, so 8% of the pixels at 1.05-1.6 R fell
+        # outside it. A pixel outside the axis has c_lo = c_mid (or c_hi =
+        # c_mid) and its rank is exactly 0 or 1: solid white and black blobs
+        # over the brightest streamer bases and the darkest gaps. Now the
+        # 0.02-99.98 percentiles with 15% of the width on either side: no
+        # pixel of the corona clips, one bin is 0.0013 dex (4x the pixel
+        # noise), the noise term is still wider than a bin.
+        # RECIPE 4: 0.23.8's input (below, verbatim) is the default again; the
+        # Fourier-flattened input of recipes 1-3 is ECLIPSEFORGE_NAFE_INPUT=lf.
+        if _nin != "lf":
+            # THE FLATTEN FOLLOWS THE LIMB (LAYER_BUILD 7). The log luminance
+            # keeps RISING for some 0.05 R outside the disc mask -- the Moon's
+            # edge is smeared when the frames are locked on the corona (0.23.8),
+            # and the brightest tiers' glare adds to it -- so an isotropic
+            # 0.08 R Gaussian cannot follow it and leaves a radial hump in the
+            # input: measured on Clifton's 360 mm set, -0.40 dex at 1.005 R,
+            # +0.165 dex peaking at 1.065 R, back to 0 at 1.2 R, against
+            # coronal structure of 0.03 dex. A rank filter puts that hump at
+            # its maximum: the layer sat at 0.88 from 1.045 to 1.09 R and at
+            # 0.12 inside -- a 22 px collar with hard edges round the whole
+            # Moon, and the ring Nico saw on three datasets. So the per-radius
+            # mean of the log luminance, taken about the measured limb (r
+            # minus the per-azimuth mask radius) with the disc excluded, is
+            # subtracted FIRST; the isotropic flatten then runs on the
+            # residual exactly as before. The mean follows any radial profile,
+            # hump included, and removes nothing that varies with azimuth:
+            # the residual's spread at 1.3-2 R is unchanged (0.0126 -> 0.0127
+            # dex), the hump is gone (medians within 0.003 dex of 0 from
+            # 1.035 R out), and the layer runs level from the limb outward.
+            _rp = r - (np.asarray(Rmap, np.float32) - np.float32(R))
+            _ib = np.clip(np.round(_rp).astype(np.int32), 0, None)
+            _nb = int(_ib.max()) + 1
+            _o = ~disc_m
+            _cnt = np.bincount(_ib[_o], minlength=_nb).astype(np.float64)
+            _sm = np.bincount(_ib[_o], weights=Ldn[_o].astype(np.float64), minlength=_nb)
+            _pr = np.where(_cnt > 0, _sm / np.maximum(_cnt, 1), np.nan)
+            _okb = np.nonzero(_cnt > 0)[0]
+            if _okb.size:
+                _pr[:_okb[0]] = _pr[_okb[0]]
+                _ok = np.isfinite(_pr)
+                _pr = np.interp(np.arange(_nb), np.nonzero(_ok)[0], _pr[_ok])
+                _pr = ndimage.gaussian_filter1d(_pr, 1.5)
+                _Lrad = np.interp(_rp.ravel(), np.arange(_nb), _pr).reshape(Ldn.shape).astype(np.float32)
+            else:
+                _Lrad = np.zeros_like(Ldn)
+            del _rp, _ib, _o, _cnt, _sm, _pr
+            _Lin = (Ldn - _Lrad).astype(np.float32)
+            del _Lrad
+            _s = max(NAFE_FLATTEN_R * R, 4.0)
+            _w = (~disc_m).astype(np.float32)
+            _num = ndimage.gaussian_filter(_Lin * _w, _s)
+            _den = ndimage.gaussian_filter(_w, _s)
+            _glob = float(np.sum(_Lin * _w) / max(float(np.sum(_w)), 1.0))
+            del _w
+            # 1e-3 not 1e-6: below about a thousandth of full weight the quotient is
+            # a handful of far-field pixels amplified by three orders of magnitude,
+            # which is noise, not a local mean.
+            _thin = _den < 1e-3
+            np.maximum(_den, 1e-6, out=_den)
+            _num /= _den
+            del _den
+            _nthin = int(_thin.sum())
+            if _nthin:
+                _num[_thin] = _glob
+            del _thin
+            _Lnf = (_Lin - _num).astype(np.float32)
+            del _num, _Lin
+            if _nthin:
+                progress.log(f"  NAFE flatten: global mean used for "
+                             f"{100.0 * _nthin / _Lnf.size:.1f}% of the frame "
+                             f"(>{4 * _s:.0f} px from open sky)", None)
+            # THE DISC IS NOT PART OF THE STATISTICS (LAYER_BUILD 8). nafe_vn
+            # took every finite pixel as valid, so the disc interior -- a
+            # quarter of the pixels near the limb, holding nothing but the
+            # flatten's fill plus noise -- set the level axis, the noise
+            # sigma and the knee's median/MAD. Measured on Clifton's 360 mm
+            # set after the exact-edge merge: the layer's median ran 0.88,
+            # 0.19, 0.51, 0.39, 0.72 in bands from the mask edge to +40 px
+            # (a bright line, a dark band, a plateau, a rise), and the corona
+            # inside 1.3 R sat on the rails (sd 0.28). With the disc out of
+            # the statistics the same input gives 0.41-0.49 level from +6 px
+            # out and sd 0.15 -- ranks, not clipping. The first 3 px outside
+            # the mask go too: the lunar edge's own profile (mountains, the
+            # edge spread) is +-0.1 dex there against 0.03 dex of corona, and
+            # ranked it dragged the next 10 px down. Those 3 px are returned
+            # at 0.5 (neutral) and sit under the render's disc edge ramp.
+            _nvalid = (~disc_m) & (r >= np.asarray(Rmap, np.float32) + 3.0)
+            # THE TAILS ARE ROLLED INTO THE AXIS, NOT CLIPPED (LAYER_BUILD 11,
+            # Nico's sharp-edged blobs, 2026-10-06). The level axis is the
+            # 0.1-99.9 percentile range, so by construction 0.1 % of the pixels
+            # at each end fall outside it, sit at x = 0 or 1, and rank EXACTLY
+            # 0 or 1 -- and they are not scattered: they are the deepest dark
+            # lanes and brightest knots, so they print as flat black and white
+            # plateaus with hard borders. Measured on his 600 mm stack: 0.10 %
+            # of the valid pixels on each rail, up to 1-2 % locally, at the dark
+            # blob NE of the Moon and the vertical edge SW of it. Now the part
+            # beyond each end is rolled off with a tanh into an extra 10 % of
+            # the axis -- monotone, so the order of those pixels survives and
+            # they get real ranks -- and K and the value window are scaled so a
+            # bin and eps keep their width in log units: inside the old axis the
+            # layer is unchanged (median |change| 0.0003). On the rails: 0.10 %
+            # -> 0.003 %.
+            _v = _Lnf[_nvalid]
+            _p_lo, _p_hi = (float(x) for x in np.percentile(_v, [0.1, 99.9]))
+            del _v
+            _span, _K, _eps = None, NAFE_K, NAFE_EPS
+            if np.isfinite(_p_lo) and np.isfinite(_p_hi) and _p_hi > _p_lo:
+                _mw = NAFE_TAIL * (_p_hi - _p_lo)
+                _t = _Lnf < _p_lo
+                _Lnf[_t] = _p_lo - _mw * np.tanh((_p_lo - _Lnf[_t]) / _mw)
+                _t = _Lnf > _p_hi
+                _Lnf[_t] = _p_hi + _mw * np.tanh((_Lnf[_t] - _p_hi) / _mw)
+                del _t
+                _span = (_p_lo - _mw, _p_hi + _mw)
+                _K = int(round((NAFE_K - 1) * (1 + 2 * NAFE_TAIL))) + 1
+                _eps = NAFE_EPS / (1 + 2 * NAFE_TAIL)
+            nv = nafe_vn(_Lnf, K=_K, gamma=NAFE_GAMMA, combine=False,
+                         sigma_sp=max(NAFE_NEIGH_R * R, 1.0),   # nafe_vn divides by `grid` itself
+                         noise_mult=NAFE_NOISE_MULT, valid=_nvalid,
+                         eps_frac=_eps, kernel="gauss", grid=NAFE_GRID, span=_span)
+            del _nvalid
+            np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
+            del _Lnf
+            lstats["nafe"] = {"K": NAFE_K, "eps": NAFE_EPS, "layer": "E",
+                              "flatten_px": round(max(NAFE_FLATTEN_R * R, 4.0), 1),
+                              "flatten": "per-radius mean about the limb, then normalized convolution, disc excluded",
+                              "stats": "disc and the first 3 px outside the mask excluded",
+                              "noise_mult": NAFE_NOISE_MULT,
+                              "neigh_px": round(max(NAFE_NEIGH_R * R, 1.0), 1),
+                              }
+        else:
+            _cor = valid & (r < 4.0 * R)
+            _lo = float(np.percentile(Lf[_cor], 0.02))
+            _hi = float(np.percentile(Lf[_cor], 99.98))
+            _mg = 0.15 * (_hi - _lo)
+            _lo, _hi = _lo - _mg, _hi + _mg
+            del _cor
+            # THE INPUT IS THE SAME RADIUS-GROWING BLUR FNRGF'S IS, and the
+            # OUTPUT FADES where the measurement says the 16-32 px band -- the
+            # scale a 0.016 R neighbourhood enhances -- carries no structure.
+            # A rank filter fills its range with whatever is there: on the
+            # reference set the outer field's grain fell 0.047 -> 0.024 at
+            # 2-2.5 R with the blur and the 3-12 px band ROSE 0.044 -> 0.070,
+            # because the rank then equalised the coarser noise instead. The
+            # noise term (NAFE_NOISE_MULT) cannot reach it either: it is sized
+            # to the pixel noise, and after the denoise the local histogram is
+            # set by 4-16 px residue several times wider. So NAFE stops where
+            # its scales stop showing the corona, like MGN's fine scales.
+            _Lin = Lf
+            if _ob > 0.0:
+                _Lin = radial_scale_blur(Lf, r, R, _ob * R, OUTER_BLUR_RANGE[0],
+                                         OUTER_BLUR_RANGE[1], valid=valid)
+            _nfade = None
+            if _do_fade:
+                _nb = 3                                           # the 16-32 px band
+                _ne = _ext[_nb] if (_fade_mode != "fixed" and _nb < len(_ext)) else 2.0
+                if _ne is not None:
+                    _nra = max(float(_ne) + 0.3, 1.3)
+                    _nfade = np.clip((_nra + 0.9 - r / R) / 0.9, 0.0, 1.0).astype(np.float32)
+            progress.log(f"  NAFE: flattened log luminance"
+                         f"{' (outer-blurred)' if _ob > 0.0 else ''}; levels "
+                         f"{_lo:+.3f}..{_hi:+.3f} dex (corona, r < 4 R), "
+                         f"{NAFE_K_LF} levels"
+                         + (f"; fade {_nra:.1f}-{_nra + 0.9:.1f} R"
+                            if _nfade is not None else "; no fade"), None)
+            nv = nafe_vn(_Lin, K=NAFE_K_LF, gamma=NAFE_GAMMA, combine=False,
+                         sigma_sp=max(NAFE_NEIGH_R * R, 1.0),   # nafe_vn divides by `grid` itself
+                         noise_mult=NAFE_NOISE_MULT,
+                         eps_frac=NAFE_EPS, kernel="gauss", grid=NAFE_GRID,
+                         valid=valid, span=(_lo, _hi))
+            if _Lin is not Lf:
+                del _Lin
+            _nfade_on = _nfade is not None
+            if _nfade_on:
+                nv = (0.5 + (nv - 0.5) * _nfade).astype(np.float32)
+            del _nfade
+            np.save(os.path.join(wd, "nafe.npy"), nv.astype(np.float32))
+            lstats["nafe"] = {"K": NAFE_K_LF, "eps": NAFE_EPS, "layer": "E",
+                              "input": "fourier-flattened log luminance (as MGN)"
+                                       + (", outer-blurred" if _ob > 0.0 else ""),
+                              "axis_dex": [round(_lo, 4), round(_hi, 4)],
+                              "noise_mult": NAFE_NOISE_MULT,
+                              "neigh_px": round(max(NAFE_NEIGH_R * R, 1.0), 1),
+                              "fade_R": ([round(_nra, 2), round(_nra + 0.9, 2)]
+                                         if _nfade_on else None),
+                              }
         del nv
+    except _NafeOff:
+        pass
     except Exception as e:
-        progress.log(f"NAFE layer unavailable ({e})", None)
+        progress.log(f"[fail] NAFE layer not built ({e})", None)
         np.save(os.path.join(wd, "nafe.npy"), np.full((H, W), 0.5, np.float32))
+    del Lf
     # HILL'S UNSHARP-MASK SET. Built HERE, before `lum_dn` is released:
     # calling it after that `del` raised UnboundLocalError at the end of an
     # 18-minute stack, which is the worst possible place to find a typo.
@@ -2002,7 +2888,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     # is one transform of data they already have.
     if partialconv:
         lstats["hill"] = build_hill(wd, progress, lum_dn=lum_dn, disc=disc_m,
-                                    prom=_pm, cy=cy, cx=cx, frac=_DF["pellett"])
+                                    prom=_pm, cy=cy, cx=cx, frac=_DF["hill"])
     else:
         # PARTIAL CONVOLUTION OFF. It is the most expensive layer in the run --
         # about half the wall clock on a 24 Mpx merge, because the polar blur
@@ -2021,9 +2907,8 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
                 except OSError:
                     pass
         lstats["hill"] = None
-        progress.log("partial convolution: OFF (setting) — the most expensive "
-                     "layer in the run is skipped and its sliders will not "
-                     "appear; turn it on for the final render", _DF["pellett"])
+        progress.log("[warn] partial convolution: off (setting), layer skipped; "
+                     "enable for final render", _DF["pellett"])
 
     del lum_dn, Ldn
 
@@ -2050,12 +2935,12 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
             cys, cxs, Rs = float(_ig["cy"]), float(_ig["cx"]), float(_ig["R"])
             lstats["inner_geom"] = {"cy": cys, "cx": cxs, "R": Rs,
                                     "offset_px": float(np.hypot(cys - cy, cxs - cx))}
-            progress.log(f"inner-stack lunar disc (from the track): "
-                         f"({cys:.0f},{cxs:.0f}) R={Rs:.0f}px — "
-                         f"{np.hypot(cys - cy, cxs - cx):.0f}px from the merged limb",
+            progress.log(f"inner-stack lunar disc (track): "
+                         f"({cys:.0f},{cxs:.0f}) R={Rs:.0f}px, "
+                         f"{np.hypot(cys - cy, cxs - cx):.0f}px from merged limb",
                          None)
     except Exception as e:
-        progress.log(f"inner-stack geometry unavailable ({e}); using merged", None)
+        progress.log(f"[warn] inner-stack geometry unavailable ({e}), merged used", None)
     _yi = np.arange(H, dtype=np.float32)[:, None] - cys
     _xi = np.arange(W, dtype=np.float32)[None, :] - cxs
     r_s = np.sqrt(_yi * _yi + _xi * _xi)
@@ -2097,8 +2982,8 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     if os.path.exists(prgb_path):
         prgb = np.load(prgb_path).astype(np.float32)   # half-res HxWx3
         if not np.isfinite(prgb).all():
-            progress.log("warning: prominence stack has non-finite samples "
-                         "(stale cache?) — sanitising", None)
+            progress.log("[odd] prominence stack: non-finite samples, "
+                         "sanitising", None)
             prgb = np.nan_to_num(prgb, nan=0.0, posinf=0.0, neginf=0.0)
         Rc = ndimage.gaussian_filter(prgb[:, :, 0], 2)
         GB = ndimage.gaussian_filter(0.5 * (prgb[:, :, 1] + prgb[:, :, 2]), 2)
@@ -2148,7 +3033,8 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
             g = np.clip((redness - t0) / (t1 - t0), 0, 1)
             g *= _ss(np.clip((rh - (Rh - 0.026 * _Rs)) / (0.019 * _Rs), 0, 1))
             g *= _ss(np.clip(((Rh + 0.226 * _Rs) - rh) / (0.081 * _Rs), 0, 1))
-            # UNION with the merge-based detection (promlayer.detect, 0.23.11). This gate reads the redness of one fast tier; on the 600 mm
+            # UNION with the merge-based detection (promlayer.detect, 0.23.10
+            # lab). This gate reads the redness of one fast tier; on the 600 mm
             # set it covered 4 of the 15 prominences the merge shows, and missed
             # the 52 px one at 68 deg entirely. The promdet layer below is scaled
             # inside this gate too, so it now reaches them as well.
@@ -2161,12 +3047,12 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
                     _before = int((g > 0.3).sum())
                     g = np.maximum(g, _nh / 1.6)     # *1.6 below brings it to full
                     lstats.setdefault("prom", {})["merge_detect_px"] = int((_nd > 0.3).sum())
-                    progress.log(f"  prominence gate: {_before * 4 / 1e3:.1f}k px from the tier's "
-                                 f"redness, {int((g > 0.3).sum()) * 4 / 1e3:.1f}k px with the "
+                    progress.log(f"  prominence gate: {_before * 4 / 1e3:.1f}k px from tier "
+                                 f"redness, {int((g > 0.3).sum()) * 4 / 1e3:.1f}k px with "
                                  f"merge-based detection", None)
                     del _nd, _nh
             except Exception as _e:
-                progress.log(f"  merge-based prominence detection not used ({_e})", None)
+                progress.log(f"[warn] merge-based prominence detection not used ({_e})", None)
             g = ndimage.gaussian_filter(g, 2)
             gate = _fit(np.clip(g * 1.6, 0, 1).repeat(2, 0).repeat(2, 1), (H, W))
             gate = ndimage.gaussian_filter(gate, 2)
@@ -2179,13 +3065,13 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
                 _pdf = ndimage.gaussian_filter(_pdf, 1.0)
                 np.save(os.path.join(wd, "promdet.npy"), _pdf.astype(np.float32))
                 lstats["prom"]["detail_layer"] = True
-                progress.log("prominence detail: built from the H-alpha tier's "
-                             "red channel, scaled inside the gate", None)
+                progress.log("[ok] prominence detail layer: H-alpha tier red "
+                             "channel, gated", None)
                 del _pdf
             except Exception as _e:
-                progress.log(f"prominence detail layer not built ({_e})", None)
+                progress.log(f"[fail] prominence detail layer not built ({_e})", None)
         else:
-            progress.log("prominence colour: not enough limb samples", None)
+            progress.log("[warn] prominence colour: too few limb samples", None)
     if "prom" in lstats:
         lstats["prom"]["area_px"] = int((gate > 0.3).sum())
         # ...and how much of it survives the disc mask. A prominence flagged
@@ -2209,7 +3095,7 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
     del gate, Ls
 
     progress.log("tangential filter...", _DF["pellett"])
-    _pellett(wd, lum, r, cy, cx, R, disc_m)
+    _pellett(wd, lum, r, cy, cx, R, disc_m, outer_blur=(_ob * R, OUTER_BLUR_RANGE))
 
     ep = os.path.join(wd, "earth.npy")
     if earthshine:
@@ -2217,11 +3103,10 @@ def build_layers(wd, progress, denoise="fine", earthshine=False,
         _earthshine(wd, r, cy, cx, R)
     elif os.path.exists(ep):
         os.remove(ep)
-    lstats["layer_recipe"] = {"build": LAYER_BUILD}
     return lstats
 
 
-def _pellett(wd, lum, r, cy, cx, R, disc, blur_deg=6.0, na=2880):
+def _pellett(wd, lum, r, cy, cx, R, disc, blur_deg=6.0, na=2880, outer_blur=None):
     """Tangential unsharp: subtract a rotational blur about the disc centre
     from the log luminance. Softer texture than MGN/FNRGF.
 
@@ -2268,14 +3153,21 @@ def _pellett(wd, lum, r, cy, cx, R, disc, blur_deg=6.0, na=2880):
     from skimage.transform import warp_polar
     H, W = lum.shape
     L = np.log10(np.clip(lum, 1.0, None))
-    L = L.copy(); L[disc] = np.median(L[disc])
     rmax = int(np.hypot(max(cy, H - cy), max(cx, W - cx))) + 8
-    P = warp_polar(L, center=(cy, cx), radius=rmax, output_shape=(na, rmax), order=1)
-    V = warp_polar(np.ones_like(L), center=(cy, cx), radius=rmax,
-                   output_shape=(na, rmax), order=1)
+    # 0.23.9: THE BLUR IS PARTIAL -- the disc carries weight 0, so a pixel
+    # just outside a limb that wobbles by a few pixels of radius is no longer
+    # averaged with the disc fill on the same arc. That fill (the disc's
+    # median) is what printed a bright ring at the mask edge: measured on the
+    # reference set as the layer's mean in shells outside the mask, +0.155 at
+    # 0-4 px and +0.058 at 4-8 px, against +0.001 and -0.018 with the disc
+    # weighted out. Grain at 1.02-1.10 R halves with it (0.039 -> 0.018 rms).
+    Wt = (~disc).astype(np.float32)
+    P = warp_polar(L * Wt, center=(cy, cx), radius=rmax, output_shape=(na, rmax), order=1)
+    V = warp_polar(Wt, center=(cy, cx), radius=rmax, output_shape=(na, rmax), order=1)
+    del Wt
     sigma_bins = blur_deg / 360.0 * na
-    # normalized convolution: out-of-frame samples don't drag the blur down
-    Pb = (ndimage.gaussian_filter1d(P * V, sigma_bins, axis=0, mode="wrap") /
+    # normalized convolution: out-of-frame and disc samples don't drag the blur down
+    Pb = (ndimage.gaussian_filter1d(P, sigma_bins, axis=0, mode="wrap") /
           np.maximum(ndimage.gaussian_filter1d(V, sigma_bins, axis=0, mode="wrap"), 1e-3))
     theta = np.arctan2(np.arange(H, dtype=np.float32)[:, None] - cy,
                        np.arange(W, dtype=np.float32)[None, :] - cx)
@@ -2286,6 +3178,14 @@ def _pellett(wd, lum, r, cy, cx, R, disc, blur_deg=6.0, na=2880):
     res = L - blur
     outer = r > R + 10
     s = 1.4826 * np.median(np.abs(res[outer] - np.median(res[outer]))) if outer.any() else 0.01
+    # 0.23.9: the far field of this layer was 85% sub-3 px grain (0.10 rms
+    # against 0.017 of structure beyond 4 R on the reference set). The
+    # RESIDUAL goes through the same radius-growing blur FNRGF's input does --
+    # after `s` is taken, so the layer's gain is what it always was. Blurring
+    # the input instead moved `s` and doubled the layer's amplitude.
+    if outer_blur is not None and float(outer_blur[0]) > 0.0:
+        res = radial_scale_blur(res, r, R, float(outer_blur[0]),
+                                outer_blur[1][0], outer_blur[1][1], valid=~disc)
     pel = 0.5 + 0.5 * np.tanh(res / (4.0 * max(s, 1e-4)))
     pel[disc] = 0.5
     np.save(os.path.join(wd, "pellett.npy"), pel.astype(np.float32))

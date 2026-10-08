@@ -124,8 +124,13 @@ def value_neighbourhood_weight(L, sigma_sp=25.0, eps=None, valid=None,
 
 def nafe_vn(A, sigma_sp=30.0, K=128, w=0.2, gamma=3.0, noise_sigma=None,
             eps_frac=0.10, valid=None, n_scales=8, kernel="gauss", grid=8,
-            combine=False, noise_mult=4.0, knee=3.0):
+            combine=False, noise_mult=4.0, knee=3.0, span=None):
     """Noise Adaptive Fuzzy Equalization with a Variable Neighbourhood.
+
+    `span` (0.23.9): (lo, hi) for the level axis, in the units of `A`. Without
+    it the axis is the 0.1-99.9 percentile range of the `valid` pixels, which
+    on an eclipse frame is set by the limb residual, not the corona -- see
+    detail.build_layers for the measurement. Values outside the span clip.
 
     Returns E, the fuzzy rank of each pixel within its own neighbourhood,
     restricted to neighbours of similar VALUE (their eqs. 11-12). `combine=True`
@@ -210,8 +215,11 @@ def nafe_vn(A, sigma_sp=30.0, K=128, w=0.2, gamma=3.0, noise_sigma=None,
     v = A[m]
     if v.size < 100:
         return np.full_like(A, 0.5)
-    lo = float(np.percentile(v, 0.1))
-    hi = float(np.percentile(v, 99.9))
+    if span is not None:
+        lo, hi = float(span[0]), float(span[1])
+    else:
+        lo = float(np.percentile(v, 0.1))
+        hi = float(np.percentile(v, 99.9))
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return np.full_like(A, 0.5)
     # a0, a1 of eq. 3: the level axis. A monotone pre-transform of A (this
