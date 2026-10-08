@@ -2,15 +2,12 @@
 
 **High-Dynamic-Range Solar Eclipse Image Processing** — version 0.25.0
 
-![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpeg)
+![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
 *41 raw frames, 12 exposure tiers, 9.6 EV — Panasonic LUMIX S1R II at 600 mm
-f/8, Spain, 12 August 2026. Aligned, stacked and enhanced in EFHDR v0.23.1,
-then finished by hand: NoiseXTerminator and mild curve adjustments in
-PixInsight, and in Photoshop the prominences added back, the earthshine pulled
-from the 0.5 s tier, some vignetting and colour work. EFHDR produced the merged
-corona underneath all of that; the rest is ordinary photographic finishing on
-top of it.*
+f/8, Spain, 12 August 2026. Stacked and rendered in EFHDR 0.25.0, including
+the Moon and prominence layers; noise reduction (NoiseXTerminator) afterwards
+in Photoshop.*
 
 A local desktop application that turns a folder of exposure-bracketed raw files
 shot during totality into a finished corona image. Point it at the folder, wait
@@ -21,15 +18,14 @@ interface is a small web server on `127.0.0.1` that only your browser talks to.
 
 | | |
 |:---:|:---:|
-| ![](docs/images/eclipseforge_composite_render_A.jpeg) | ![](docs/images/eclipseforge_composite_render_B.jpeg) |
-| **As the camera saw it** | **Neutralise corona** |
+| ![](docs/images/eclipseforge_composite_render_A.jpg) | ![](docs/images/eclipseforge_composite_render_B.jpg) |
+| **After stacking** | **After the colour and tone controls** |
 
-*The same merged image, one control apart. The corona is scattered photospheric
-light and is very nearly white; at 6.8 degrees of solar altitude the atmosphere
-takes the blue out of it on the way down, which is the warm cast on the left.
-Neutralise corona measures the colour in a 1.05-1.6 R annulus and divides it
-out. What that leaves visible on the right is the sky's own light, which this
-version does not remove — see Known issues in the release notes.*
+*The same stack, before and after rendering. Left: the merge as it comes out of
+the stack, with the camera's white balance (look "EFHDR as loaded"). At 6.8
+degrees of solar altitude the atmosphere takes the blue out of the corona's
+light, which is the warm cast. Right: the same layers after the colour and tone
+controls and the Moon layer.*
 
 *41 frames, 12 exposure tiers, 9.6 EV — Panasonic S1R II at 600 mm f/8,
 Spain, 12 August 2026.*
@@ -39,11 +35,6 @@ Spain, 12 August 2026.*
 *The folder and the flats go in the top bar; the row of buttons switches the
 preview between the composite and each individual layer; every slider on the
 right re-renders live, with no re-processing.*
-
-*A different bracket from the one above: 9 frames, 9 exposure tiers, 8.0 EV —
-Canon EOS Rebel T7 with an EF-S 55-250 mm at 240 mm f/5.6. Image (c) a second tester
-Brown, 2026, used with permission; one of the sets this release is validated
-against.*
 
 ---
 
@@ -157,14 +148,6 @@ own button so it can be inspected alone, and the composite is a weighted mix.
 MGN, Tangential and Partial conv are for fine structure, FNRGF for faint
 outer structure, and Inner and Prom gate are additional *sources* rather
 than filters.
-
-| MGN | FNRGF | Tangential |
-|:---:|:---:|:---:|
-| ![](docs/images/eclipseforge_render_mgn.jpeg) | ![](docs/images/eclipseforge_render_fnrgf.jpeg) | ![](docs/images/eclipseforge_render_pellett.jpeg) |
-| **Inner** | **Prom gate** | |
-| ![](docs/images/eclipseforge_render_inner.jpeg) | ![](docs/images/eclipseforge_render_prom.jpg) | |
-
-*The same merged image through each layer.*
 
 **MGN — Multi-scale Gaussian Normalisation** (Morgan & Druckmüller 2014)
 Normalises local contrast at six spatial scales at once: at each scale it
@@ -673,13 +656,11 @@ under-exposed one degrades to a vignetting model rather than adding noise.
 **More flats and brighter flats both buy sharper correction** — for dust removal
 as well as vignetting, expose them to roughly half saturation and shoot plenty.
 
-![The master flat](docs/images/eclipseforge_flat.jpeg)
-
-*The master flat on the **Flat** button, stretched to its own 0.5–99.5
-percentile, because a falloff of a few percent shown linearly over 0–1 is
-invisible. Visible here: the vignette, a brightest point below and left of the
-frame centre rather than on it, and a scatter of dust motes — all divided out of
-every frame of every tier. This view is where a bad flat set announces itself.*
+The master flat is shown on the **Flat** button, stretched to its own
+0.5–99.5 percentile, because a falloff of a few percent shown linearly over 0–1
+is invisible. The vignette, an off-centre brightest point and dust motes show
+there before they are divided out of every frame of every tier. This view is
+where a bad flat set announces itself.
 
 Practical notes:
 
