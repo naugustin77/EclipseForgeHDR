@@ -4,7 +4,7 @@
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
-*Example result, stacked and rendered in EFHDR 0.25.0, including
+*Example result, stacked and rendered in EFHDR v0.28.0, including
 the Moon and prominence layers; noise reduction (NoiseXTerminator) afterwards
 in Photoshop.*
 
@@ -18,15 +18,15 @@ interface is a small web server on `127.0.0.1` that only your browser talks to.
 | | |
 |:---:|:---:|
 | ![](docs/images/eclipseforge_composite_render_A.jpg) | ![](docs/images/eclipseforge_composite_render_B.jpg) |
-| **After stacking** | **After the colour and tone controls** |
+| **After stacking** (here a low eclipse in 2026, hence the warm tones) | **After colour and tone adjustments** ("Night navy" preset) |
 
 *The same stack, before and after rendering. Left: the merge as it comes out of
 the stack, with the camera's white balance (look "EFHDR as loaded"). With the
 Sun low in the sky the atmosphere takes the blue out of the corona's
 light, which is the warm cast. Right: the same layers after the colour and tone
-controls and the Moon layer.*
+adjustments of the "Night navy" preset and the Moon layer.*
 
-![The EclipseForgeHDR interface](docs/images/eclipseforge_gui.jpeg)
+![The EclipseForgeHDR interface](docs/images/eclipseforge_gui.jpg)
 
 *The folder and the flats go in the top bar; the row of buttons switches the
 preview between the composite and each individual layer; every slider on the
