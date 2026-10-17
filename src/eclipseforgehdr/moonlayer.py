@@ -5,7 +5,7 @@ and cached as MOON_FILE on the merge grid (0.5 = neutral, the format the old
 earth.npy had, so render.py's Earthshine control drives it unchanged).
 
 Recipe (after Project Helion's log on the same frames, re-derived and measured
-on the reference set, Oct 2026):
+on the reference test set, Oct 2026):
   1. every long frame read from the raw file, calibrated with the cached master
      bias / dark / flat when they fit, superpixel green;
   2. each frame's Moon found by its own limb and the frames stacked ON THE MOON
@@ -19,7 +19,7 @@ on the reference set, Oct 2026):
      the SENSOR on this set (measured: early vs late frames correlate 0.41 in
      sensor coordinates, 0.23 on the Moon), so it is left out;
   6. faded out over the last 0.08 R, where the limb's spill owns the light.
-Checked against a PixInsight earthshine of the same frames: same
+Checked against an independent PixInsight earthshine of the same frames: same
 orientation; correlation 0.54 / 0.67 / 0.61 / 0.27 in the bands 0.02-0.08 /
 0.03-0.15 / 0.06-0.3 / 0.1-0.5 R (the largest is where the two scattered-light
 models differ most).
@@ -133,7 +133,7 @@ def build(folder, wd, progress=None, frames=None):
     tmax = max(t for _, t in frames)
     use = [(p, t) for p, t in frames if t >= tmax / 16.0 - 1e-9]
     # THE LONGEST EXPOSURE IS LEFT OUT when at least two shorter ones remain.
-    # Measured on the reference set against the PixInsight earthshine: its large-scale
+    # Measured on the reference set against that PixInsight earthshine: its large-scale
     # pattern is instrumental (4x the others' level in rate units), and with it
     # the maria scale agrees 0.05 with that result, without it 0.27 (0.61 at
     # 0.04-0.2 R instead of 0.53).
@@ -271,8 +271,8 @@ def build(folder, wd, progress=None, frames=None):
         return ndimage.gaussian_filter(a * w, sg) / np.maximum(ndimage.gaussian_filter(w, sg), 1e-6)
     s_lo = max(3.0, 0.012 * mR); s_hi = 0.3 * mR
     Eb = np.where(inside, nconv(E, s_lo) - nconv(E, s_hi), 0.0)
-    # ---- 5b: THE LIMB BAND (build 2, 2026-10-07). Measured on a
-    # test set and on the reference frames: after the band-pass the structure
+    # ---- 5b: THE LIMB BAND (build 2, 2026-10-07). Measured on two
+    # test sets (one of them the reference set): after the band-pass the structure
     # grew toward the edge (ring std 1.8x the centre's at 0.75-0.86 R) and the
     # rings there sat dark (layer mean 0.44 against 0.50), then both dropped to
     # flat within 0.05 R -- a visible rim. Real maria lose contrast toward the

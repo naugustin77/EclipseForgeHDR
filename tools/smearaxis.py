@@ -36,7 +36,7 @@ reports its amplitude and axis. Amplitude near zero means the two runs are
 smeared the same way; a large amplitude means one of them is smeared along the
 reported axis, and the sign says which.
 
-WORKED EXAMPLE (a round-robin test bracket, 0.23.8). Moon Align against Corona
+WORKED EXAMPLE (a test bracket, 0.23.8). Moon Align against Corona
 Align: the two runs measure the same overall (+0.1%), but the ratio fits a
 cos(2*phi) of amplitude 18.8% about an axis of 74 degrees, and the per-tier
 shifts in the work directory lie along 82 degrees with 46x elongation. Same
@@ -61,7 +61,7 @@ except ImportError as _e:                        # noqa: BLE001
     # and NOT in the system python. Name the interpreter that has them rather
     # than leaving a bare ImportError: on macOS `python` does not exist at all
     # and `python3` is the system one, which has no scipy.
-    _v = os.path.expanduser("~/.local/pipx/venvs/eclipseforgehdr/bin/python")
+    _v = os.path.expanduser("~/.local/pipx/venvs/eclipseforgehdr-lab/bin/python")
     sys.stderr.write(
         f"{__file__.split(os.sep)[-1]}: {_e}\n\n"
         "This needs numpy, scipy and Pillow. They are in the venv pipx made\n"

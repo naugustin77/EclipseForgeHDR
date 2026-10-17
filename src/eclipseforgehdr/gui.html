@@ -93,6 +93,11 @@ button:disabled{opacity:.45;cursor:default}
 .log .lv-ok{color:#72d48f}.log .lv-warn{color:#f0a640}.log .lv-fail{color:#ff6161;font-weight:600}
 .log .lv-odd{color:#ff82d0}.log .lv-step{color:#9ec4ff}
 .runline .left{color:var(--muted)}
+.tline{margin-top:8px;background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:6px 8px 5px}
+.tline svg{display:block;width:100%;height:70px}
+.tline .tlsum{font:11px ui-monospace,monospace;color:var(--muted);margin-top:3px;line-height:1.45}
+.tline .tlsum i{display:inline-block;width:8px;height:8px;border-radius:2px;margin:0 3px 0 6px;vertical-align:0}
+.tline .tlhead{font:10px ui-monospace,monospace;color:var(--muted);letter-spacing:.06em;margin-bottom:2px}
 .log.big{position:fixed;left:16px;right:calc(var(--rail) + 16px);top:16px;bottom:16px;height:auto;z-index:40;font-size:12px;resize:none;box-shadow:0 20px 60px rgba(0,0,0,.7)}
 .grouphead{display:flex;align-items:center;gap:8px;cursor:pointer;-webkit-user-select:none;user-select:none}
 .grouphead h2{flex:1;margin:0}
@@ -141,6 +146,8 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
 .group.nd .grouphead:hover .reset{display:inline-block}
 .ctl.nd label .val::before{content:"\25CF";color:var(--gold);font-size:8px;margin-right:6px;vertical-align:2px}
 .viewbar .vbtn.primary{box-shadow:0 0 0 1px var(--gold) inset}
+.viewbar .cropvbtn{padding:5px 10px;font-size:12px;white-space:nowrap;flex:none}
+.viewbar .cropvbtn.primary{box-shadow:0 0 0 1px var(--gold) inset}
 .bar{height:5px;background:#2a303a;border-radius:3px;margin-top:8px;overflow:hidden}
 .bar>div{height:100%;background:var(--gold);width:0%;transition:width .4s linear}
 /* While a run is live the bar carries moving stripes. The bar can sit at one
@@ -342,6 +349,13 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
           <option value="clip" selected>Clipped mean (kappa-sigma)</option>
         </select></label>
       <label class="opt"
+        title="For repeated brackets only. HDR per bracket (experimental) is meant for sequences where the sky or the Moon's position significantly changes between brackets (long eclipses); it could not be tested extensively yet. Re-stacks.">
+        <span class="optname">Brackets</span>
+        <select id="bracketMode" class="sel">
+          <option value="tiers" selected>Stack per exposure</option>
+          <option value="hdr">HDR per bracket (experimental)</option>
+        </select></label>
+      <label class="opt"
         title="Harmonics of the FNRGF layer. EFHDR: 6 per ring, hard cutoff. Published: 30, progressively attenuated. Rebuilds the detail layers, no re-stack.">
         <span class="optname">FNRGF</span>
         <select id="fnrgfPreset" class="sel">
@@ -421,6 +435,9 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
         <button data-view="flat" class="vbtn" id="flatBtn" style="display:none"
           title="The master flat, stretched to show falloff and dust. A check on the flats; not part of the composite.">Flat</button>
       </span>
+    <!-- the 1:1 crop button lives in the bar under the preview so it is always in reach (2026-10-16) -->
+    <button id="cropbtn" class="cropvbtn" disabled
+      title="Press, then click a point on the preview: a 600 px window of the full-resolution picture is rendered with the current sliders, through the export path (final sharpening, stars, prominences), and shown at 1:1. About 2 s. Esc cancels; the window can be refreshed after moving a slider.">1:1 crop…</button>
     <div id="credit" class="credit"></div>
     </div>
   </div>
@@ -434,14 +451,18 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
         <span id="stepnote"></span>
       </div>
       <div class="log" id="log" title="Green: done. Orange: warning, the run goes on. Red: failure. Pink: unusual, check it. Blue: stage start.">idle</div>
+      <div class="tline" id="tline" style="display:none" title="One bar per frame along the shooting time; bar height is the exposure time (log scale). Hover a bar for the file.">
+        <div class="tlhead" id="tlhead">SHOOTING TIMELINE</div>
+        <svg id="tlsvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="tlsum" id="tlsum"></div>
+      </div>
     </div>
     <div class="group"><div class="grouphead"><span class="gico"></span><h2>Structure</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-structure"></div></div>
     <div class="group" id="grp-hill"><div class="grouphead"><span class="gico"></span><h2>Partial convolution</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">Unsharp masks of the log-stretched image at
         2&ndash;32 px, added back with their own weights. Each blur runs in polar coordinates, along
         a streamer rather than across it, and leaves the Moon and the prominences out. Additive,
-        where MGN and NAFE are locally normalised: faint structure stays faint.
-        After the talk &ldquo;Advanced Solar Eclipse Photography&rdquo;.</div>
+        where MGN and NAFE are locally normalised: faint structure stays faint.</div>
       <div class="hint" id="hillNote" style="display:none;color:var(--gold)">
         The masks are not in this work directory &mdash; press Clear cache and Start to
         build them (adds a few minutes to the stack).</div>
@@ -463,11 +484,13 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
           <option value="helion">Bright desaturated streamers</option>
           <option value="druckmuller">Calm blue</option>
           <option value="sunset">Deep sunset</option>
-          <option value="darkmoody">Dark moody</option>
-          <option value="purple">Deep purple</option>
           <option value="expM4">Clean Steel M4</option>
           <option value="expM5">Clean Steel M5</option>
           <option value="expM6">Clean Steel M6</option>
+          <option value="silverRays">Silver rays</option>
+          <option value="nightNavy">Night navy</option>
+          <option value="midnightSilver">Midnight silver</option>
+          <option value="goldenHour">Golden hour</option>
         </select></label>
       <label class="opt" title="Monochrome removes all colour; the composite then exports as a single channel. Mono + tints is a stylized rendering that discards the corona's measured color and replaces it with a chosen tint.">
         <span class="optname">Colour</span>
@@ -518,8 +541,6 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
           </select></label>
         <input type="text" id="expname" value="eclipseforge_render" spellcheck="false">
         <button class="primary" id="export" disabled>Export full resolution</button>
-        <button id="cropbtn" disabled style="margin-top:6px"
-          title="Press, then click a point on the preview: a 600 px window of the full-resolution picture is rendered with the current sliders, through the export path (final sharpening, stars, prominences), and shown at 1:1. About 2 s. Esc cancels; the window can be refreshed after moving a slider.">1:1 crop of the export…</button>
         <span class="hint">Exports the current view (composite, or the selected detail layer as grayscale).
         Saved into <code>eclipseforge_output/</code> inside the raw folder, with a .params.json sidecar.</span>
       </div>
@@ -605,6 +626,7 @@ const DEFS = [
  ["promSat","Prominence saturation",0,2,0.01,"prom"],
  ["promPeak","Prominence peak (1 = off)",0.6,1,0.005,"prom"],
  ["promSoft","Prominence soft highlights",0,1,0.01,"prom"],
+ ["promLight","Prominence brightness (0 = opaque colour)",0,1,0.01,"prom"],
  ["promFade","Calm the corona detail under prominences",0,1,0.01,"prom"],
  ["starStrength","Star gain (0 = no stars, 1 = as shot, >1 = brighter)",0,10,0.01,"stars"],
  ["starColour","Star colour (0 = white, 1 = as measured)",0,2,0.01,"stars"],
@@ -651,7 +673,7 @@ let P = {}, GEO = null, L = {}, ready = false;
 // frame rather than a grey one). Temperature reaches further
 // down than Camera Raw's -150 because a corona a few degrees above the
 // horizon is reddened by the atmosphere far more than any daylight scene:
-// on the reference set the picker wanted below -150 and clamped.
+// on the reference test set the picker wanted below -150 and clamped.
 //
 // ONLY the control changes. P, the settings file, the export sidecar, the
 // report and render.py all keep the multiplier, so a file saved under the old
@@ -735,7 +757,8 @@ function buildSliders(defaults){
     // a parameter (the looks and Natural keep their values, pixel for pixel);
     // Structure, on the finished picture, is the control now.
     if (k === "clarity") div.style.display = "none";
-    if (k === "promSoft") div.title = "Smooths the step from the prominence cores to their rims: the brightest parts keep their structure instead of becoming one flat colour. 0 = off. Double-click to reset.";
+    if (k === "promLight") div.title = "How far the prominences brighten the corona under them, so the brightest core is also the brightest part (pale pink where it outshines a light corona). 0 = laid over the corona as an opaque colour, as before. Double-click to reset.";
+  if (k === "promSoft") div.title = "Smooths the step from the prominence cores to their rims: the brightest parts keep their structure instead of becoming one flat colour. 0 = off. Double-click to reset.";
   if (k === "detailStart") div.title = "How close to the Moon the inner and filament detail begin, in full-resolution pixels outside the disc edge; full strength at twice that. Lower brings texture up to the limb, higher hides a dashed line along it. Check with the 1:1 crop. Double-click to reset.";
   if (k === "bandFaint") div.title = "Fades the filament detail out in the darker parts of the picture: 0 = everywhere, higher = only where the corona is brighter than this. Double-click to reset.";
   if (k === "bandCoarse") div.title = "How much of the coarse filament texture (6-24 px) the filament detail carries. 1 = as before; lower takes out the blotchy texture next to the limb and keeps the fine filaments.";
@@ -771,6 +794,134 @@ function buildSliders(defaults){
   setupCurve();
 }
 
+
+/* ---- shooting timeline under the log (2026-10-15) -----------------------
+   What the bracket finder made of the folder, as a picture: one bar per frame
+   along the shooting time, height = exposure time on a log scale, so repeated
+   brackets show as a saw and a set shot tier by tier as a staircase. After a
+   run the bars also say what happened to each frame, and a white line marks
+   the instant whose Moon every tier was stacked with. */
+let TL = null;
+function tlExp(s){
+  if (s >= 1) return (Math.round(s * 10) / 10) + " s";
+  return "1/" + Math.round(1 / s) + " s";
+}
+function tlDur(s){
+  if (s == null) return "";
+  if (s < 90) return Math.round(s) + " s";
+  return Math.floor(s / 60) + " min " + Math.round(s % 60) + " s";
+}
+async function loadTimeline(){
+  const box = $("tline"); if (!box) return;
+  try {
+    const r = await fetch("/api/timeline"); const j = await r.json();
+    if (!j.ok || !j.n){ box.style.display = "none"; TL = null; return; }
+    TL = j; box.style.display = ""; drawTimeline();
+  } catch (e) { box.style.display = "none"; }
+}
+function drawTimeline(){
+  const j = TL, svg = $("tlsvg"); if (!j || !svg) return;
+  const W = Math.max(120, svg.clientWidth || 300), H = 70;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (n, a, txt) => { const e = document.createElementNS(NS, n);
+    for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const F = j.frames, padL = 4, padR = 4, top = 13, bot = 3;
+  const t0 = Math.min(...F.map(f => f.t)), t1 = Math.max(...F.map(f => f.t));
+  const span = Math.max(t1 - t0, 1e-6);
+  const X = t => padL + (t - t0) / span * (W - padL - padR);
+  const smin = Math.min(...F.map(f => f.sec)), smax = Math.max(...F.map(f => f.sec));
+  const lr = Math.log(smax / smin) || 1;
+  const hOf = s => 5 + (smax > smin ? Math.log(s / smin) / lr : 0.6) * (H - top - bot - 5);
+  const bw = Math.max(1.2, Math.min(6, (W - padL - padR) / (F.length * 1.7)));
+  const COL = ["#5aa0f0", "#3a76c8"];
+  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d"};
+  const MOONC = "#e6e9ee";
+  // brackets: alternate shading behind each, number on top
+  if (j.repeated){
+    const nb = j.n_brackets, every = Math.max(1, Math.ceil(nb / Math.max(1, Math.floor(W / 22))));
+    for (let b = 0; b < nb; b++){
+      const fb = F.filter(f => f.bracket === b); if (!fb.length) continue;
+      const xa = X(Math.min(...fb.map(f => f.t))) - bw, xb = X(Math.max(...fb.map(f => f.t))) + bw;
+      svg.appendChild(el("rect", {x: xa, y: top - 1, width: Math.max(1, xb - xa), height: H - top - bot + 1,
+        fill: b % 2 ? "#1b1f27" : "#171a21", rx: 2}));
+      if (b % every === 0)
+        svg.appendChild(el("text", {x: xa + 1, y: 9, fill: "#8b93a0", "font-size": 9,
+          "font-family": "ui-monospace,monospace"}, String(b + 1)));
+    }
+  }
+  // FRAMES TOO CLOSE TO SEPARATE (a burst of short exposures within one
+  // second) are drawn as one bar with their count on top, the bar split by
+  // what happened to them; hover lists them.
+  const why = {excluded: "not stacked (not a totality frame / unreadable)",
+               brightness: "left out: brightness more than 15 % off the tier median",
+               dropped: "left out by the sharpness cut"};
+  const tip1 = f => `${f.name} · ${tlExp(f.sec)} · +${f.t.toFixed(1)} s` +
+      (j.repeated ? ` · bracket ${f.bracket + 1}` : "") +
+      (f.status ? ` · ${why[f.status] || f.status}` : "") +
+      (f.gain != null ? (f.status === "brightness"
+          ? ` (${Math.round(Math.abs(f.gain - 1) * 100)} % ${f.gain < 1 ? "darker" : "brighter"} than the tier median; cause not known)`
+          : ` · brightness ${f.gain.toFixed(3)} of the tier median`) : "");
+  const groups = [];
+  for (const f of F){
+    const g = groups[groups.length - 1];
+    if (g && g[0].sec === f.sec && g[0].bracket === f.bracket && X(f.t) - X(g[g.length - 1].t) < bw + 1.5)
+      g.push(f);
+    else groups.push([f]);
+  }
+  const ORDER = ["stacked", "brightness", "dropped", "excluded", null];
+  for (const g of groups){
+    const f0 = g[0], h = hOf(f0.sec);
+    const xa = X(f0.t) - bw / 2, xb = X(g[g.length - 1].t) + bw / 2;
+    const w = Math.max(bw, xb - xa);
+    const base = COL[j.repeated ? f0.bracket % 2 : 0];
+    let yb = H - bot;
+    for (const st of ORDER){
+      const k = g.filter(f => (f.status || null) === st).length; if (!k) continue;
+      const hh = Math.max(h * k / g.length, st && st !== "stacked" ? 2.5 : 0);   // a left-out frame stays visible on a short bar
+      const r = el("rect", {x: xa, y: yb - hh, width: w, height: hh,
+        fill: (st && SC[st]) || base, rx: 0.5, opacity: st === "excluded" ? 0.8 : 1});
+      r.appendChild(el("title", {}, g.length === 1 ? tip1(f0)
+        : `${g.length} frames at ${tlExp(f0.sec)}, +${f0.t.toFixed(1)}–${g[g.length - 1].t.toFixed(1)} s:\n` +
+          g.map(tip1).join("\n")));
+      svg.appendChild(r);
+      yb -= hh;
+    }
+    if (g.length > 1)
+      svg.appendChild(el("text", {x: xa + w / 2, y: Math.max(9, H - bot - h - 2), fill: "#8b93a0",
+        "font-size": 8.5, "text-anchor": "middle", "font-family": "ui-monospace,monospace"},
+        String(g.length)));
+  }
+  if (j.t_ref != null && j.t_ref >= t0 - 1 && j.t_ref <= t1 + 1){
+    const x = X(j.t_ref);
+    svg.appendChild(el("line", {x1: x, x2: x, y1: top - 2, y2: H - bot, stroke: MOONC, "stroke-width": 1.5}));
+    svg.appendChild(el("text", {x: Math.min(x + 3, W - 30), y: 9, fill: MOONC, "font-size": 9,
+      "font-family": "ui-monospace,monospace"}, "Moon"));
+  }
+  // the line underneath
+  const ex = j.exposures, cnt = k => F.filter(f => f.status === k).length;
+  let s = `${j.n} frames · ${ex.length} exposure${ex.length > 1 ? "s" : ""}` +
+    (ex.length > 1 ? ` (${tlExp(ex[0])} – ${tlExp(ex[ex.length - 1])})` : ` (${tlExp(ex[0])})`) + " · " +
+    (j.repeated ? `${j.n_brackets} repeated brackets over ${tlDur(j.span_s)}`
+                : `one bracket${j.span_s != null ? " over " + tlDur(j.span_s) : ""}${j.reason ? " (" + j.reason + ")" : ""}`);
+  if (!j.timed) s += " · no time stamps: shown in file-name order";
+  if (j.unread) s += ` · ${j.unread} without an exposure time`;
+  let leg = "";
+  if (j.ran){
+    leg += `<i style="background:${COL[0]}"></i>stacked ${cnt("stacked")}`;
+    if (cnt("brightness")) leg += `<i style="background:${SC.brightness}"></i>brightness off ${cnt("brightness")}`;
+    if (cnt("dropped")) leg += `<i style="background:${SC.dropped}"></i>sharpness cut ${cnt("dropped")}`;
+    if (cnt("excluded")) leg += `<i style="background:${SC.excluded}"></i>not stacked ${cnt("excluded")}`;
+    if (j.t_ref != null) leg += `<i style="background:${MOONC};width:2px"></i>Moon placed at +${j.t_ref.toFixed(0)} s` +
+      (j.moon_v ? ` (${Math.hypot(j.moon_v[0], j.moon_v[1]).toFixed(3)} px/s)` : "");
+  }
+  const sum = $("tlsum"); sum.textContent = s;
+  if (leg){ const d = document.createElement("div"); d.innerHTML = leg; sum.appendChild(d); }
+  $("tlhead").textContent = j.ran ? "SHOOTING TIMELINE · last run" : "SHOOTING TIMELINE · from the time stamps";
+}
+window.addEventListener("resize", () => { if (TL) drawTimeline(); });
+
 async function loadFolder(){
   const r = await fetch("/api/folder", {method:"POST",
     headers:{"Content-Type":"application/json"},
@@ -801,6 +952,7 @@ async function loadFolder(){
   refreshCache();
   loadSite();
   loadVersions();
+  loadTimeline();
 }
 
 /* ---- clear cache -----------------------------------------------------
@@ -824,6 +976,7 @@ $("clearcache").addEventListener("click", async () => {
   b.disabled = false;
   if (!j.ok){ $("status").textContent = j.error; return; }
   ready = false; $("export").disabled = true; $("cropbtn").disabled = true; $("views").style.display = "none";
+  loadTimeline();
   $("status").textContent = j.files
     ? `cache cleared — ${j.files} files, ${(j.bytes/1073741824).toFixed(2)} GB · `
       + "Start now redoes the full pipeline"
@@ -850,7 +1003,7 @@ $("importPath").addEventListener("input", syncStart);
    stack is ticked (the values are kept, and come back when it is unticked). */
 const SIMPLE_IGNORES = ["importPath", "brwImport", "feather", "wb", "photometry",
   "photoSolve", "intraLock", "colourPlanes", "alignCorr", "alignFilter",
-  "stackCombine", "despeckle", "exportTiers", "tierLinear", "frames"];
+  "stackCombine", "bracketMode", "despeckle", "exportTiers", "tierLinear", "frames"];
 const SIMPLE_NOTE = "Not used by the simple stack. Untick Simple stack to use it.";
 function syncSimple(){
   const on = $("simpleStack").checked;
@@ -906,6 +1059,7 @@ async function startRun(){
                           alignCorr: $("alignCorr").value,
                           alignFilter: $("alignFilter").value,
                           stackCombine: $("stackCombine").value,
+                          bracketMode: $("bracketMode").value,
                           fnrgfPreset: $("fnrgfPreset").value,
                           despeckle: $("despeckle").checked,
                           exportTiers: $("exportTiers").checked,
@@ -1122,6 +1276,7 @@ async function pollProgress(){
     runStop("✕", "failed"); $("start").disabled = false;
     $("clearcache").disabled = false; await refreshCache(); $("sdot").className = "sdot err"; return; }
   if (j.done && j.ready){ runStop("✓", "done");
+    loadTimeline();
     await loadLayers(); $("start").disabled = false;
     $("clearcache").disabled = false; await refreshCache(); return; }
   pollAgain(pollProgress, 800);
@@ -1184,6 +1339,7 @@ const _ss = x => { x = x<0?0:x>1?1:x; return x*x*(3-2*x); };
 
 async function loadLayers(){
   GEO = await (await fetch("/api/geometry")).json();
+  _poolInit();                                      // the workers start while the layers load
   // START FROM NOTHING (0.22.76). `L` used to accumulate: loadLayers only ever
   // ADDED, and the optional layers -- promdet, contact, mgn_fine, the
   // partial-convolution masks -- are fetched only when the geometry says this
@@ -1191,7 +1347,7 @@ async function loadLayers(){
   // not and the pixel loop kept reading the PREVIOUS set's array; at a
   // different frame size the index is out of range, the term goes NaN and the
   // pixels go black. The export reads its own `src` and never did this, so the
-  // preview and the file disagreed. Going from a short-lens set to longer ones in one
+  // preview and the file disagreed. Going through three test sets of different size in one
   // session is exactly the sequence that hits it.
   L = {};
 
@@ -1249,7 +1405,7 @@ async function loadLayers(){
     if (sn){ sn.innerHTML = starNoteHtml(); drawSkyMap(); } }
   for (const k of ["promGain","promDetail","promChroma"]){
     const el = $("s_"+k), row = el && el.closest(".ctl"); if (row) row.style.display = GEO.hasPromLayer ? "none" : ""; }
-  for (const k of ["promLayer","promStretch","promRim","promSat","promPeak","promFade","promSoft"]){
+  for (const k of ["promLayer","promStretch","promRim","promSat","promPeak","promFade","promSoft","promLight"]){
     const el = $("s_"+k), row = el && el.closest(".ctl"); if (row) row.style.display = GEO.hasPromLayer ? "" : "none"; }
   { const hc = document.querySelector(".promhuectl"); if (hc) hc.style.display = GEO.hasPromLayer ? "" : "none"; }
   if (GEO.hasHill){ names.push("hilllog");
@@ -1309,6 +1465,7 @@ async function loadLayers(){
     L.wf[i] = _ss((r - 1.02*GEO.R)/(0.55*GEO.R));
   }
   ready = true; $("export").disabled = false; $("cropbtn").disabled = false;
+  _poolInit(); $("credit").title = "Preview render: " + POOL.why;
   $("setsave").disabled = false;
   $("views").style.display = "inline-flex";
   $("status").textContent = "ready — adjust and export";
@@ -1439,7 +1596,7 @@ function makeDetail(Q){
 const STAGE_B_KEYS = new Set(["outGamma","bgBlack","toneCurve","moonCurve",
   "ringBlend","ringScale","ringDX","ringDY","coronaLevel","skyLevel","skyColour",
   "moonColour","moonHueR","moonHueG","moonHueB","skyHueR","skyHueG","skyHueB","finalMid","finalDark","finalLight","structure",
-  "finalNoise","containWhites","promLayer","promStretch","promRim","promSat","promSoft",
+  "finalNoise","containWhites","promLayer","promStretch","promRim","promSat","promSoft","promLight",
   "starStrength","starColour","innerDetail","bandDetail","bandCoarse","bandFaint","detailStart"]);
 const RCACHE = {L: null, N: 0, key: "", draft: false};
 function stageKeyA(Q){
@@ -1479,7 +1636,7 @@ function detailAt(j){
   return [mg, fn, inEff];
 }
 // FINAL SHARPENING -- the preview's copy of render.final_sharpen. Same
-// recipe (a Photoshop sharpening action: five high passes at 1.5-24 px scaled
+// recipe (a published Photoshop action: five high passes at 1.5-24 px scaled
 // to the solar radius, median / minimum / maximum across the scales in Soft
 // Light, a per-band noise gate), on the decimated preview, with box-blur
 // Gaussians so a slider stays interactive. The export is the Python one.
@@ -1631,6 +1788,481 @@ function finalSharpen(d, W, H, Rgrid, mid, dark, light, k){
   }
 }
 
+// THE PREVIEW ON EVERY CORE (2026-10-16: faster preview). Stage A and
+// stage B of renderNow are run over row strips: by the page alone (as before),
+// or by the page and a pool of workers sharing the layers in shared memory.
+// The pixel arithmetic below is renderNow's, moved here unchanged: the same
+// expressions in the same order, so the pixels are the same bytes either way.
+function _stageA(S, y0, y1){
+  const {P, N, W, H, DEC, draft, DS, fnMix, detailGain, baseLift, envGamma, radialFlatten, innerMix,
+         innerDim, promGain, temp, satur, hlDesat, discLevel, discTrim, earthShine, knee, LOGK, KK, LKN,
+         RPROF, BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK} = S;
+  const V0 = S.V0, V1 = S.V1, V2 = S.V2, EGA = S.EG;
+  const bg=L.bg, rp=L.rprof, ear=L.earth, pr=L.prom, ch=L.ratio, wf=L.wf, rr_=L.r;
+  const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
+  const HL = [];
+  for (let k=0;k<HN;k++) HL.push(L["hill"+k]||null);
+  function hillE(j, r){
+    let E = 0;
+    let zt = 0; if (HZS > 0){ zt = Math.min(1, Math.max(0, ((r||0)-HZR)/HZF + 0.5)); zt = zt*zt*(3-2*zt); }
+    for (let k=0;k<HN;k++){
+      if (!HG[k] || !HL[k]) continue;
+      const u = (HL[k][j]*256 + HL[k][j+1])/65535;   // 0..1, zero at 0.5
+      let mv = (u*2-1)*HSPAN[k];
+      if (HZS > 0 && HZSIGN[k]) mv *= 1 + HZS*HZSIGN[k]*(1-2*zt);
+      if (HTH > 0 && HRSP[k]){
+        const sg = (L.hillsigma[j]*256 + L.hillsigma[j+1])/65535*HSGS;
+        const t = HTH*HRSP[k]*(HATT[k]==null?1:HATT[k])*sg;
+        mv = mv > t ? mv - t : (mv < -t ? mv + t : 0);
+      }
+      E += HG[k]*mv;
+    }
+    return HK*E;
+  }
+  const DET = makeDetail(P);
+  const dsw = Math.max(1, (P.discSoft||12))/DEC;
+      const sAt = (i) => {
+        const j = i*4;
+        DET(j);
+        const mg = DA.mg, fn = DA.fn, inEff = DA.inn;
+        const r = rr_[i];
+        const Re = L.rmask[i] + discTrim/DEC;   // discTrim is full-res px
+        const eg = Math.min(1, Math.max(0, (r-(Re+2/DEC-dsw))/dsw));
+        const wI = eg*_ss((1.45*GEO.R - r)/(0.40*GEO.R));
+        const wG = eg*Math.exp(-Math.max(0, r-Re)/(0.60*GEO.R));
+        // `bg` arrives 16-bit packed (R = high byte, G = low) so the log envelope
+        // can cube it without banding the far field -- see server.py.
+        const bgv = (bg[j]*256 + bg[j+1])/65535;
+        const env = LOGK > 0 ? Math.log1p(KK*bgv*bgv*bgv)/LKN : bgv;
+        let B = Math.pow(env, envGamma)*(1-innerDim*wG);
+        let _rp;
+        if (RPROF){
+          const rf = r*DEC, k = Math.floor(rf), g2 = rf-k;
+          const p0 = RPROF[Math.min(k, RPROF.length-1)];
+          const p1 = RPROF[Math.min(k+1, RPROF.length-1)];
+          _rp = p0*(1-g2) + p1*g2;
+        } else _rp = rp[j]/255;
+        B = B/Math.pow(Math.max(_rp, 0.12), radialFlatten)*lvl;
+        let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
+        det = det + P.pelGain*(L.pel[j]/255 - 0.5);
+        det = det*(1-innerMix*wI) + innerMix*wI*inEff;
+        // prominence detail, inside the gate only -- mirrors render.py exactly
+        if (P.promDetail > 0 && L.promdet){
+          const pw = P.promDetail*(pr[j]/255);
+          det = det*(1-pw) + pw*(L.promdet[j]/255);
+        }
+        let Y = B*(baseLift+detailGain*det);
+        // Partial-convolution chain -- MUST match render.py's block of the same name
+        if (HMIX > 0 && L.hilllog){
+          // OVERLAY of the masks-only layer (0.5 + 0.75 k E) at opacity HMIX
+          let dd = Math.max(-0.5, Math.min(0.5, HMIX*0.75*hillE(j, r)));
+          // eased out under the prominence layer -- see render.py
+          if (L.pl_F && (P.promFade||0) > 0) dd *= 1 - P.promFade*(L.pl_F[j]/255);
+          Y = Y < 0.5 ? Y*(1 + 2*dd) : 1 - (1 - Y)*(1 - 2*dd);
+        }
+        const pdrv = L.promdet ? L.promdet[j]/255 : inEff;
+        Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(pdrv-0.5)));
+        const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
+        Y = Y*eg + Yd*(1-eg);
+        // sky-cast correction weighted by the chroma confidence -- see render.py
+        const cf = L.cconf ? L.cconf[j]/255 : 1;
+        let a0 = _cl(ch[j])  /(1 + cf*(BC[0]-1));
+        let a1 = _cl(ch[j+1])/(1 + cf*(BC[1]-1));
+        let a2 = _cl(ch[j+2])/(1 + cf*(BC[2]-1));
+        if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
+        a0 *= temp; a2 /= temp; a1 *= P.tint;
+        // Saturation AFTER the balance, so 0 is white as balanced -- see render.py
+        if (satur !== 1){ a0 = Math.pow(a0, satur); a1 = Math.pow(a1, satur); a2 = Math.pow(a2, satur); }
+        const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
+        a0 /= alum; a1 /= alum; a2 /= alum;
+        a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
+        // prominence structure in green/blue -- see render.py
+        if (P.promChroma !== 0 && L.promdet){
+          let cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
+          if (satur !== 1) cfac = Math.pow(Math.max(cfac, 1e-3), satur);
+          a1 *= cfac; a2 *= cfac;
+        }
+        const r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
+        const m = Math.max(r0,r1,r2);
+        const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));
+        const sc = m>1e-6 ? ms/m : 1;
+        const tt = Math.min(1, Math.max(0,(ms-0.9)/0.1))*hlDesat;
+        V0[i] = (r0*sc)*(1-tt)+ms*tt; V1[i] = (r1*sc)*(1-tt)+ms*tt; V2[i] = (r2*sc)*(1-tt)+ms*tt;
+        EGA[i] = eg;
+      };
+  if (draft){
+    // every DS-th pixel each way, copied into its DS x DS block (strips start on a multiple of DS)
+    for (let y=y0; y<y1; y+=DS) for (let x=0; x<W; x+=DS){
+      const i = y*W + x; sAt(i);
+      const v0 = V0[i], v1 = V1[i], v2 = V2[i], e = EGA[i];
+      for (let yy=y; yy<y+DS && yy<H; yy++) for (let xx=x; xx<x+DS && xx<W; xx++){
+        const k = yy*W + xx; V0[k]=v0; V1[k]=v1; V2[k]=v2; EGA[k]=e; }
+    }
+  } else for (let i=y0*W, i1=y1*W; i<i1; i++) sAt(i);
+}
+function _stageB(S, y0, y1){
+  const {W, ig, ib, bgBlack, TLUT, MLUT} = S;
+  const V0 = S.V0, V1 = S.V1, V2 = S.V2, EGA = S.EG, d = S.OUT;
+  const _lut = (T, v) => { const f = v*1023, i0 = f|0, fr = f-i0; return T[i0] + fr*((T[Math.min(1023,i0+1)]||T[i0]) - T[i0]); };
+  const CRV = !!(TLUT || MLUT);
+  const outB = (v, eg, jr, c) => {
+    v = v<0?0:v>1?1:v;
+    v = Math.pow(v, ig);
+    v = (v-bgBlack)*ib; v = v<0?0:v>1?1:v;
+    if (CRV){ const vg = TLUT ? _lut(TLUT, v) : v, vm = MLUT ? _lut(MLUT, v) : v; v = vg*eg + vm*(1-eg); }
+    return v*255;
+  };
+  for (let i=y0*W, j=4*i, i1=y1*W; i<i1; i++,j+=4){
+    const eg = EGA[i];
+    const jr = j;
+    d[j]   = outB(V0[i], eg, jr, 0);
+    d[j+1] = outB(V1[i], eg, jr, 1);
+    d[j+2] = outB(V2[i], eg, jr, 2);
+    d[j+3] = 255;
+  }
+}
+// THE WORKER POOL (2026-10-16). One worker per core but one; the page is the
+// last. The layers, the stage-A arrays and the output strip live in shared
+// memory (SharedArrayBuffer -- the server sends the cross-origin isolation
+// headers that allow it), so nothing is copied per render. Strips are claimed
+// from a shared counter, a few per thread, so a slow core does not hold the
+// frame. The page waits for the strips without returning to the event loop,
+// so renderNow stays synchronous exactly as before. Without shared memory
+// (another browser, or ?nopool in the address) everything runs on the page,
+// as it did. A worker that fails turns the pool off and the frame is redone on
+// the page.
+const POOL = {ok: null, workers: [], n: 0, up: 0, Lmap: null, GEO: null, out: null, why: "", runs: 0, fsRuns: 0};
+// usable once every worker has started: a worker's script is loaded through the page's own
+// event loop, so the page must not wait on one that has not reported in yet
+function _poolReady(){ return _poolInit() && POOL.up >= POOL.n; }
+function _isShared(a){ return !!a && typeof SharedArrayBuffer !== "undefined" && a.buffer instanceof SharedArrayBuffer; }
+function _f64(N){ return _poolInit() ? new Float64Array(new SharedArrayBuffer(8*N)) : new Float64Array(N); }
+function _toShared(a){
+  if (!a || !ArrayBuffer.isView(a) || _isShared(a) || typeof SharedArrayBuffer === "undefined" || !self.crossOriginIsolated) return a;
+  const s = new a.constructor(new SharedArrayBuffer(a.byteLength)); s.set(a); return s;
+}
+function _poolSource(){
+  // the worker gets the page's own functions as text: one copy of the arithmetic
+  return "let L = {}, GEO = null, nafeMed = 0.5;\n"
+    + "const DA = {mg: 0, fn: 0, inn: 0, mgr: 0.5, fn0: 0.5};\n"
+    + "const FINAL_RADII=" + JSON.stringify(FINAL_RADII) + ", FINAL_REF_R=" + FINAL_REF_R
+    + ", FINAL_GATE=" + JSON.stringify(FINAL_GATE) + ";\n"
+    + "const _ERF_LUT=new Float32Array(" + JSON.stringify(Array.from(_ERF_LUT)) + ");\n"
+    + "const STRUCT_R=" + JSON.stringify(STRUCT_R) + ", STRUCT_K=" + STRUCT_K + ", STRUCT_LIMB=" + JSON.stringify(STRUCT_LIMB) + ";\n"
+    + "const _ss = " + _ss.toString() + ";\n"
+    + [makeDetail, _stageA, _stageB, _passApply, _parWork, _boxesForGauss, _boxBlurH, _boxBlurV, _gauss, _erf,
+       _boxBlurHR, _boxBlurVC, _fsSPMD].map(f => f.toString()).join("\n")
+    + "\npostMessage({t: 'up'});"
+    + "\nonmessage = e => { const m = e.data;"
+    + " if (m.t === 'L'){ L = m.L; GEO = m.GEO; nafeMed = m.nafeMed; return; }"
+    + " if (m.t === 'A' || m.t === 'B' || m.t === 'P'){ _parWork(m.t, m.S, m.ctl, m.K, m.rows); return; }"
+    + " if (m.t === 'FS'){ let ok = false, err = '';"
+    + "   try { ok = _fsSPMD(m.J, m.rank, m.nr); } catch (x){ err = String(x && x.stack || x); }"
+    + "   if (m.rank === 0 || err) postMessage({t: 'fsdone', job: m.J.job, ok, err}); } };";
+}
+function _poolInit(){
+  if (POOL.ok !== null) return POOL.ok;
+  POOL.ok = false;
+  try {
+    if (/[?&]nopool\b/.test(location.search)){ POOL.why = "off (?nopool)"; return false; }
+    if (typeof SharedArrayBuffer === "undefined" || !self.crossOriginIsolated){
+      POOL.why = "off (this browser gives the page no shared memory)"; return false; }
+    let hc = Math.max(1, Math.min(16, navigator.hardwareConcurrency || 1));
+    { const ov = location.search.match(/[?&]threads=(\d+)/); if (ov) hc = Math.max(1, Math.min(32, +ov[1])); }   // for tests
+    if (hc < 2){ POOL.why = "off (one core)"; return false; }
+    const url = URL.createObjectURL(new Blob([_poolSource()], {type: "text/javascript"}));
+    for (let k = 0; k < hc - 1; k++){
+      const w = new Worker(url);
+      w.onerror = e => { _poolOff("worker error: " + (e && e.message)); };
+      w.onmessage = e => { if (e.data && e.data.t === "up"){ POOL.up++; return; } _fsDone(e.data); };
+      POOL.workers.push(w);
+    }
+    POOL.n = POOL.workers.length; POOL.ok = true; POOL.why = hc + " threads";
+  } catch (e){ POOL.ok = false; POOL.why = "off (" + e + ")"; }
+  console.log("preview render:", POOL.why);
+  return POOL.ok;
+}
+function _poolOff(why){
+  if (!POOL.ok) return;
+  POOL.ok = false; POOL.why = "off (" + why + ")";
+  console.warn("preview render: pool " + POOL.why + "; rendering on the page");
+  for (const w of POOL.workers) try { w.terminate(); } catch (e) {}
+  POOL.workers = []; POOL.n = 0;
+  RCACHE.key = "";                                   // the cached stage A may be half-written
+}
+// the layers go to the workers once per set (and again if one is replaced)
+function _poolSync(){
+  if (!POOL.ok) return false;
+  let same = POOL.Lmap && POOL.GEO === GEO && POOL.Lmap.size === Object.keys(L).length;
+  if (same) for (const k in L) if (POOL.Lmap.get(k) !== L[k]){ same = false; break; }
+  if (same) return true;
+  for (const k in L) L[k] = _toShared(L[k]);
+  POOL.Lmap = new Map(Object.entries(L)); POOL.GEO = GEO;
+  const msg = {t: "L", L: Object.assign({}, L), GEO, nafeMed};
+  for (const w of POOL.workers) w.postMessage(msg);
+  return true;
+}
+function _parWork(t, S, ctl, K, rows){
+  for (;;){
+    const c = Atomics.add(ctl, 1, 1);
+    if (c >= K) break;
+    const y0 = c*rows, y1 = Math.min(S.H, y0 + rows);
+    try { if (t === "A") _stageA(S, y0, y1); else if (t === "B") _stageB(S, y0, y1); else _passApply(S, y0, y1); }
+    catch (e){ Atomics.store(ctl, 2, 1); }
+  }
+  Atomics.add(ctl, 0, 1);
+}
+function _parRun(t, S){
+  const H = S.H;
+  const one = () => { if (t === "A") _stageA(S, 0, H); else if (t === "B") _stageB(S, 0, H); else _passApply(S, 0, H); };
+  if (!_poolReady() || (t !== "P" && !(_isShared(S.V0) && _isShared(S.V1) && _isShared(S.V2) && _isShared(S.EG)))
+      || (t === "P" && ((S.ID && S.ID.A && !_isShared(S.ID.A)) || (S.BD && S.BD.A && !_isShared(S.BD.A)))) || !_poolSync()){ one(); return; }
+  _fsCancel();                                       // a sharpening still running is stale now
+  let d = null;
+  if ((t === "B" || t === "P") && !_isShared(S.OUT)){
+    d = S.OUT;
+    if (!POOL.out || POOL.out.length !== d.length) POOL.out = new Uint8ClampedArray(new SharedArrayBuffer(d.length));
+    if (t === "P") POOL.out.set(d);                  // the passes read the picture too
+    S = Object.assign({}, S, {OUT: POOL.out});
+  }
+  // strips: a multiple of 6 rows (whole draft blocks for steps 2 and 3), ~4 per thread
+  const rows = 6*Math.max(1, Math.ceil(H/(6*4*(POOL.n + 1))));
+  const K = Math.ceil(H/rows);
+  const ctl = new Int32Array(new SharedArrayBuffer(16));
+  for (const w of POOL.workers) w.postMessage({t, S, ctl, K, rows});
+  _parWork(t, S, ctl, K, rows);
+  const t0 = performance.now();
+  while (Atomics.load(ctl, 0) < POOL.n + 1){
+    if (performance.now() - t0 > 20000){ _poolOff("a worker did not answer in 20 s"); one(); if (d) d.set(S.OUT); return; }
+  }
+  if (Atomics.load(ctl, 2)){ _poolOff("a strip failed"); one(); if (d) d.set(S.OUT); return; }
+  if (d) d.set(S.OUT);
+  POOL.runs++;
+}
+// STRUCTURE AND FINAL SHARPENING ON THE POOL (2026-10-16). The same passes as
+// structureBoost and finalSharpen, split over the workers: the horizontal box
+// blurs by rows, the vertical ones by columns, every per-pixel step by rows,
+// with a barrier between steps. Each row or column is computed by the same
+// code in the same order as before, so the result is the same bytes; the one
+// sum over the whole picture (the structure slider's ring means) is done by
+// one worker in the original order. A newer render cancels a running job at
+// the next barrier.
+function _boxBlurHR(src, dst, W, H, r, y0, y1){
+  const iarr = 1/(r+r+1);
+  for (let i=y0;i<y1;i++){
+    let ti=i*W, li=ti, ri=ti+r, fv=src[ti], lv=src[ti+W-1], val=(r+1)*fv;
+    for (let j=0;j<r;j++) val += src[ti+j];
+    for (let j=0;j<=r;j++){ val += src[ri++]-fv; dst[ti++] = val*iarr; }
+    for (let j=r+1;j<W-r;j++){ val += src[ri++]-src[li++]; dst[ti++] = val*iarr; }
+    for (let j=W-r;j<W;j++){ val += lv-src[li++]; dst[ti++] = val*iarr; }
+  }
+}
+function _boxBlurVC(src, dst, W, H, r, x0, x1){
+  const iarr = 1/(r+r+1);
+  for (let i=x0;i<x1;i++){
+    let ti=i, li=ti, ri=ti+r*W, fv=src[ti], lv=src[ti+W*(H-1)], val=(r+1)*fv;
+    for (let j=0;j<r;j++) val += src[ti+j*W];
+    for (let j=0;j<=r;j++){ val += src[ri]-fv; dst[ti] = val*iarr; ri+=W; ti+=W; }
+    for (let j=r+1;j<H-r;j++){ val += src[ri]-src[li]; dst[ti] = val*iarr; li+=W; ri+=W; ti+=W; }
+    for (let j=H-r;j<H;j++){ val += lv-src[li]; dst[ti] = val*iarr; li+=W; ti+=W; }
+  }
+}
+function _fsSPMD(J, rank, nr){
+  const W = J.W, H = J.H, N = W*H, d = J.d, B = J.buf, ctl = J.ctl;
+  const ry0 = Math.floor(H*rank/nr), ry1 = Math.floor(H*(rank+1)/nr);
+  const cx0 = Math.floor(W*rank/nr), cx1 = Math.floor(W*(rank+1)/nr);
+  const p0 = ry0*W, p1 = ry1*W;
+  // barrier; the last to arrive copies the cancel flag into the decision all read
+  const bar = () => {
+    const g = Atomics.load(ctl, 1);
+    if (Atomics.add(ctl, 0, 1) === nr - 1){
+      Atomics.store(ctl, 0, 0); Atomics.store(ctl, 3, Atomics.load(ctl, 2));
+      Atomics.add(ctl, 1, 1); Atomics.notify(ctl, 1);
+    } else while (Atomics.load(ctl, 1) === g) Atomics.wait(ctl, 1, g, 100);
+    return Atomics.load(ctl, 3) === 0;
+  };
+  // _gauss(src) into dst, tmp as scratch; false = cancelled
+  const gaussP = (src, dst, tmp, sigma) => {
+    if (sigma < 1.0){
+      const w1 = Math.exp(-0.5/(sigma*sigma)), s = 1+2*w1, a = w1/s, b = 1/s;
+      for (let y=ry0;y<ry1;y++){ const o=y*W; for (let x=0;x<W;x++){ const l=src[o+(x>0?x-1:x)], r=src[o+(x<W-1?x+1:x)]; tmp[o+x]=a*l+b*src[o+x]+a*r; } }
+      if (!bar()) return false;
+      for (let y=ry0;y<ry1;y++){ const o=y*W, u=(y>0?y-1:y)*W, dn=(y<H-1?y+1:y)*W; for (let x=0;x<W;x++) dst[o+x]=a*tmp[u+x]+b*tmp[o+x]+a*tmp[dn+x]; }
+      return bar();
+    }
+    const bxs = _boxesForGauss(sigma, 3);
+    for (let p=p0;p<p1;p++) dst[p] = src[p];
+    if (!bar()) return false;
+    for (const bw of bxs){ const r=(bw-1)/2;
+      _boxBlurHR(dst, tmp, W, H, r, ry0, ry1); if (!bar()) return false;
+      _boxBlurVC(tmp, dst, W, H, r, cx0, cx1); if (!bar()) return false; }
+    return true;
+  };
+  let failed = false;
+  try {
+    // ---- STRUCTURE (structureBoost) ----
+    if (J.st > 0){
+      const s = J.st, cy = J.cy, cx = J.cx, Rgrid = J.R;
+      const Y = B[0], lm = B[1], m = B[2], rp = B[3];
+      for (let y=ry0;y<ry1;y++){ let i=y*W; for (let x=0;x<W;x++,i++){
+        const j=4*i, yv=(0.2126*d[j]+0.7152*d[j+1]+0.0722*d[j+2])/255;
+        const r=Math.hypot(y-cy, x-cx); rp[i]=r; Y[i]=yv;
+        const mm = r > STRUCT_LIMB[0]*Rgrid ? 1 : 0; m[i]=mm; lm[i]=mm*Math.log(Math.max(yv,1e-4));
+      } }
+      if (!bar()) return false;
+      const s1=Math.max(STRUCT_R[0]*Rgrid,0.5), s2=Math.max(STRUCT_R[1]*Rgrid,1.0);
+      const a1=B[4], m1=B[5], a2=B[6], m2=B[7], tmp=B[8], band=B[9];
+      if (!gaussP(lm, a1, tmp, s1) || !gaussP(m, m1, tmp, s1) || !gaussP(lm, a2, tmp, s2) || !gaussP(m, m2, tmp, s2)) return false;
+      for (let i=p0;i<p1;i++) band[i]=a1[i]/Math.max(m1[i],1e-4)-a2[i]/Math.max(m2[i],1e-4);
+      if (!bar()) return false;
+      const sum = J.sum;
+      if (rank === 0){
+        let rmax = 0;
+        for (let i=0;i<N;i++) if (rp[i]>rmax) rmax=rp[i];
+        const nb=(rmax|0)+1, cnt=new Float64Array(nb);
+        for (let b=0;b<nb;b++) sum[b]=0;
+        for (let i=0;i<N;i++) if (m[i]>0){ const b=rp[i]|0; sum[b]+=band[i]; cnt[b]++; }
+        for (let b=0;b<nb;b++) sum[b] = cnt[b]>0 ? sum[b]/cnt[b] : 0;
+      }
+      if (!bar()) return false;
+      const kk = s*STRUCT_K, dl = STRUCT_LIMB[1]-STRUCT_LIMB[0];
+      for (let i=p0;i<p1;i++){
+        const yv=Y[i]; let w=Math.min(1,Math.max(0,4*yv*(1-yv)))*Math.min(1,Math.max(0,(rp[i]/Rgrid-STRUCT_LIMB[0])/dl));
+        if (w<=0) continue;
+        const g=Math.exp(kk*(band[i]-sum[rp[i]|0])*w), j=4*i;
+        d[j]=Math.min(255,d[j]*g); d[j+1]=Math.min(255,d[j+1]*g); d[j+2]=Math.min(255,d[j+2]*g);
+      }
+      if (!bar()) return false;
+    }
+    // ---- FINAL SHARPENING (finalSharpen) ----
+    const mid = J.mid, dark = J.dark, light = J.light, k = J.k;
+    if (mid>0||dark>0||light>0){
+      const radii = J.radii, resp = J.resp;
+      const ch = [B[0], B[1], B[2]], Y = B[3];
+      for (let i=p0;i<p1;i++){ const j=4*i; ch[0][i]=d[j]/255; ch[1][i]=d[j+1]/255; ch[2][i]=d[j+2]/255; Y[i]=0.2126*ch[0][i]+0.7152*ch[1][i]+0.0722*ch[2][i]; }
+      if (!bar()) return false;
+      const tmp = B[5], GA = B[7], GB = B[8];
+      let sig = null;
+      if (k > 0){
+        const b1 = B[4];
+        if (!gaussP(Y, b1, tmp, radii[0])) return false;
+        for (let i=p0;i<p1;i++) b1[i]=Math.abs(Y[i]-b1[i]);
+        if (!bar()) return false;
+        const T=32, ty=Math.max(1,Math.floor(H/T)), tx=Math.max(1,Math.floor(W/T)), tm=J.tm, buf=new Float32Array(T*T);
+        const ta0 = Math.floor(ty*rank/nr), ta1 = Math.floor(ty*(rank+1)/nr);
+        for (let a=ta0;a<ta1;a++) for (let b=0;b<tx;b++){ let q=0; for (let y=0;y<T;y++){ const o=(a*T+y)*W+b*T; for (let x=0;x<T;x++) buf[q++]=b1[o+x]; } const v=buf.slice().sort(); tm[a*tx+b]=1.4826*v[(T*T)>>1]; }
+        if (!bar()) return false;
+        if (rank === 0) J.ts.set(_gauss(tm.slice(0, ty*tx), tx, ty, 1.0));
+        if (!bar()) return false;
+        const ts = J.ts;
+        sig = B[6];
+        for (let y=ry0;y<ry1;y++){ const fy=Math.min(ty-1,Math.max(0,(y+0.5)/T-0.5)), y0=Math.floor(fy), y1=Math.min(ty-1,y0+1), wy=fy-y0;
+          for (let x=0;x<W;x++){ const fx=Math.min(tx-1,Math.max(0,(x+0.5)/T-0.5)), x0=Math.floor(fx), x1=Math.min(tx-1,x0+1), wx=fx-x0;
+            sig[y*W+x]=(1-wy)*((1-wx)*ts[y0*tx+x0]+wx*ts[y0*tx+x1])+wy*((1-wx)*ts[y1*tx+x0]+wx*ts[y1*tx+x1]); } }
+        if (!bar()) return false;
+      }
+      let gates = null;
+      if (sig){
+        gates = []; let prev = Y;
+        for (let i=0;i<radii.length;i++){
+          const cur = (i % 2) ? GB : GA;
+          if (!gaussP(Y, cur, tmp, radii[i])) return false;
+          const g = B[9+i]; const kk=k*FINAL_GATE[i]*resp[i];
+          for (let p=p0;p<p1;p++) g[p]=_erf(Math.abs(prev[p]-cur[p])/Math.max(kk*sig[p],1e-6));
+          gates.push(g); prev=cur;
+        }
+        if (!bar()) return false;
+      }
+      const acc = B[14], hp = [B[15], B[16], B[17], B[18], B[19]], MD = B[20], MN = B[21], MX = B[22];
+      for (let c=0;c<3;c++){
+        let prev = ch[c];
+        for (let p=p0;p<p1;p++) acc[p] = 0;
+        for (let i=0;i<radii.length;i++){
+          const cur = (i % 2) ? GB : GA;
+          if (!gaussP(ch[c], cur, tmp, radii[i])) return false;
+          const g = gates ? gates[i] : null, h = hp[i];
+          for (let p=p0;p<p1;p++){ let b = prev[p]-cur[p]; if (g) b*=g[p]; acc[p]+=b; h[p]=acc[p]+0.5; }
+          prev = cur;
+        }
+        const h0=hp[0],h1=hp[1],h2=hp[2],h3=hp[3],h4=hp[4];
+        for (let p=p0;p<p1;p++){
+          let a=h0[p],b=h1[p],cc=h2[p],dd=h3[p],e=h4[p], t;
+          if (a>b){t=a;a=b;b=t;} if (cc>dd){t=cc;cc=dd;dd=t;}
+          let lo = a<cc ? a : cc, hi = b>dd ? b : dd;
+          MN[p] = lo<e ? lo : e; MX[p] = hi>e ? hi : e;
+          if (a<cc){ a=cc; } else { cc=a; }
+          if (b>dd){ b=dd; }
+          MD[p] = a>b ? (b>e ? b : (a<e ? a : e)) : (a>e ? a : (b<e ? b : e));
+        }
+        const C = ch[c];
+        for (let i=p0;i<p1;i++){
+          let o = C[i];
+          if (mid>0){ let b=MD[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += mid*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+          if (dark>0){ let b=MN[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += dark*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+          if (light>0){ let b=MX[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += light*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+          d[4*i+c] = o<0?0:o>1?255:o*255;
+        }
+      }
+    }
+  } catch (e){
+    failed = true;
+    Atomics.store(ctl, 2, 1);                        // the others leave at the next barrier
+    while (bar()) {}
+    throw e;
+  }
+  return bar();
+}
+// the noise response of each band, as finalSharpen measures it (same code, same cache)
+function _fsResp(radii){
+  const key = radii.join(",");
+  if (!finalSharpen._resp || finalSharpen._resp.key !== key){
+    const S=128, n=new Float32Array(S*S); let seed=7;
+    for (let i=0;i<S*S;i++){ seed=(seed*1103515245+12345)&0x7fffffff; const u1=(seed+1)/0x80000000; seed=(seed*1103515245+12345)&0x7fffffff; const u2=seed/0x80000000; n[i]=Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2); }
+    const g = radii.map(s => _gauss(n, S, S, s)); const resp=[];
+    let prev=n; for (let i=0;i<radii.length;i++){ let ss=0; for (let p=0;p<S*S;p++){ const v=prev[p]-g[i][p]; ss+=v*v; } resp.push(Math.sqrt(ss/(S*S))); prev=g[i]; }
+    finalSharpen._resp = {key, resp: resp.map(v => v/resp[0])};
+  }
+  return finalSharpen._resp.resp;
+}
+const FSP = {buf: null, N: 0, job: null, jobs: {}};
+function _fsCancel(){ if (FSP.job) Atomics.store(FSP.job.ctl, 2, 1); }
+// true when the pool took the job; false = use the single worker as before
+function _fsPool(r){
+  if (!_poolReady() || POOL.n < 1) return false;
+  const W = r.W, H = r.H, N = W*H;
+  try {
+    if (!FSP.buf || FSP.N !== N){
+      FSP.buf = []; for (let k=0;k<23;k++) FSP.buf.push(new Float32Array(new SharedArrayBuffer(4*N)));
+      FSP.N = N;
+    }
+  } catch (e){ FSP.buf = null; return false; }
+  const radii = FINAL_RADII.map(s => Math.max(0.6, s*GEO.R/FINAL_REF_R));
+  const T = 32, ty = Math.max(1, Math.floor(H/T)), tx = Math.max(1, Math.floor(W/T));
+  const dd = new Uint8ClampedArray(new SharedArrayBuffer(r.data.length)); dd.set(r.data);
+  const J = {job: r.job, W, H, d: dd, buf: FSP.buf, ctl: new Int32Array(new SharedArrayBuffer(16)),
+             st: r.st, cy: GEO.cy, cx: GEO.cx, R: GEO.R, mid: r.mid, dark: r.dark, light: r.light, k: r.k,
+             radii, resp: _fsResp(radii),
+             tm: new Float32Array(new SharedArrayBuffer(4*ty*tx)), ts: new Float32Array(new SharedArrayBuffer(4*ty*tx)),
+             sum: new Float64Array(new SharedArrayBuffer(8*(Math.ceil(Math.hypot(W, H)) + 2)))};
+  _fsCancel();
+  FSP.job = J; FSP.jobs[r.job] = r;
+  POOL.workers.forEach((w, rank) => w.postMessage({t: "FS", J, rank, nr: POOL.n}));
+  return true;
+}
+function _fsDone(m){
+  if (!m || m.t !== "fsdone") return;
+  const J = FSP.job && FSP.job.job === m.job ? FSP.job : null;
+  const r = FSP.jobs[m.job]; delete FSP.jobs[m.job];
+  if (J) FSP.job = null;
+  if (m.err){ _poolOff("final sharpening: " + m.err.split("\n")[0]); if (r && r.job === _fsJob){ r.data = new Uint8ClampedArray(r.data); _fsPost(r); } return; }
+  if (!m.ok || !J || !r || m.job !== _fsJob) return;            // cancelled or an older render
+  const copy = new ImageData(new Uint8ClampedArray(J.d), r.W, r.H);
+  if (r.view === "moon") moonMask(copy.data, r.PE); else { promOverlay(copy.data); starOverlay(copy.data); }
+  ringPass(copy.data, r.PE);
+  octx.putImageData(copy, 0, 0); draw();
+  POOL.fsRuns++;
+  console.log("final sharpening", Math.round(performance.now()-r.t0), "ms (" + POOL.n + " workers)");
+}
 function renderNow(){
   if (CURVE) CURVE.draw();
   if (!ready) return;
@@ -1658,15 +2290,15 @@ function renderNow(){
   const CG = [Math.pow(cg[0],CN), Math.pow(cg[1],CN), Math.pow(cg[2],CN)];
   const BC = [Math.pow(bc[0],bn), Math.pow(bc[1],bn), Math.pow(bc[2],bn)];
   const lvl = 1-0.5*radialFlatten;
-  // The method's log stretch, log(1 + k*I) with k = 10^logK. 0 keeps the cube root.
+  // The published log stretch, log(1 + k*I) with k = 10^logK. 0 keeps the cube root.
   // Log stretch REMOVED 2026-10-08: the slider is gone and old settings with logK render as 0
   const LOGK = 0, KK = Math.pow(10, LOGK), LKN = Math.log1p(KK);
   // the radial profile, evaluated from its own numbers and INTERPOLATED -- as
   // a full-res 8-bit layer it was a staircase and printed rings
   const RPROF = GEO.rprofile || null;
-  // The partial-convolution chain: gains, transport spans and the master scale. HK divides by
+  // Partial-convolution chain: gains, transport spans and the master scale. HK divides by
   // the rms of the FINEST mask -- one number for the whole set, so the ratios
-  // between scales stay exactly the method's. Mirrors render.py.
+  // between scales stay exactly as published. Mirrors render.py.
   const HMIX = (GEO.hasHill ? (P.hillMix||0) : 0), HN = GEO.nHill||0;
   const HSPAN = GEO.hillSpan || [];
   // normalised to the STRUCTURE rms, as render.py is -- see server.py
@@ -1685,7 +2317,7 @@ function renderNow(){
   // rather than per pixel: the layer arrives 16-bit, so the table IS exact.
   const HKB = GEO.hillLogKBuild || 6, HKR = (P.hillLogK == null ? HKB : P.hillLogK);
   let HLUT = null, HMS = 1;
-  // built for the partial-convolution VIEW too, not just the mix -- the view is where the
+  // built for the partial-conv VIEW too, not just the mix -- the view is where the
   // base stretch gets tuned, and without the table it would ignore the slider
   if ((HMIX > 0 || VIEW === "partialconv") && Math.abs(HKR-HKB) > 1e-6){
     const Kb = Math.pow(10,HKB), Kr = Math.pow(10,HKR);
@@ -1709,7 +2341,7 @@ function renderNow(){
   // and correctly in the export -- see the note beside hill_prev_att.
   const HATT = GEO.hillPrevAtt || [];
 
-  // The method's im_enhanced at one pixel. Factored out because the partial-convolution VIEW and
+  // The recipe's im_enhanced at one pixel. Factored out because the partial-conv VIEW and
   // the composite must be the same number -- the view is what gets tuned and
   // exported, so a second copy of this arithmetic would be a second image.
   // the masks alone, in im_log units (k*E); hillYh adds the base
@@ -1793,110 +2425,24 @@ function renderNow(){
     let needA = !(C.L === L && C.N === N && C.key === keyA);
     if (!needA && C.draft && !RENDER_DRAFT) needA = true;
     if (needA){
-      if (!C.V0 || C.N !== N){
-        C.V0 = new Float64Array(N); C.V1 = new Float64Array(N);
-        C.V2 = new Float64Array(N); C.EG = new Float64Array(N);
+      if (!C.V0 || C.N !== N || (_poolInit() && !_isShared(C.V0))){
+        C.V0 = _f64(N); C.V1 = _f64(N);
+        C.V2 = _f64(N); C.EG = _f64(N);
       }
-      const V0 = C.V0, V1 = C.V1, V2 = C.V2, EGA = C.EG;
-      const dsw = Math.max(1, (P.discSoft||12))/DEC;
-      const sAt = (i) => {
-        const j = i*4;
-        DET(j);
-        const mg = DA.mg, fn = DA.fn, inEff = DA.inn;
-        const r = rr_[i];
-        const Re = L.rmask[i] + discTrim/DEC;   // discTrim is full-res px
-        const eg = Math.min(1, Math.max(0, (r-(Re+2/DEC-dsw))/dsw));
-        const wI = eg*_ss((1.45*GEO.R - r)/(0.40*GEO.R));
-        const wG = eg*Math.exp(-Math.max(0, r-Re)/(0.60*GEO.R));
-        // `bg` arrives 16-bit packed (R = high byte, G = low) so the log envelope
-        // can cube it without banding the far field -- see server.py.
-        const bgv = (bg[j]*256 + bg[j+1])/65535;
-        const env = LOGK > 0 ? Math.log1p(KK*bgv*bgv*bgv)/LKN : bgv;
-        let B = Math.pow(env, envGamma)*(1-innerDim*wG);
-        let _rp;
-        if (RPROF){
-          const rf = r*DEC, k = Math.floor(rf), g2 = rf-k;
-          const p0 = RPROF[Math.min(k, RPROF.length-1)];
-          const p1 = RPROF[Math.min(k+1, RPROF.length-1)];
-          _rp = p0*(1-g2) + p1*g2;
-        } else _rp = rp[j]/255;
-        B = B/Math.pow(Math.max(_rp, 0.12), radialFlatten)*lvl;
-        let det = (1-fnMix*wf[i])*mg + fnMix*wf[i]*fn;
-        det = det + P.pelGain*(L.pel[j]/255 - 0.5);
-        det = det*(1-innerMix*wI) + innerMix*wI*inEff;
-        // prominence detail, inside the gate only -- mirrors render.py exactly
-        if (P.promDetail > 0 && L.promdet){
-          const pw = P.promDetail*(pr[j]/255);
-          det = det*(1-pw) + pw*(L.promdet[j]/255);
-        }
-        let Y = B*(baseLift+detailGain*det);
-        // The partial-convolution chain -- MUST match render.py's block of the same name
-        if (HMIX > 0 && L.hilllog){
-          // OVERLAY of the masks-only layer (0.5 + 0.75 k E) at opacity HMIX
-          let dd = Math.max(-0.5, Math.min(0.5, HMIX*0.75*hillE(j, r)));
-          // eased out under the prominence layer -- see render.py
-          if (L.pl_F && (P.promFade||0) > 0) dd *= 1 - P.promFade*(L.pl_F[j]/255);
-          Y = Y < 0.5 ? Y*(1 + 2*dd) : 1 - (1 - Y)*(1 - 2*dd);
-        }
-        const pdrv = L.promdet ? L.promdet[j]/255 : inEff;
-        Y = Y*(1 + promGain*(pr[j]/255)*(0.30 + 1.3*(pdrv-0.5)));
-        const Yd = discLevel*(1+earthShine*(2*(ear[j]/255)-1));
-        Y = Y*eg + Yd*(1-eg);
-        // sky-cast correction weighted by the chroma confidence -- see render.py
-        const cf = L.cconf ? L.cconf[j]/255 : 1;
-        let a0 = _cl(ch[j])  /(1 + cf*(BC[0]-1));
-        let a1 = _cl(ch[j+1])/(1 + cf*(BC[1]-1));
-        let a2 = _cl(ch[j+2])/(1 + cf*(BC[2]-1));
-        if (CN > 0){ a0 *= CG[0]; a1 *= CG[1]; a2 *= CG[2]; }
-        a0 *= temp; a2 /= temp; a1 *= P.tint;
-        // Saturation AFTER the balance, so 0 is white as balanced -- see render.py
-        if (satur !== 1){ a0 = Math.pow(a0, satur); a1 = Math.pow(a1, satur); a2 = Math.pow(a2, satur); }
-        const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
-        a0 /= alum; a1 /= alum; a2 /= alum;
-        a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
-        // prominence structure in green/blue -- see render.py
-        if (P.promChroma !== 0 && L.promdet){
-          let cfac = 1 + P.promChroma*(pr[j]/255)*(2*(L.promdet[j]/255) - 1);
-          if (satur !== 1) cfac = Math.pow(Math.max(cfac, 1e-3), satur);
-          a1 *= cfac; a2 *= cfac;
-        }
-        const r0 = Y*a0, r1 = Y*a1, r2 = Y*a2;
-        const m = Math.max(r0,r1,r2);
-        const ms = m<=knee ? m : knee+(1-knee)*Math.tanh((m-knee)/(1-knee));
-        const sc = m>1e-6 ? ms/m : 1;
-        const tt = Math.min(1, Math.max(0,(ms-0.9)/0.1))*hlDesat;
-        V0[i] = (r0*sc)*(1-tt)+ms*tt; V1[i] = (r1*sc)*(1-tt)+ms*tt; V2[i] = (r2*sc)*(1-tt)+ms*tt;
-        EGA[i] = eg;
-      };
-      if (RENDER_DRAFT){
-        // every DS-th pixel each way, copied into its DS x DS block
-        const W = GEO.W, H = GEO.H, DS = RENDER_DRAFT_STEP;
-        for (let y=0; y<H; y+=DS) for (let x=0; x<W; x+=DS){
-          const i = y*W + x; sAt(i);
-          const v0 = V0[i], v1 = V1[i], v2 = V2[i], e = EGA[i];
-          for (let yy=y; yy<y+DS && yy<H; yy++) for (let xx=x; xx<x+DS && xx<W; xx++){
-            const k = yy*W + xx; V0[k]=v0; V1[k]=v1; V2[k]=v2; EGA[k]=e; }
-        }
-      } else for (let i=0; i<N; i++) sAt(i);
+      // stage A over row strips, on every core when the pool is up (2026-10-16);
+      // _stageA holds the pixel arithmetic, unchanged
+      const SA = {P, N, W: GEO.W, H: GEO.H, DEC, draft: RENDER_DRAFT, DS: RENDER_DRAFT_STEP,
+                  fnMix, detailGain, baseLift, envGamma, radialFlatten, innerMix, innerDim, promGain,
+                  temp, satur, hlDesat, discLevel, discTrim, earthShine, knee, LOGK, KK, LKN, RPROF,
+                  BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK,
+                  V0: C.V0, V1: C.V1, V2: C.V2, EG: C.EG};
+      _parRun("A", SA);
       C.L = L; C.N = N; C.key = keyA; C.draft = RENDER_DRAFT;
     }
-    const V0 = C.V0, V1 = C.V1, V2 = C.V2, EGA = C.EG;
-    const CRV = !!(TLUT || MLUT);
-    const outB = (v, eg, jr, c) => {
-      v = v<0?0:v>1?1:v;
-      v = Math.pow(v, ig);
-      v = (v-bgBlack)*ib; v = v<0?0:v>1?1:v;
-      if (CRV){ const vg = TLUT ? _lut(TLUT, v) : v, vm = MLUT ? _lut(MLUT, v) : v; v = vg*eg + vm*(1-eg); }
-      return v*255;
-    };
-    for (let i=0,j=0; i<N; i++,j+=4){
-      const eg = EGA[i];
-      const jr = j;
-      d[j]   = outB(V0[i], eg, jr, 0);
-      d[j+1] = outB(V1[i], eg, jr, 1);
-      d[j+2] = outB(V2[i], eg, jr, 2);
-      d[j+3] = 255;
-    }
+    // stage B over row strips (2026-10-16); _stageB holds the arithmetic, unchanged
+    const SB = {N, W: GEO.W, H: GEO.H, ig, ib, bgBlack, TLUT, MLUT,
+                V0: C.V0, V1: C.V1, V2: C.V2, EG: C.EG, OUT: d};
+    _parRun("B", SB);
   }
   // contain whites: scale the whole picture so the 99.99th percentile of its luminance sits at the ceiling
   // with an inner corona level, contain whites runs in lookPass, after the level step
@@ -1907,9 +2453,12 @@ function renderNow(){
     const ceil = P.containWhites*255; if (p > ceil && p > 0){ const f = ceil/p; for (let i=0;i<d.length;i+=4){ d[i]*=f; d[i+1]*=f; d[i+2]*=f; } }
   }
   // the look controls -- render.py's look(), same order (after contain whites)
-  if (!solo) lookPass(d, P);
-  if (!solo) innerDetailPass(d, P);
-  if (!solo) bandDetailPass(d, P);
+  // the look, then the inner and the filament detail (2026-10-16): the
+  // whole-picture numbers here, the pixels over row strips (_passApply)
+  if (!solo){
+    const SP = {W: GEO.W, H: GEO.H, OUT: d, LK: _lookPrep(d, P), ID: _indetPrep(P), BD: _bdetPrep(P)};
+    if (SP.LK || SP.ID || SP.BD) _parRun("P", SP);
+  }
   // the final sharpening copies the picture BEFORE the prominence layer goes on,
   // and lays the layer on after it -- the order render.py uses
   scheduleFinal(out);
@@ -1956,47 +2505,12 @@ function detailFade(P){
 let DFADE = null, DFADE_KEY = "";
 function detailFadeCached(P){
   const k = String(P.detailStart ?? 8) + "|" + (L.r ? L.r.length : 0);
-  if (k !== DFADE_KEY){ DFADE = detailFade(P); DFADE_KEY = k; }
+  if (k !== DFADE_KEY){ DFADE = _toShared(detailFade(P)); DFADE_KEY = k; }
   return DFADE;
-}
-function innerDetailPass(d, P){
-  const g = (P.innerDetail || 0) * INDET_GAIN, F = L.indet;
-  if (!(g > 0) || !F || !GEO.hasInnerDetail || VIEW !== "composite") return;
-  const A = detailFadeCached(P);
-  for (let j = 0; j < d.length; j += 4){
-    const hi = F[j], lo = F[j+1];
-    if (hi === 128 && lo === 0) continue;                      // 0 (nothing there)
-    let f = ((hi*256 + lo)/65535 - 0.5) * 2 * INDET_SPAN;
-    if (A) f *= A[j >> 2];
-    const m = Math.exp(g * f);
-    d[j] = Math.min(255, d[j]*m); d[j+1] = Math.min(255, d[j+1]*m); d[j+2] = Math.min(255, d[j+2]*m);
-  }
 }
 // THE FILAMENT DETAIL LAYER -- render.py, after the inner detail: the picture
 // times exp(bandDetail x layer); 16-bit, signed over +-BDET_SPAN.
 const BDET_SPAN = 0.2;
-function bandDetailPass(d, P){
-  const g = (P.bandDetail || 0), F = L.bdet, bf = (P.bandFaint || 0);
-  if (!(g > 0) || !F || !GEO.hasBandDetail || VIEW !== "composite") return;
-  const A = detailFadeCached(P);
-  // the coarse part: 1 = the layer as built, 0 = the fine-only layer (render.py)
-  let bc = (P.bandCoarse ?? 1); bc = bc < 0 ? 0 : (bc > 1 ? 1 : bc);
-  const F2 = (bc < 1 && GEO.hasBandFine) ? L.bdetf : null;
-  for (let j = 0; j < d.length; j += 4){
-    const hi = F[j], lo = F[j+1];
-    if (!F2 && hi === 128 && lo === 0) continue;
-    let f = ((hi*256 + lo)/65535 - 0.5) * 2 * BDET_SPAN;
-    if (F2) f = bc*f + (1 - bc)*((F2[j]*256 + F2[j+1])/65535 - 0.5) * 2 * BDET_SPAN;
-    if (A) f *= A[j >> 2];
-    if (bf > 0){
-      let y = (0.2126*d[j] + 0.7152*d[j+1] + 0.0722*d[j+2]) / 255 / bf;
-      y = y < 0 ? 0 : (y > 1 ? 1 : y);
-      f *= y*y*(3 - 2*y);
-    }
-    const m = Math.exp(g * f);
-    d[j] = Math.min(255, d[j]*m); d[j+1] = Math.min(255, d[j+1]*m); d[j+2] = Math.min(255, d[j+2]*m);
-  }
-}
 // THE LOOK CONTROLS -- mirrors render.py's look(): inner corona level (median
 // display luminance at 1.05-1.15 R), a screen lift of everything outside the
 // Moon towards the sky colour, and the Moon disc's colour; one hue axis for both.
@@ -2030,9 +2544,10 @@ function moonMask(d, P){
     d[j] *= a; d[j+1] *= a; d[j+2] *= a;
   }
 }
-function lookPass(d, P){
+function _lookPrep(d, P){
+  // lookPass's whole-picture numbers (2026-10-16): unchanged; the pixel loop is in _passApply
   const cl = P.coronaLevel||0, sl = P.skyLevel||0, mc = P.moonColour||0;
-  if (!(cl > 0) && !(sl > 0) && mc === 0) return;
+  if (!(cl > 0) && !(sl > 0) && mc === 0) return null;
   const DEC = GEO.decim || 4, R = GEO.R, rr = L.r, rm = L.rmask;
   const dsw = Math.max(1, (P.discSoft||12))/DEC, dt = (P.discTrim||0)/DEC;
   const N = rr.length, EG = new Float32Array(N);
@@ -2065,8 +2580,18 @@ function lookPass(d, P){
     for (let i=0;i<N;i++) if (EG[i] <= 0){ const j = 4*i; ys.push((0.2126*d[j]+0.7152*d[j+1]+0.0722*d[j+2])/255); }
     if (ys.length > 20){ ys.sort((a,b)=>a-b); yd = ys.length % 2 ? ys[ys.length>>1] : 0.5*(ys[(ys.length>>1)-1]+ys[ys.length>>1]); }
   }
-  for (let i=0, j=0; i<N; i++, j+=4){
-    const eg = EG[i], kk = 1 + (k-1)*eg;     // the disc keeps its own level
+  return {k, doSh, kn, cwf, sl, sc, mcc, yd, DEC, dt, dsw};
+}
+// the pixels of the look, inner-detail and filament-detail passes over rows
+// y0..y1 (2026-10-16). Each loop is the pass's own, unchanged; a pixel only
+// ever reads itself, so doing the three per strip gives the same bytes.
+function _passApply(S, y0, y1){
+  const d = S.OUT, W = S.W, i0 = y0*W, i1 = y1*W;
+  if (S.LK){
+    const {k, doSh, kn, cwf, sl, sc, mcc, yd, DEC, dt, dsw} = S.LK, rr = L.r, rm = L.rmask;
+    for (let i=i0, j=4*i0; i<i1; i++, j+=4){
+      const e = (rr[i]-(rm[i]+dt+2/DEC-dsw))/dsw;
+      const eg = Math.fround(e<0?0:e>1?1:e), kk = 1 + (k-1)*eg;     // EG was a Float32Array
     let v0 = d[j]/255*kk, v1 = d[j+1]/255*kk, v2 = d[j+2]/255*kk;
     if (doSh){ const m = Math.max(v0,v1,v2); if (m > kn){ const f = (kn + (1-kn)*Math.tanh((m-kn)/(1-kn)))/m; v0*=f; v1*=f; v2*=f; } }
     if (cwf !== 1){ v0*=cwf; v1*=cwf; v2*=cwf; }
@@ -2078,7 +2603,47 @@ function lookPass(d, P){
     if (mcc){ const yp = Math.min(0.2126*v0 + 0.7152*v1 + 0.0722*v2, 2*yd);
               const u = (1-eg)*yp; v0 += u*(mcc[0]-1); v1 += u*(mcc[1]-1); v2 += u*(mcc[2]-1); }
     d[j] = Math.min(1,Math.max(0,v0))*255; d[j+1] = Math.min(1,Math.max(0,v1))*255; d[j+2] = Math.min(1,Math.max(0,v2))*255;
+    }
   }
+  if (S.ID){
+    const {g, A, span} = S.ID, F = L.indet;
+    for (let j = 4*i0, j1 = 4*i1; j < j1; j += 4){
+      const hi = F[j], lo = F[j+1];
+      if (hi === 128 && lo === 0) continue;                      // 0 (nothing there)
+      let f = ((hi*256 + lo)/65535 - 0.5) * 2 * span;
+      if (A) f *= A[j >> 2];
+      const m = Math.exp(g * f);
+      d[j] = Math.min(255, d[j]*m); d[j+1] = Math.min(255, d[j+1]*m); d[j+2] = Math.min(255, d[j+2]*m);
+    }
+  }
+  if (S.BD){
+    const {g, A, bf, bc, F2on, span} = S.BD, F = L.bdet, F2 = F2on ? L.bdetf : null;
+    for (let j = 4*i0, j1 = 4*i1; j < j1; j += 4){
+      const hi = F[j], lo = F[j+1];
+      if (!F2 && hi === 128 && lo === 0) continue;
+      let f = ((hi*256 + lo)/65535 - 0.5) * 2 * span;
+      if (F2) f = bc*f + (1 - bc)*((F2[j]*256 + F2[j+1])/65535 - 0.5) * 2 * span;
+      if (A) f *= A[j >> 2];
+      if (bf > 0){
+        let y = (0.2126*d[j] + 0.7152*d[j+1] + 0.0722*d[j+2]) / 255 / bf;
+        y = y < 0 ? 0 : (y > 1 ? 1 : y);
+        f *= y*y*(3 - 2*y);
+      }
+      const m = Math.exp(g * f);
+      d[j] = Math.min(255, d[j]*m); d[j+1] = Math.min(255, d[j+1]*m); d[j+2] = Math.min(255, d[j+2]*m);
+    }
+  }
+}
+function _indetPrep(P){
+  const g = (P.innerDetail || 0) * INDET_GAIN, F = L.indet;
+  if (!(g > 0) || !F || !GEO.hasInnerDetail || VIEW !== "composite") return null;
+  return {g, A: detailFadeCached(P), span: INDET_SPAN};
+}
+function _bdetPrep(P){
+  const g = (P.bandDetail || 0), F = L.bdet, bf = (P.bandFaint || 0);
+  if (!(g > 0) || !F || !GEO.hasBandDetail || VIEW !== "composite") return null;
+  let bc = (P.bandCoarse ?? 1); bc = bc < 0 ? 0 : (bc > 1 ? 1 : bc);
+  return {g, A: detailFadeCached(P), bf, bc, F2on: !!((bc < 1 && GEO.hasBandFine) ? L.bdetf : null), span: BDET_SPAN};
 }
 // THE 0.24 PROMINENCE LAYER over the finished picture. Same formula as
 // promlayer.overlay: the layer's own curve and colour, alpha from its own
@@ -2096,6 +2661,7 @@ function promOverlay(d){
   }
   const PK = Math.min(1, Math.max(0.3, P.promPeak ?? 1));
   const SO = Math.min(1, Math.max(0, P.promSoft ?? 0)), AS = 1/(1 - Math.exp(-1.5)), KN = 1 - 0.4*SO;
+  const LI = Math.min(1, Math.max(0, P.promLight ?? 0.8));   // promlayer.overlay: prominence light
   for (let j=0; j<d.length; j+=4){
     const Lv = (Ll[j]*256 + Ll[j+1])/65535*4;
     if (Lv <= 0) continue;
@@ -2108,6 +2674,23 @@ function promOverlay(d){
     let c0 = Math.max(0, 1 + ((PC ? PC[0] : C[j]  /255*4) - 1)*sat);
     let c1 = Math.max(0, 1 + ((PC ? PC[1] : C[j+1]/255*4) - 1)*sat);
     let c2 = Math.max(0, 1 + ((PC ? PC[2] : C[j+2]/255*4) - 1)*sat);
+    if (LI > 0){
+      // the prominence ADDS brightness, hue as far as the gamut allows there
+      const b0 = d[j]/255, b1 = d[j+1]/255, b2 = d[j+2]/255;
+      const Lb = Math.min(1, Math.max(0, 0.2126*b0 + 0.7152*b1 + 0.0722*b2));
+      const Lt = Lb + (1 - Lb)*Math.min(1, Math.max(0, a*y*LI*PK));
+      const q0 = Lb > 1e-4 ? b0/Lb : 1, q1 = Lb > 1e-4 ? b1/Lb : 1, q2 = Lb > 1e-4 ? b2/Lb : 1;
+      const e0 = c0 - q0, e1 = c1 - q1, e2 = c2 - q2, il = 1/Math.max(Lt, 1e-6);
+      let sm = 1;
+      if (e0 > 1e-6) sm = Math.min(sm, (il - q0)/e0);
+      if (e1 > 1e-6) sm = Math.min(sm, (il - q1)/e1);
+      if (e2 > 1e-6) sm = Math.min(sm, (il - q2)/e2);
+      const s_ = Math.min(a, Math.max(0, sm));
+      d[j]   = Math.min(1, Math.max(0, Lt*(q0 + s_*e0)))*255;
+      d[j+1] = Math.min(1, Math.max(0, Lt*(q1 + s_*e1)))*255;
+      d[j+2] = Math.min(1, Math.max(0, Lt*(q2 + s_*e2)))*255;
+      continue;
+    }
     if (SO > 0){
       const cm = Math.max(c0, c1, c2);
       let t = Math.min(1, Math.max(0, (y*cm - 1)/Math.max(y*(cm - 1), 1e-6)));
@@ -2448,12 +3031,13 @@ function _fsMakeWorker(){
   return _fsWorker;
 }
 function _fsPost(r){
+  if (_fsPool(r)) return;                          // all cores, when the pool is up
   const w = _fsMakeWorker();
   if (!w){ _fsMain(r); return; }
   if (_fsBusy){ _fsNext = r; return; }
   _fsBusy = true; w._jobs[r.job] = r;
   w.postMessage({job: r.job, buf: r.data.buffer, W: r.W, H: r.H, R: GEO.R, cy: GEO.cy, cx: GEO.cx, st: r.st,
-                 mid: r.mid, dark: r.dark, light: r.light, k: r.k}, [r.data.buffer]);
+                 mid: r.mid, dark: r.dark, light: r.light, k: r.k, view: r.view}, [r.data.buffer]);
 }
 function _fsMain(r){                                    // no worker: the old path
   if (r.job !== _fsJob) return;
@@ -2623,14 +3207,29 @@ function solveWhite(x0, y0, x1, y1, pred, label){
              + (clipped ? "  (wanted " + dispFmt(tW) + " / " + dispFmt(nW) + " - clamped to the slider range; that spot is further from neutral than these sliders reach)" : ""));
 }
 // LOOK PRESETS: colour and tone fitted (looks/fit.py, reference set) to measured
+// 2026-10-16 (lab, judged by eye): eight looks fitted to the new reference set
+// (looks2/fit5.py: tone with the corona held near neutral, lift <= 0.4,
+// compression <= 0.8, limb-ring saturation and streamer/gap spread in the loss;
+// then detail incl. Noise reduction; then a colour-only fit and corrections by
+// eye; tone-curve highlight slope capped at 0.6 -- steeper tops gave a crunchy,
+// coloured collar at the limb; streamer/gap balance (10th/90th percentile per
+// shell) checked against the reference). DETAIL = the Clean Steel M4 recipe, with
+// Structure capped at 0.4 (0.15-0.2 where it carved dark wedges) and each look's
+// own detail gain. The Noise reduction slider (tuned at a quarter of the resolution,
+// it gave blotches at 1:1) was removed, as was the Ray detail slider of that day
+// (tangential high-pass, after a published workflow's step 3): hair-like
+// streaks and streaks through the prominences at 1:1. Silver rays, Night navy, Slate
+// filaments, Midnight silver (one reference only), Golden hour
+// (each fitted to one published render). Removed the same day: Dark moody, Deep purple, and the new
+// Slate filaments, Bright desaturated streamers II, Calm blue II, Deep purple II.
 // looks of published renders; named for what they look like, not for whom
 // partial convolution in every look (2026-10-07, hand-picked start values; since 2026-10-13 every look also sets the 2-32 px weights)
-// Bright desaturated streamers (helion) = settings picked by eye on the reference set (2026-10-10), all
-// look controls except the stars and the 2-32 px weights; warm = their Temperature/Tint over the corona white.
-// Clean Steel M4 / M5 / M6 (expM4, expM5, expM6; 2026-10-12/13, judged by eye on the reference set and another test set):
+// Bright desaturated streamers (helion) = hand-picked settings on the reference set (2026-10-10), all
+// look controls except the stars and the 2-32 px weights; warm = its Temperature/Tint over the corona white.
+// Clean Steel M4 / M5 / M6 (expM4, expM5, expM6; 2026-10-12/13, judged by eye on two test sets):
 // Bright desaturated streamers' tone with a steel-blue sky, Moon and corona colour (from the former Steel blue sky
 // look, fitted 2026-10-11). M5 has inner corona level 0.58 instead of 0.62; M6 has short-exposure detail 0.4 instead
-// of 0.21 (without MGN the first ~0.2 R lose local contrast; better on detailed stacks like that other test set, M4 on
+// of 0.21 (without MGN the first ~0.2 R lose local contrast; better on detailed stacks, M4 on
 // the reference set). Steel blue sky, Clean steel and Natural balanced blue were removed 2026-10-13.
 // DETAIL SETTINGS OF ALL COLOUR LOOKS EXCEPT Bright desaturated streamers (2026-10-13; Bright desaturated
 // streamers was set back to its own settings the same day, MGN 0.2, blend 0.15, filament 1.6, Structure 0): the
@@ -2640,13 +3239,13 @@ function solveWhite(x0, y0, x1, y1, pred, label){
 // fine-only layer (coarse part 0), start 8 px; final sharpening 0.35 / 0.20 / 0, gate 6. Each look keeps its own
 // tone and colour, including base lift and detail gain (taking M4's lifted the dark skies of Deep sunset and
 // Dark moody).
-// Deep sunset (sunset) = a saved DeepSunset settings file (2026-10-10), the same way.
+// Deep sunset (sunset) = a saved hand-tuned settings file (2026-10-10), the same way.
 // Highlight compression 1 in Bright desaturated streamers (with inner corona level 0.62), Dark moody and
 // Deep purple (2026-10-10: near-white at 1.02-1.05 R was 13 / 10 / 81 %, references 2-4 %).
-// Bright desaturated streamers: inner detail 1.25 (gain 7.5; 6-9 judged best by eye, 2026-10-10).
+// Bright desaturated streamers: inner detail 1.25 (gain 7.5; 6-9 looked right, 2026-10-10).
 // Both take the final sharpening 0.35 / 0.20 / 0, gate 6 (full-res test 2026-10-10: half the extra sky grain of 0.29 / 0.20 / 0.31,
 // no bright line along the limb, ~70 % of the gain in the corona kept).
-const LOOKS = {"helion": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.15, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.2, "moonColour": 0.707, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.992, "moonHueG": 0.796, "moonHueR": 0.647, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 1.1, "skyHueB": 1, "skyHueG": 0.756, "skyHueR": 0.579, "skyLevel": 0.17, "smoothing": 0.25, "structure": 0, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.2, "warm": [0.934, 1.024], "innerDetail": 0, "bandDetail": 1.6}, "druckmuller": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.589, "radialFlatten": 0.0, "envGamma": 1.046, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.0, "clarity": 0.1, "smoothing": 0.25, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.0, "hillDenoise": 0, "hlCompress": 0.0, "fnMix": 0.4, "detailScale": 1, "fnCompress": 0.9, "structure": 0.4, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.21, "innerDenoise": 0.4, "innerDim": 0, "innerDetail": 0, "bandDetail": 2.2, "bandCoarse": 0.0, "finalMid": 0.35, "finalDark": 0.2, "finalLight": 0, "finalNoise": 6}, "sunset": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.545, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.09, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.439, "moonHueG": 0.635, "moonHueR": 1, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 0.9, "skyColour": 0.18, "skyHueB": 0.78, "skyHueG": 0.039, "skyHueR": 0.769, "skyLevel": 0.05, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.06, "discLevel": 0.16, "warm": [2.279, 1.067], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "darkmoody": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.1, "toneCurve": [[0, 0], [0.2, 0.22], [0.35, 0.42], [0.5, 0.5], [0.75, 0.78], [1, 1]], "containWhites": 1, "coronaLevel": 0.55, "radialFlatten": 0.1, "envGamma": 0.8, "satur": 0.25, "skyLevel": 0.09, "skyColour": 1.3, "discLevel": 0.4, "moonColour": 0.6, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.3, "hillDenoise": 0, "clarity": 0.1, "smoothing": 0.25, "warm": [0.9, 0.97], "hlCompress": 1, "fnMix": 0.4, "mgnContrast": 0.0, "detailScale": 1, "fnCompress": 0.9, "structure": 0.4, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.21, "innerDenoise": 0.4, "innerDim": 0, "innerDetail": 0, "bandDetail": 2.2, "bandCoarse": 0.0, "finalMid": 0.35, "finalDark": 0.2, "finalLight": 0, "finalNoise": 6}, "purple": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.1, "toneCurve": [[0, 0], [0.25, 0.38], [0.5, 0.7], [0.75, 0.9], [1, 1]], "containWhites": 1, "coronaLevel": 0.85, "radialFlatten": 0.3, "envGamma": 1.0, "satur": 0.25, "skyLevel": 0.1, "skyColour": 1.1, "discLevel": 0.25, "moonColour": 1.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.3, "clarity": 0.1, "smoothing": 0.25, "hillDenoise": 0, "hlCompress": 1, "mgnContrast": 0.0, "baseLift": 0.45, "detailGain": 1.3, "finalMid": 0.35, "finalLight": 0, "promSat": 0.5, "fnMix": 0.4, "skyHueR": 0.72, "skyHueG": 0.68, "skyHueB": 1.0, "moonHueR": 0.8, "moonHueG": 0.82, "moonHueB": 1.0, "warm": [1.0, 0.93], "detailScale": 1, "fnCompress": 0.9, "structure": 0.4, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.21, "innerDenoise": 0.4, "innerDim": 0, "innerDetail": 0, "bandDetail": 2.2, "bandCoarse": 0.0, "finalDark": 0.2, "finalNoise": 6}, "expM4": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM5": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.58, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM6": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.4, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}};
+const LOOKS = {"helion": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.15, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.2, "moonColour": 0.707, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.992, "moonHueG": 0.796, "moonHueR": 0.647, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 1.1, "skyHueB": 1, "skyHueG": 0.756, "skyHueR": 0.579, "skyLevel": 0.17, "smoothing": 0.25, "structure": 0, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.2, "warm": [0.934, 1.024], "innerDetail": 0, "bandDetail": 1.6}, "druckmuller": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.589, "radialFlatten": 0.0, "envGamma": 1.046, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.0, "clarity": 0.1, "smoothing": 0.25, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.0, "hillDenoise": 0, "hlCompress": 0.0, "fnMix": 0.4, "detailScale": 1, "fnCompress": 0.9, "structure": 0.4, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.21, "innerDenoise": 0.4, "innerDim": 0, "innerDetail": 0, "bandDetail": 2.2, "bandCoarse": 0.0, "finalMid": 0.35, "finalDark": 0.2, "finalLight": 0, "finalNoise": 6}, "sunset": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.545, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.09, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.439, "moonHueG": 0.635, "moonHueR": 1, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 0.9, "skyColour": 0.18, "skyHueB": 0.78, "skyHueG": 0.039, "skyHueR": 0.769, "skyLevel": 0.05, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.06, "discLevel": 0.16, "warm": [2.279, 1.067], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "expM4": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM5": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.58, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM6": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.4, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "silverRays": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.71, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.814, "moonHueR": 0.532, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.235, "satur": 0.085, "skyColour": 2.205, "skyHueB": 1.0, "skyHueG": 0.82, "skyHueR": 0.637, "skyLevel": 0.091, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.125, 1.002], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "nightNavy": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.533, "detailGain": 0.9, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.306, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.484, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.81, "moonHueR": 0.577, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.42, "satur": 0.0, "skyColour": 1.607, "skyHueB": 1.0, "skyHueG": 0.761, "skyHueR": 0.626, "skyLevel": 0.061, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.511], [0.5, 0.729], [0.75, 0.944], [1, 1]], "bgBlack": 0.1, "discLevel": 0.17, "warm": [1.051, 1.0], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "midnightSilver": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.647, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.521, "moonHueR": 0.2, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.95, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.315, "satur": 0.085, "skyColour": 2.056, "skyHueB": 1.0, "skyHueG": 0.823, "skyHueR": 0.659, "skyLevel": 0.142, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.2, 1.078], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "goldenHour": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.64, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.2, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.25, "hlDesat": 0.0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1.0, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.25, "moonHueG": 0.45, "moonHueR": 1.0, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 1.7, "skyColour": 1.786, "skyHueB": 0.376, "skyHueG": 0.584, "skyHueR": 1.0, "skyLevel": 0.074, "smoothing": 0.25, "structure": 0.2, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.088, "discLevel": 0.16, "warm": [1.729, 1.12], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}};
 // As loaded: every look control back to what the server sent after stacking
 // (the picture as it first appeared); a control whose layer was not built stays 0.
 function loadedParams(){
@@ -2871,7 +3470,7 @@ $("flatDir").addEventListener("keydown", e => {if (e.key==="Enter") loadFolder()
 $("importPath").addEventListener("keydown", e => {if (e.key==="Enter") startRun();});
 // Enter here too. The folder field right above it loads on Enter, so pasting
 // a path and pressing Enter is the obvious move -- and it did nothing, which
-// is what test reports described as "the diamond ring will not load".
+// is what early test runs reported as "the diamond ring will not load".
 $("ringpath").addEventListener("keydown", e => {
   if (e.key === "Enter" && !$("ringload").disabled) $("ringload").click();
 });
@@ -2979,7 +3578,7 @@ function currentProcessing(){
   // records what the run actually used, which is the more honest thing to save.
   const ids = {intra_lock:"intraLock", colour_planes:"colourPlanes", partialconv:"partialConv",
                align_corr:"alignCorr", align_filter:"alignFilter",
-               stack_combine:"stackCombine", fnrgf_preset:"fnrgfPreset",
+               stack_combine:"stackCombine", bracket_mode:"bracketMode", fnrgf_preset:"fnrgfPreset",
                photo_solve:"photoSolve", tier_mode:"tierMode", align_mode:"alignMode",
                feather:"feather", wb_source:"wb", photometry:"photometry",
                frames:"frames", denoise:"denoise", simple:"simpleStack"};
@@ -3418,7 +4017,7 @@ let CACHE = null;
 const OPTMAP = {denoise:"denoise", feather:"feather", wb:"wb_source", photoSolve:"photo_solve", tierMode:"tier_mode",
   alignMode:"align_mode",
   intraLock:"intra_lock", colourPlanes:"colour_planes", alignCorr:"align_corr", alignFilter:"align_filter",
-  stackCombine:"stack_combine", fnrgfPreset:"fnrgf_preset", frames:"frames",
+  stackCombine:"stack_combine", bracketMode:"bracket_mode", fnrgfPreset:"fnrgf_preset", frames:"frames",
   despeckle:"despeckle", exportTiers:"export_tiers", tierLinear:"tier_linear"};
 function ctlValue(id){ const el = $(id); return el.type === "checkbox" ? el.checked : el.value; }
 function diffOpts(){

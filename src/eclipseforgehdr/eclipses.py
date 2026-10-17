@@ -27,7 +27,7 @@ GeoNames (geonames.org, CC BY 4.0) populated places, as Stellarium ships
 them (data/base_locations.bin.gz): name, region, population, latitude,
 longitude, elevation, IANA time zone; country from the time zone
 (tzdata zone.tab). Every place inside a path of totality with at least
-POP_MIN inhabitants, plus a short list of places added by hand.
+POP_MIN inhabitants, plus a few smaller places added by hand.
 """
 import math, json, os
 
@@ -135,6 +135,41 @@ def local(date, lat, lon, height_m=0.0):
                    duration_s=(c3 - c2) * 3600.0,
                    mid_ut=0.5 * (c2 + c3) + E["t0"] - E["dT"] / 3600.0)
     return out
+
+
+K_MOON = 0.2725076        # the Moon's radius in Earth radii (the elements' unit)
+
+
+def moon_rate(date, lat, lon, height_m=0.0):
+    """How fast the Moon moves against the Sun as seen from this place at
+    mid-eclipse, in MOON RADII per second, or None when the eclipse is not
+    in the list or not seen there.
+
+    On the fundamental plane the observer sits (u, v) from the shadow axis,
+    which is the Sun-Moon line, and the Sun-Moon separation seen from there is
+    that distance over the observer's distance to the Moon -- as is the Moon's
+    own radius K_MOON over the same distance. So in Moon radii the separation
+    is simply hypot(u, v) / K_MOON, and its rate hypot(u', v') / K_MOON, with
+    the observer's own motion (Earth's rotation) already in u', v'. Times the
+    Moon's radius in pixels this is the lunar track's expected speed on the
+    sensor, for any lens and camera."""
+    E = ECLIPSES.get(str(date))
+    if E is None:
+        return None
+    try:
+        loc = local(date, lat, lon, height_m or 0.0)
+    except Exception:
+        return None
+    if not loc.get("obscured"):
+        return None
+    phi = lat * D2R
+    U = math.atan(0.99664719 * math.tan(phi))
+    h = (height_m or 0.0) / 6378140.0
+    rsp = 0.99664719 * math.sin(U) + h * math.sin(phi)
+    rcp = math.cos(U) + h * math.cos(phi)
+    t = loc["mid_ut"] - E["t0"] + E["dT"] / 3600.0
+    u, v, a, b, L1, L2, zeta, d, H = _state(E, t, rsp, rcp, lon)
+    return math.hypot(a, b) / 3600.0 / K_MOON
 
 
 def utc_offset_h(tz, date, ut_h):

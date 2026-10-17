@@ -20,8 +20,8 @@ HOW
     the slope k of y = k x + c over the pixels both frames hold above 1 % and
     below 70 % of saturation. The fit is made on BIN MEDIANS, with the bins
     taken on the smoothed sum of the two frames. A plain least-squares fit on
-    pixels is biased low when x is noisy (regression dilution): on that set's
-    shortest frames it printed a false 5-15 % fall inside every group;
+    pixels is biased low when x is noisy (regression dilution): on a FITS
+    test set's shortest frames it printed a false 5-15 % fall inside every group;
   * the slopes chain into one brightness per frame; sorted, the frames split
     into tiers wherever two neighbours differ by more than GAP (8 %). Real
     steps are 19 % and more (1/4 EV); frame-to-frame scatter inside a tier

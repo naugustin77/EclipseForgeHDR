@@ -4,7 +4,7 @@ Everything here is measured on the display-encoded composite as it is written,
 scale-free (radii in R), so the same thresholds hold for any set and size. Each
 check returns a value, a grade (ok / check / bad) and one line saying what it
 means and what to reach for. Thresholds were set by running the same code on
-published renders (professional eclipse composites, Project Helion) and on
+published renders (Druckmüller 2026, other published renders, Project Helion) and on
 our own renders with known faults.
 
 The list follows what Project Helion's grading names (ring_break, inner_halo,
@@ -187,7 +187,7 @@ def grade(rgb, cy, cx, R, Rmask=None):
             "or the disc colour bleeding out)")
     # ---- grain: pixel noise measured ALONG THE RADIUS. Coronal structure is
     # mostly radial, so the radial derivative carries the noise and little of the
-    # fine structure (a plain high-pass rates a reference render's hair-fine streamers as
+    # fine structure (a plain high-pass rates a published render's hair-fine streamers as
     # grain). Central difference minus its local mean, robust sigma, x sqrt(2) for
     # the difference, in 8-bit levels; per zone.
     zones = [("1.2-1.6 R", 1.2, 1.6), ("1.6-2.4 R", 1.6, 2.4), ("2.4-3.2 R", 2.4, 3.2)]
@@ -281,7 +281,7 @@ def grade(rgb, cy, cx, R, Rmask=None):
 # PROCESSING (artefacts, colour, tones: settings or a fault), and the
 # headline gives one sentence and one thing to try for the weakest.
 # References: detail 0.05 is the low end of the published renders
-# (professional composites: 0.05-0.07) -- "good" means that, not "passes".
+# (Druckmueller and others: 0.05-0.07) -- "good" means that, not "passes".
 REF = {"rings": 0.8, "limb_dark_rim": 6.0, "limb_width": 30.0, "corona_neutral": 6.0,
        "colour_step": 2.0, "limb_blue": 4.0, "grain": 2.5, "grain_gap": 2.5,
        "detail": 0.05, "flat_blocks": 1.0, "clipped_white": 0.5, "clipped_black": 0.5,

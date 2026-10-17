@@ -241,7 +241,7 @@ NAFE_TAIL = 0.10      # LAYER_BUILD 11: the 0.1 % beyond each end of the level a
 # All are lab constants with environment overrides for A/B runs; a layer-only
 # rebuild (LAYER_BUILD) applies them to a cached stack without re-stacking.
 #
-# RECIPE 4 SWITCHES ALL OF THE ABOVE OFF, after the verdict on recipe 3:
+# RECIPE 4 SWITCHES ALL OF THE ABOVE OFF, after the visual verdict on recipe 3:
 # outer corona washed out, inner not sharp beyond a small radius, FNRGF flat,
 # MGN empty past a small radius. A second, independent test -- along-ray
 # coherence: average the band-passed image over 32-64 px of radius and
@@ -277,9 +277,9 @@ OUTER_BLUR_R = 0.0          # recipe 4: off; 0.006 in recipes 1-3. FNRGF/tangent
 OUTER_BLUR_RANGE = (1.3, 3.0)
 NAFE_INPUT = "flatten"      # "flatten" = 0.23.8's input (recipe 4); "lf" = recipes 1-3
 PROM_FEATHER_PX = 4.0       # 0.23.11 lab: soft edge on MGN's prominence holes, see _prom_feather
-ALONG_SIGMA_R = 0.0         # along-filament smoothing OFF (build 29, 2026-10-12): its coherence gate left a patchwork of radially smeared streaks and raw-noise patches in MGN (gate vs MGN fine-scale std r = -0.96, a test set); grain goes at the end with NXT. Was 0.010 R (builds 13-28)
+ALONG_SIGMA_R = 0.0         # along-filament smoothing OFF (build 29, 2026-10-12): its coherence gate left a patchwork of radially smeared streaks and raw-noise patches in MGN (gate vs MGN fine-scale std r = -0.96, one test set); grain goes at the end with NXT. Was 0.010 R (builds 13-28)
 MGN_LIMB_M0 = (20.0, 40.0)  # build 29: the ring-average residual of the flattened log luminance is removed within 20 px of the limb mask, fading out by 40 px (see build_layers); None = off
-LAYER_BUILD = 29            # 29 = MGN audit 2026-10-12: no along-filament smoothing; MGN scale ladder evenly spaced from the resolution floor (no near-duplicate scale); MGN global term centred on the layer's neutral 0.5; ring-average limb residual removed before MGN (no bright/dark ring 1-12 px out). 28 = the large prominence core in the clean corona filled with a floor, a texture limit and a ceiling (no 1e9 blue pixels, the blue blob beside a test set's big prominence, 2026-10-11); inner and filament detail start at the rim peak. 27 = audit batch 3 (2026-10-10): ring statistics of MGN, FNRGF, the inner corona and the debands follow the limb (the oval, A5); FNRGF fitted from every pixel of each ring (D4); hill_sigma from the merged noise floor (A7); lifted stars tapered by significance, no zero clip (A8); prominence gate in measured sigma of the smoothed map (A11); inner-detail noise measured against the merge noise (D2); detail sigmas floored at 1.2 px (D3). 26 = filament detail: bands >= 6 px weighted by radial structure past 1.5-2.2 R, target falling as (r/2)^-0.75 (no blotches in the faint corona, 2026-10-10). 25 = filament detail layer (band_detail.npy: per-scale contrast, noise-limited, after Helion's ACHF, 2026-10-10). 24 = stars lifted with the stars.py build-6 list (a catalogue-confirmed faint star is lifted and laid back too, 2026-10-10). 23 = inner detail ring statistics follow the limb (no dark ring 8-20 px outside it, 2026-10-10). 22 = inner detail layer (loops near the limb, inner_detail.npy, 2026-10-10). 21 = sensor artefacts (hot green photosites) no longer lifted as stars (stars.py build 5, 2026-10-10). 20 = catalogue-confirmed stars lifted too (starcat.py, 2026-10-09). 19 = stars lifted out of the corona before every layer (stars.remove, 2026-10-09). 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
+LAYER_BUILD = 35            # 35 = a filled prominence core rises over its whole depth, evenly in ratio (FITS test set, softer edge, plateau kept; 2026-10-16). 34 = the filament layer's radial profile smoothed past the rim (4 px), so its own band no longer prints fine rings round the Moon (FITS test set: coherent rings at 1.04-1.6 R gone or cut to a third, 2026-10-16). 33 = the filled prominence core is a membrane (Laplace) fill from the measured pixels around it, lifted to its level inward, and replaces the core's unreliable pixels outright (no seams, arcs or plateau; one test set, 2026-10-16). 32 = a filled prominence core is a soft dome from its measured edge to its level, not a flat plateau with a step at the edge (one test set, 2026-10-16). 31 = prominence core fill finds the core above the limb band and also fills a core the short frames do not cover at all when its rim reads > 1 sigma (one test set came out hollow, 2026-10-16). 30 = MGN normalisation span wide enough for the darkest corona (no flat 0.45 hole where the residual fell below -6 sd; reference set at 8 o'clock, 2026-10-16). 29 = MGN audit 2026-10-12: no along-filament smoothing; MGN scale ladder evenly spaced from the resolution floor (no near-duplicate scale); MGN global term centred on the layer's neutral 0.5; ring-average limb residual removed before MGN (no bright/dark ring 1-12 px out). 28 = the large prominence core in the clean corona filled with a floor, a texture limit and a ceiling (no 1e9 blue pixels, the blue blob beside one test set's big prominence, 2026-10-11); inner and filament detail start at the rim peak. 27 = audit batch 3 (2026-10-10): ring statistics of MGN, FNRGF, the inner corona and the debands follow the limb (the oval, A5); FNRGF fitted from every pixel of each ring (D4); hill_sigma from the merged noise floor (A7); lifted stars tapered by significance, no zero clip (A8); prominence gate in measured sigma of the smoothed map (A11); inner-detail noise measured against the merge noise (D2); detail sigmas floored at 1.2 px (D3). 26 = filament detail: bands >= 6 px weighted by radial structure past 1.5-2.2 R, target falling as (r/2)^-0.75 (no blotches in the faint corona, 2026-10-10). 25 = filament detail layer (band_detail.npy: per-scale contrast, noise-limited, after Helion's ACHF, 2026-10-10). 24 = stars lifted with the stars.py build-6 list (a catalogue-confirmed faint star is lifted and laid back too, 2026-10-10). 23 = inner detail ring statistics follow the limb (no dark ring 8-20 px outside it, 2026-10-10). 22 = inner detail layer (loops near the limb, inner_detail.npy, 2026-10-10). 21 = sensor artefacts (hot green photosites) no longer lifted as stars (stars.py build 5, 2026-10-10). 20 = catalogue-confirmed stars lifted too (starcat.py, 2026-10-09). 19 = stars lifted out of the corona before every layer (stars.remove, 2026-10-09). 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
                             # them from a cached stack when a run's number is older
 
 
@@ -365,7 +365,7 @@ _DETAIL_W = {                 # in pipeline order -- dict order is the order
     # follows MGN; it sat near the end, so the bar jumped to 95% within
     # seconds) and partial convolution added -- the largest step of the stage,
     # missing from the table, so the bar sat at 98% for most of the run.
-    # Seconds from a test run (24 Mpx, 2026-10-07 report); partial
+    # Seconds from one test run (24 Mpx, 2026-10-07 report); partial
     # convolution set to about half its pre-FFT cost there.
     "denoise":     2.0,
     "mgn":         4.0,
@@ -802,7 +802,7 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
     #   scales used   5      4      3
     #   amplitude   x0.83  x0.66  x0.49
     #
-    # A short lens or any camera whose floor merges the fine end -- exactly the
+    # A short consumer zoom or any camera whose floor merges the fine end -- exactly the
     # case resolution_floor() was written for -- lost up to half the layer, and
     # `mgnContrast` silently absorbed it.
     _g = list(gains)[:len(list(scales))]
@@ -840,8 +840,8 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
 #     im_enhanced = im_log + a*M_1 + b*M_2 + c*M_4 + ...
 #     M_s (unsharp mask of size s) = im_log - im_blur(s)
 #
-# straight off the method's slide, with im_blur the POLAR-ORIENTED, PARTIAL blur of the
-# log-mapped image and the amplification factors from the method's example, 100 / 60 / 20 /
+# straight off the published slide, with im_blur the POLAR-ORIENTED, PARTIAL blur of the
+# log-mapped image and the amplification factors the example's 100 / 60 / 20 /
 # 10 at 2 / 4 / 8 / 16 px.
 #
 # WHY THIS IS NOT WHAT THE OTHER LAYERS DO, which is the whole point. MGN
@@ -851,7 +851,7 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
 # frame end up with the SAME texture amplitude -- faint structure and noise come
 # out equally strong, which reads as coarse. The partial convolution's combination is LINEAR: a
 # fixed scalar per scale, nothing divided by anything local. Faint stays faint.
-# That difference, not the filter kernels, is why the method's slides look finer than
+# That difference, not the filter kernels, is why the published slides look finer than
 # our composite did.
 #
 # WHY THE POLAR BLUR MATTERS, and why the note below was the wrong test for it.
@@ -859,7 +859,7 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
 # back in the picture the radial width is s px everywhere while the tangential
 # width is s * r / r_max -- narrow near the limb, growing outwards. The kernel
 # therefore averages ALONG a streamer and not across it, by a margin that
-# increases with radius. The method's author: "you'll have poor noise performance in the outer
+# increases with radius. The published recipe: "you'll have poor noise performance in the outer
 # corona in particular ... the difference between an image that's sharpened like
 # this and just a highpass filter in Photoshop is that polar transformation."
 #
@@ -872,8 +872,8 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
 
 HILL_SCALES = (2.0, 4.0, 8.0, 16.0, 32.0)
 HILL_LIMB_PAD = 5.0     # px beyond the render's disc mask that the masks treat as Moon
-# The method's own example is 100 / 60 / 20 / 10 at 2 / 4 / 8 / 16 px. Scaled to 1.0
-# at the finest and extended by one octave for frames larger than the original's.
+# The published example is 100 / 60 / 20 / 10 at 2 / 4 / 8 / 16 px. Scaled to 1.0
+# at the finest and extended by one octave for frames larger than its.
 HILL_GAINS = (1.0, 0.6, 0.2, 0.1, 0.05)
 
 
@@ -1230,7 +1230,7 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
     Partial (normalized, incomplete) convolution is already how every masked
     filter here estimates a local mean -- (w.f * C) / (w * C), with the mask
     convolved by the same kernel. What was missing is what goes IN the mask.
-    The method's rule is "Moon, proms, stars should be 0"; ours was the Moon alone.
+    The published rule is "Moon, proms, stars should be 0"; ours was the Moon alone.
 
     Why prominences matter more than their size suggests: S, the local standard
     deviation, is MGN's DIVISOR. A prominence is the brightest thing in the
@@ -1258,7 +1258,7 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
     flattened to 0.5 -- and 99/8 is a conservative point on it, not a maximum.
     Anyone is free to move it; the cost of moving it is in the third column.
 
-    STARS ARE NOT MASKED. The method lists them, and the same argument applies, but
+    STARS ARE NOT MASKED. The published rule lists them, and the same argument applies, but
     the 2026 brackets have none to mask yet -- so there is nothing here to
     measure against and nothing is claimed. A star mask belongs with the first
     frame that actually shows stars.
@@ -1295,10 +1295,10 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
         # A bare percentile ALWAYS FIRES. On a bracket with no prominences to
         # speak of it flags the reddest 1% of the ring -- which is noise and
         # ordinary corona -- and the 8 px dilation turns that into a scatter of
-        # patches. On a test set: the real H-alpha gate, which does have
+        # patches. On one test set the real H-alpha gate, which does have
         # an absolute threshold, finds 349 px outside the disc; this mask was
         # punching out 11000, about 32x more. Those holes printed as a row of
-        # smooth blobs in an arc below the Moon once the method's step 4 zeroed the
+        # smooth blobs in an arc below the Moon once the recipe's step 4 zeroed the
         # masks inside them (0.22.71) -- and as high-contrast smudges before it.
         #
         # So require the redness to be a genuine outlier against the corona's
@@ -1625,9 +1625,9 @@ def resolution_floor(L, r, R, lo=1.3, hi=3.0):
     """The smallest filter scale this image actually resolves, in pixels.
 
     MGN's finest scales were fixed at 1.25 and 2.5 px. That is a statement about
-    a sensor and a lens, not about eclipses: at 1.79 arcsec/px behind a long lens
+    a sensor and a lens, not about eclipses: at 1.79 arcsec/px behind a long telephoto
     those scales sit near the optical limit, but at 3.19 arcsec/px behind a
-    consumer zoom -- whose real resolution is 3-4 px -- they sit entirely
+    short consumer zoom -- whose real resolution is 3-4 px -- they sit entirely
     below anything the optics delivered, so they can only amplify noise. On that
     dataset the pixel-scale band carried 9.6% of the local mean against 1.9-2.7%
     for the bands where the real structure lives.
@@ -1663,7 +1663,7 @@ def scale_ladder(top, floor, n=6, min_ratio=1.6):
     spaced EVENLY (geometrically) from the floor to the top instead of
     clamping the finest scale onto the floor. Clamping left a near-duplicate
     pair whenever the floor fell just under a halving step -- 1.4 and 1.84 px
-    on a test set (R 458) -- so one fine scale was counted twice and the
+    on one test set (R 458) -- so one fine scale was counted twice and the
     3-scale fine layer was mostly pixel noise (measured signal/noise of the
     radially coherent structure 0.41; evenly spaced 1.4/2.6/4.7 px: 0.53, the
     finest scale kept). With fewer scales than n the ratio stays >= min_ratio.
@@ -1756,7 +1756,7 @@ HILL_BUILD = 15     # 15 = masks rebuilt on the build-13 master after the recipe
 # ECLIPSEFORGE_HILL_RADIAL=<factor>, 0 to switch it off for an A/B.
 # OFF BY DEFAULT since the test that settled 0.23.7: with the raw base, no
 # threshold and the 2 px mask off, the partial-convolution chain on the reference set looks like
-# the method's slide at half size, and the smoothing's radial texture was the thing
+# the published slide at half size, and the smoothing's radial texture was the thing
 # that did not. Kept as an opt-in for full-resolution exports.
 HILL_RADIAL = 0.0
 # THE LONG-WINDOW GATE (build 11). Coronal structure is coherent along the
@@ -1975,7 +1975,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
     the layer without re-stacking. The rebuild path re-reads hdr_lum.npy and
     redoes the denoise, which is seconds; the polar blur is the whole cost.
 
-    Built on the LOG-MAPPED image, not on log10 luminance: the method's masks are
+    Built on the LOG-MAPPED image, not on log10 luminance: the published masks are
     differences of im_log and it is im_log they are added back to, so any other
     base would be a different filter wearing the same name.
 
@@ -1993,7 +1993,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         # ECLIPSEFORGE_HILL_NODENOISE=1: build the masks on the RAW merged
         # luminance instead of the denoised master.
         #
-        # WHY THIS IS A QUESTION AT ALL. The method builds its masks on the log-mapped
+        # WHY THIS IS A QUESTION AT ALL. The recipe builds its masks on the log-mapped
         # HDR straight out of the merge. We build them on `lum_dn`, which the
         # "fine" profile has already soft-thresholded at 1.0-1.5 sigma in its two
         # finest starlet bands -- and then the renderer's Noise threshold slider
@@ -2073,7 +2073,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         # NW limb: hill_log at exactly 1.000 from 1.03 to 1.07 R in that
         # sector, 0.989 and unclipped in the control sector; with Base
         # weight above 0 the plateau printed as a bright band with a hard
-        # outer edge (the reported "sharp rim"), and the masks had nothing to add
+        # outer edge (the "sharp rim" seen in testing), and the masks had nothing to add
         # inside it. Now the top of the scale is the brightest corona
         # pixel outside the disc and the prominence patches (a high
         # percentile of that region, against a stray pixel), nothing above
@@ -2212,9 +2212,9 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
                 del _ml
                 m = m * np.clip(_zl - 1.0, 0.0, 1.0).astype(np.float32)
                 del _zl
-            # THE METHOD'S STEP 4: "replace any pixels restricted by the mask with
+            # THE RECIPE'S STEP 4: "replace any pixels restricted by the mask with
             # zero". Leaving it out is what put a row of dark blobs in an arc
-            # below the Moon on a test set.
+            # below the Moon on one test set.
             #
             # Where the mask is 0 the partial convolution has no data to work
             # with, so `blur` is whatever num/max(den, 1e-4) happens to produce
@@ -2240,7 +2240,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
             m *= (_t * _t)
             m[~good] = 0.0
             # THE PROMINENCE PATCHES ARE FILLED, NOT LEFT FLAT (build 12).
-            # Zero inside the patch was the method's step 4, and it is right for
+            # Zero inside the patch was the recipe's step 4, and it is right for
             # the data: the mask there is the prominence against a blur that
             # never saw it, 10-170x the corona signal. But a zeroed patch is
             # a flat cut-out with the dilated mask's blobby outline, and it
@@ -2617,7 +2617,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     # along the radius they change slowly while photon noise does not; across
     # them (tangentially) both change. A Gaussian along the radius only, in
     # polar coordinates, removes noise without touching the filaments. Measured
-    # on a test set at R 151: filament/noise (tangential over radial
+    # on one test set at R 151: filament/noise (tangential over radial
     # band-pass, 1.3-2 R) 1.40 -> 1.76 at 1.5 px with sigma = 0.01 R. Every
     # detail layer below is built on this; the brightness base is not.
     _al = _envf("ECLIPSEFORGE_ALONG", ALONG_SIGMA_R)
@@ -2626,7 +2626,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
                      f"gated by coherence)...", None)
         _aw = np.clip((r / R - 1.02) / 0.06, 0.0, 1.0).astype(np.float32)
         _aw[disc_m] = 0.0
-        # THE GATE (2026-10-07: "the background has this weird elongated
+        # THE GATE (2026-10-07, from testing: "the background has this weird elongated
         # grain"): a plain radial blur turns leftover grain into radial streaks
         # wherever there is no filament to follow. So the smoothing is scaled
         # by how filament-like the neighbourhood is -- the structure-tensor
@@ -2658,7 +2658,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     # THE LIMB RESIDUAL (build 29). The ring profile above starts at R+3 and
     # is smoothed over 6 rings, so it cannot follow the steep rise of the
     # corona's brightness in the first pixels outside the mask: the flattened
-    # residual kept +0.04..+0.05 dex there (a test set: +0.054 at 1 px,
+    # residual kept +0.04..+0.05 dex there (one test set: +0.054 at 1 px,
     # +0.028 at 6 px, +0.008 at 12 px; its spread is 0.07). Every MGN scale
     # then printed it as a bright ring 1-4 px out and a dark ring 5-12 px out.
     # Removed here as what it is -- the azimuthal median per 1 px of distance
@@ -2671,7 +2671,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
         if _kl.any():
             # half-pixel bins, interpolated between their centres: whole-pixel
             # steps left a 1 px concentric ripple of about +-0.04 in the fine
-            # MGN layer (half-pixel: within the layer's noise, a test set)
+            # MGN layer (half-pixel: within the layer's noise, one test set)
             _bw = 0.5
             _nb = int(_a1 / _bw) + 1
             _ib = np.clip((_dl[_kl] / _bw).astype(np.int32), 0, _nb - 1)
@@ -2691,6 +2691,23 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     inner_field = valid & (r < 4 * R)
     sd = float(np.std(Lf[inner_field])) if inner_field.any() else 0.05
     half = max(6.0 * sd, 1e-3)          # gain matched to the residual's own scale
+    # NOTHING CLIPPED AT THE ENDS OF THE SPAN (build 30, 2026-10-16). mgn()
+    # maps the residual onto 0..1 over (-half, half) with a hard clip, and a
+    # clipped pixel has no local contrast left: every scale term is 0 and the
+    # layer is a flat 0.45 there. On the reference set (run of 2026-10-16) a
+    # dark gap between streamers at 1.12-1.27 R, 8 o'clock, went to -0.278 dex
+    # against a span of +-0.272 (6 sd): 4137 px flat in MGN and the fine MGN.
+    # The span now also covers the 99.995th percentile of |residual| with 10 %
+    # to spare (x1.14 there). The scale terms are ratios and do not change;
+    # the global term's contrast drops by that factor (rms change 0.003 of the
+    # layer away from the hole).
+    if inner_field.any():
+        _pe = float(np.percentile(np.abs(Lf[inner_field]), 99.995))
+        if 1.1 * _pe > half:
+            progress.log(f"  MGN span widened from +-{half:.3f} to +-{1.1 * _pe:.3f} dex "
+                         f"(the darkest/brightest residual would have been clipped flat)", None)
+            lstats["mgn_span_widened"] = [round(half, 4), round(1.1 * _pe, 4)]
+            half = 1.1 * _pe
     # The ladder: top tied to R so it covers the same coronal structure at any
     # focal length (0.0643 * 622 = 40 px reproduces the reference set exactly),
     # bottom raised to whatever this image actually resolves.
@@ -2711,7 +2728,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     #
     # Consequence worth stating: a masked pixel's normalized value is undefined
     # (its own brightness is excluded from the mean it would be compared to), so
-    # the prominence cores come out flat 0.5 in THIS layer -- the method's step 4,
+    # the prominence cores come out flat 0.5 in THIS layer -- the recipe's step 4,
     # "replace any pixels restricted by the mask with 0". Prominence structure
     # is carried by the promdet layer and the prominence gate, which exist for
     # exactly that, so nothing is lost; but it does mean the MGN layer viewed on
@@ -2720,7 +2737,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     valid_stat = valid if _pm is None else (valid & ~_pm)
     # PIXELS NO TIER COULD HOLD (TODO 0-b, lab 0.24): filled from the shortest
     # tier as a lower bound, not a measurement -- left out of the statistics
-    # (3 px margin). Measured on a test-set crop: half the ring power.
+    # (3 px margin). Measured on one test crop: half the ring power.
     _nwp = os.path.join(wd, "nowt_mask.npy")
     if os.path.exists(_nwp) and os.environ.get("ECLIPSEFORGE_NO_MERGENOISE", "") in ("", "0"):
         try:
@@ -2849,14 +2866,14 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     # amplification factors, and their effect is that all six scales get equal
     # say, tilted very slightly toward the COARSE end.
     #
-    # The method combines its masks as E = 100A + 60B + 20C + 10D (A=2px..D=16px):
+    # The published recipe combines its masks as E = 100A + 60B + 20C + 10D (A=2px..D=16px):
     # normalised, 1 : 0.6 : 0.2 : 0.1, the finest scale weighted TEN TIMES the
     # coarsest. That is the opposite emphasis, and side by side on the reference
     # bracket it is the difference between slabs and filaments -- the coarse
     # scales dominate the layer's range, so fine structure arrives already
     # compressed against the rails.
     #
-    # amp*coh RATES THE METHOD'S LADDER LOWER in every shell (0.0535 -> 0.0300 at the
+    # amp*coh RATES THE PUBLISHED LADDER LOWER in every shell (0.0535 -> 0.0300 at the
     # limb) and it is still the better picture. The score rewards radially
     # coherent structure and the coarse scales carry plenty of it; "delicate" is
     # not a thing it measures. This is an emphasis choice, so it is a slider.
@@ -2865,7 +2882,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     # a group a RENDER-TIME blend, because the layer is a weighted mean of its
     # per-scale terms. Measured, the blend reaches the true ladder: fine/coarse
     # energy ratio 1.09 as shipped, 3.18 at detailScale 1, 3.32 for the real
-    # partial-convolution gains -- and the two are indistinguishable side by side.
+    # published gains -- and the two are indistinguishable side by side.
     progress.log("MGN fine scales (detail balance)...",
                  _DF.get("mgn_fine", 99.0))
     _nf = len(_sc) // 2
@@ -3054,7 +3071,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
             # edge is smeared when the frames are locked on the corona (0.23.8),
             # and the brightest tiers' glare adds to it -- so an isotropic
             # 0.08 R Gaussian cannot follow it and leaves a radial hump in the
-            # input: measured on a test set, -0.40 dex at 1.005 R,
+            # input: measured on one test set, -0.40 dex at 1.005 R,
             # +0.165 dex peaking at 1.065 R, back to 0 at 1.2 R, against
             # coronal structure of 0.03 dex. A rank filter puts that hump at
             # its maximum: the layer sat at 0.88 from 1.045 to 1.09 R and at
@@ -3114,7 +3131,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
             # took every finite pixel as valid, so the disc interior -- a
             # quarter of the pixels near the limb, holding nothing but the
             # flatten's fill plus noise -- set the level axis, the noise
-            # sigma and the knee's median/MAD. Measured on a test
+            # sigma and the knee's median/MAD. Measured on one test
             # set after the exact-edge merge: the layer's median ran 0.88,
             # 0.19, 0.51, 0.39, 0.72 in bands from the mask edge to +40 px
             # (a bright line, a dark band, a plateau, a rise), and the corona
@@ -3127,7 +3144,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
             # at 0.5 (neutral) and sit under the render's disc edge ramp.
             _nvalid = (~disc_m) & (r >= np.asarray(Rmap, np.float32) + 3.0)
             # THE TAILS ARE ROLLED INTO THE AXIS, NOT CLIPPED (LAYER_BUILD 11,
-            # the reported sharp-edged blobs, 2026-10-06). The level axis is the
+            # the sharp-edged blobs, 2026-10-06). The level axis is the
             # 0.1-99.9 percentile range, so by construction 0.1 % of the pixels
             # at each end fall outside it, sit at x = 0 or 1, and rank EXACTLY
             # 0 or 1 -- and they are not scattered: they are the deepest dark
@@ -3384,7 +3401,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
         # ...and how much of it survives the disc mask. A prominence flagged
         # UNDER the mask contributes nothing to the picture, so a report that
         # counts it is telling the user they have prominences they cannot see.
-        # Measured on an imported HDR (a Siril stack from a FITS test set):
+        # Measured on an imported HDR (a Siril stack of 327 frames):
         # 60 px flagged, every one of them between 0.97 and 1.01 R -- at or
         # inside the limb -- and 0 px visible. Beyond 1.02 R the highest
         # R/(G+B)/2 anywhere out to 1.3 R is 1.33 against a 1.35 threshold, so
@@ -3431,7 +3448,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
 
 # THE INNER DETAIL LAYER (2026-10-10: the innermost corona is "mostly
 # white and overprocessed" next to the references). Measured on the reference
-# stack against two published renders of the same eclipse: the
+# stack against Druckmueller's and another published render of the same eclipse: the
 # small structure close to the limb is 2-3x weaker, the coarse mottle as strong
 # or stronger -- while the stack carries that structure well above its noise.
 #   * band: a difference of Gaussians of the log corona (stars and prominences
@@ -3515,14 +3532,14 @@ def _rim_edge(lum, r, Rm, R, margin, cap_R=0.04):
     """The inner-detail and filament layers' own inner edge, in units of R
     (a map like Rm): the disc mask or the RIM PEAK, whichever is further out.
 
-    The disc mask sits mid-way up the limb's ramp (margin 4.4 px on a test
-    set, where the corona's brightness keeps rising until ~6-8 px out:
+    The disc mask sits mid-way up the limb's ramp (margin 4.4 px on one
+    test set, where the corona's brightness keeps rising until ~6-8 px out:
     the limb blur against the steep falloff). Inside the peak the light is the
     blurred lunar edge, and the edge's position wobbles by tenths of a pixel
     round the Moon (the real lunar limb profile, the tiers' residual
     registration): on a ramp that rises 50 %/px that is a large local residual,
     and the 2-12 px bands, at gains of 6-9 near the limb, printed it as a chain
-    of bright dashes 10-20 px outside the limb (a test set, 2026-10-11). So
+    of bright dashes 10-20 px outside the limb (one test set, 2026-10-11). So
     the layers start where the ramp ends: the peak of the median radial
     profile about the measured limb, found in 0.5 px bins, capped at 0.04 R."""
     d = (r - Rm) * np.float32(R) + np.float32(margin)          # px from the fitted limb
@@ -3560,7 +3577,7 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
     lum = np.asarray(lum_m[y0:y1, x0:x1], np.float32)
     H, W = lum.shape
     sc = R / 617.0
-    # resolution floor (audit D3): the sigmas scale with R, and on a short-lens
+    # resolution floor (audit D3): the sigmas scale with R, and on a short-focal-length
     # set (R 151) the fine one fell below 1 px -- demosaic texture with a
     # gain of 6-8. Nothing resolves below ~1.4 px, so the bands stop there.
     s0 = max(0.7 * sc, SIGMA_FLOOR_PX * 0.5)
@@ -3672,11 +3689,11 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
     tr = np.clip((r_zero - r) / (r_zero - r_full), 0, 1)
     tr = tr * tr * (3 - 2 * tr)
     # THE FADE-IN AT THE LIMB (2026-10-11): was 3 px past the mask then a
-    # 0.03 R ramp -- 14 px on one test set's Moon, 19 px on the reference set's -- so
+    # 0.03 R ramp -- 14 px on one test set's Moon, 19 px on another's -- so
     # the layers' texture stopped 10-20 px short of the limb, the strip read
     # as a smooth pale band, and the inner layer's texture piled up at the
     # end of the ramp (2x the normal strength at 16-20 px): a collar with an
-    # edge (a test set). Both layers remove the limb-relative radial profile
+    # edge (one test set). Both layers remove the limb-relative radial profile
     # and exclude the disc by normalised convolution, so the ramp only has to
     # hide the last pixels of the edge: DETAIL_LIMB_PAD_PX, then
     # DETAIL_LIMB_EASE_PX.
@@ -3848,8 +3865,8 @@ def prominence_detail(red_half, gate_half, floor_map=None):
 
     WHY A SEPARATE LAYER, AND WHY NOT MGN.
 
-    Prominence interiors came out flat in every corona layer, and external
-    test reports said so. Two measured reasons, on the reference bracket's biggest
+    Prominence interiors came out flat in every corona layer, and both external
+    test sets showed it. Two measured reasons, on the reference bracket's biggest
     prominence (225 deg, R/GB 16.4):
 
     1. MGN's NORMALISATION WINDOW CLIPS THEM. `hi` is the 99.95th percentile of
@@ -3939,7 +3956,7 @@ def denoise_loglum(L, noise_map, ks=(1.5, 1.0, 0.0, 0.0), levels=4):
 
 # THE FILAMENT DETAIL LAYER (lab 0.25.1, 2026-10-10)
 #
-# Measured against a full-resolution Helion run of the same frames (status note
+# Measured against a Helion full-resolution run of the reference frames (status note
 # 2026-10-10-filament-crispness-diagnosis): from 2 R out its filaments
 # (structures 12-50 px wide) carry 2-2.5x our contrast while our grain (3-12 px)
 # is up to 2x theirs. Our layers boost every fine scale about equally at every
@@ -3984,7 +4001,7 @@ BAND_BUDGET = (0.006, 0.005, 0.004, 0.006, 0.006)
 # the noise. The finest band's own signal/noise is at the noise even at the
 # limb; it is gated by the next band's instead (structure there = edges).
 BAND_NOISE_TILE = 64
-# FAR FIELD (2026-10-10, verdict: "all that is less bright is ugly blotchy"). Out
+# FAR FIELD (2026-10-10, from testing: "all that is less bright is ugly blotchy"). Out
 # where the corona is faint the 6-24 px bands also carry isotropic blotches
 # (sky and merge residue a few times the photon noise) that the noise cap
 # lets through. Filaments there are radial, the blotches are not: past
@@ -4008,6 +4025,10 @@ def _band_white_factors(sigmas):
     w = rng.standard_normal((512, 512)).astype(np.float32)
     g = [w] + [ndimage.gaussian_filter(w, s) for s in sigmas]
     return [float((g[i] - g[i + 1])[48:-48, 48:-48].std()) for i in range(len(sigmas))]
+
+
+BAND_PROFILE_SIGMA_PX = 4.0   # smoothing of the radial profile past the rim (see build_band_detail)
+BAND_PROFILE_RIM_PX = 6.0    # ... over this far past the rim edge, ramped in over as far again
 
 
 def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
@@ -4054,7 +4075,7 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
     # ridge with a negative lobe all round the Moon: the layer's azimuthal
     # mean was -0.038 at 12-30 px on one test set and -0.049 at
     # 20-30 px on the reference set, larger than its own spread there -- a
-    # dark collar just beyond a bright rim, i.e. a ring (seen in a test-set render).
+    # dark collar just beyond a bright rim, i.e. a ring (seen in a test render).
     # The per-radius mean about the measured limb (sum/count, so the empty
     # bins inside the Moon do not pull it down) is banded alongside and its
     # bands are taken out of what the layer ADDS -- not out of the gain
@@ -4073,6 +4094,23 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
     _sm = np.bincount(_rb[_vv], weights=lY[_vv].astype(np.float64), minlength=_rmax + 1)
     _pr = (ndimage.uniform_filter1d(_sm.astype(np.float64), 3)
            / np.maximum(ndimage.uniform_filter1d(_cnt.astype(np.float64), 3), 1e-9))
+    # FINE RINGS FROM THE PROFILE (2026-10-16, FITS test set): the profile's own
+    # band is subtracted from every band below, so whatever 1-4 px wiggle the
+    # binned profile carries (bin to bin, from the pixel lattice and the
+    # streamers crossing the bins) went into the layer as rings round the
+    # Moon, coherent all the way round, while the merge itself had none:
+    # 3e-4 in the two finest bands at 1.15-1.4 R against 3e-5 in the data.
+    # The corona's mean profile has no structure that fine except at the rim,
+    # so past the first BAND_PROFILE_RIM_PX it is smoothed by
+    # BAND_PROFILE_SIGMA_PX; at the rim it keeps the 3-bin profile, whose
+    # curvature the bands there need.
+    _prs = (ndimage.gaussian_filter1d(_sm.astype(np.float64), BAND_PROFILE_SIGMA_PX)
+            / np.maximum(ndimage.gaussian_filter1d(_cnt.astype(np.float64), BAND_PROFILE_SIGMA_PX), 1e-9))
+    _db = np.arange(_pr.size, dtype=np.float64) - 16.0           # px past the rim edge
+    _bw = np.clip((_db - BAND_PROFILE_RIM_PX) / BAND_PROFILE_RIM_PX, 0.0, 1.0)
+    _bw = _bw * _bw * (3.0 - 2.0 * _bw)
+    _pr = (1.0 - _bw) * _pr + _bw * _prs
+    del _prs, _db, _bw
     _xb = np.arange(_pr.size, dtype=np.float64) + 0.5            # bin centres
     lP = (np.interp(np.clip(_rel, 0, _rmax).ravel(), _xb, _pr).reshape(_rel.shape).astype(np.float32)
           * v).astype(np.float32)                                # the radial profile alone
@@ -4196,11 +4234,11 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
                      + "; median gain at 1.1/1.4/2.4 R " + "; ".join(str(m) for m in med), None)
     del prev, cur, lY, N, lP, prevP, curP
     # THE FADE-IN AT THE LIMB (2026-10-11): was 3 px past the mask then a
-    # 0.03 R ramp -- 14 px on one test set's Moon, 19 px on the reference set's -- so
+    # 0.03 R ramp -- 14 px on one test set's Moon, 19 px on another's -- so
     # the layers' texture stopped 10-20 px short of the limb, the strip read
     # as a smooth pale band, and the inner layer's texture piled up at the
     # end of the ramp (2x the normal strength at 16-20 px): a collar with an
-    # edge (a test set). Both layers remove the limb-relative radial profile
+    # edge (one test set). Both layers remove the limb-relative radial profile
     # and exclude the disc by normalised convolution, so the ramp only has to
     # hide the last pixels of the edge: DETAIL_LIMB_PAD_PX, then
     # DETAIL_LIMB_EASE_PX.

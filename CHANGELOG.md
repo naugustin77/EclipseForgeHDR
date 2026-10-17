@@ -5,6 +5,71 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.28.0
+
+**Caches from 0.27.0 are re-stacked once**: the stack changed for repeated
+brackets, for single-pass brackets and in the photometry.
+
+**Repeated brackets**
+- **Bracket finder:** repeated passes through the bracket are found from the
+  time stamps and the exposure order; the log and report give each bracket's
+  brightness against the exposure median (frame gain), long and short tiers
+  separately.
+- **Moon placed per frame:** each frame is aligned on the corona and its Moon
+  is placed on the measured lunar track, so every tier is stacked with the Moon
+  of one instant and the limb zone is averaged only from frames that saw it
+  there. On a 7-bracket test set the tier-to-tier disagreement at the limb fell
+  from 0.078 to 0.010.
+- **Brackets: HDR per bracket (experimental):** each bracket is merged on its
+  own into the main frame, the bracket HDRs are placed by a moon-free corona
+  offset, scaled per channel to a common gain and offset, weighted away from
+  each bracket's own Moon and averaged with rejection (noise model
+  a·m + b + (e·m)², limb band excluded). Default stays Stack per exposure. On
+  one test set: same position and brightness within 0.5 %, 13-26 % more grain
+  at 1-2 px (one resample per frame instead of two), equal noise at 4 px and
+  larger.
+
+**Single pass**
+- Tier-to-tier links measured on the corona clear of every Moon; prominence
+  links dropped where a corona link exists.
+- One Moon for all tiers: every tier's Moon placed at one instant, with the
+  limb band kept whole.
+- The expected lunar rate is computed from the Besselian elements at the
+  observing site (Moon radii per second times the measured radius) instead of
+  an assumed value; the partial-lock check only runs when it is known.
+
+**Photometry**
+- The per-channel linear fit falls back to the scalar chain when a tier's fit
+  moves it by more than 25 %, which removed isophote rings on a 3-bracket set.
+
+**Prominences**
+- A core clipped in every frame is filled from its rim with a rise over the
+  whole depth, even in ratio, to a plateau at the rim's 99th percentile (a
+  lower bound): the same edge 6 px in now steps 0.37 dex instead of 0.58.
+- Pixels lost to clipping are judged from the clean frames.
+- New slider **Prominence brightness**.
+
+**Detail layers (recipe 35)**
+- Filament detail: the radial profile removed from each band is smoothed
+  (σ 4 px) beyond the rim, which took out fine concentric rings around the
+  Moon (ring rms at 1.15-1.4 R 1.9e-3 → 4.4e-4) with the structure kept.
+- MGN: span wide enough for the darkest corona.
+- Stars: the photosite test also checks green alone from 5 σ.
+
+**Interface**
+- Looks: Silver rays, Night navy, Midnight silver, Golden hour added; Dark
+  moody and Deep purple removed.
+- Preview rendered on all cores (shared memory, identical pixels); about 40 %
+  faster on two cores.
+- 1:1 crop button moved to the bar under the preview.
+- Timeline of the shoot under the log; frames left out for brightness are
+  marked "brightness off".
+
+**Tests**
+- New smoke tests: brackets, moonmotion, onemoon, bracket_hdr. smoke_dark,
+  smoke_selectors and smoke_settings updated to the current defaults; all
+  pass.
+
 ## 0.27.0
 
 **Caches from 0.26.0 are re-stacked once**: the stack changed for FITS input

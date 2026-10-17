@@ -9,7 +9,7 @@ exact instead of searched:
     the +-14 h clock search and the eclipse-date table are not needed;
   * time and place give the Sun's altitude, and with it the atmospheric
     refraction that lifts the bottom of a low-Sun frame more than its top
-    (one test set, low Sun: the stars sat 27-37 px from their
+    (one test set with the Sun 7 deg up: the stars sat 27-37 px from their
     catalogue places without it, 12-16 px with it).
 
 Saved beside the frames as SITE_FILE, so it survives a cleared cache and

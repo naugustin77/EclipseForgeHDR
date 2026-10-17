@@ -18,7 +18,7 @@ from eclipseforgehdr import eclipses as E
 
 POP_MIN = 20000                 # 50000 until 2026-10-10: Soria (39 000, 1:42 of totality) was missing
 TOP_PER_COUNTRY = 3
-ALWAYS = {("Thuwal", "Asia/Riyadh"), ("Al Lith", "Asia/Riyadh")}   # 2026-10-10
+ALWAYS = {("Thuwal", "Asia/Riyadh"), ("Al Lith", "Asia/Riyadh")}   # added by hand, 2026-10-10
 
 
 def read_stellarium(path):

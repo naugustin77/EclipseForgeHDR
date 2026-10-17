@@ -366,7 +366,7 @@ def build_from_rgb(folder, rgb, progress, denoise="off", stats=None,
     #
     # An import has a better limb than a stack, not a worse one -- somebody
     # already registered and merged it -- so the blind rule was backwards.
-    # Measured on an imported test stack (R = 523.8 px, fit rms 2.34 px): the
+    # Measured on an imported Siril stack (R = 523.8 px, fit rms 2.34 px): the
     # transition is 11.0 px wide at the 90th percentile, so the measured rule
     # asks for 9.9 px and the blind one took 22.0. Those extra 12 px are a ring
     # right where prominences live, at 1.83 arcsec/px about 22 arcsec of it.

@@ -266,11 +266,11 @@ def stack_variance(tiers_aligned, cy, cx, R):
     # what makes the number mean anything, and leaving it out produced a false
     # alarm that stood for three releases.
     #
-    # One test set reported cov_limb 0.793 against 0.037 on a second
+    # One test set reported cov_limb 0.793 against 0.037 on another test
     # set of the same eclipse, and that 20x gap was read as veiling glare --
     # written into the report, the changelog and the backlog. Rebuilding the
     # same statistic from that run's OWN exported tiers gives **0.021**. The
-    # second set rebuilds at 0.039 against the pipeline's 0.037, so the method
+    # other set rebuilds at 0.039 against the pipeline's 0.037, so the method
     # is sound; the first set's number is not.
     #
     # The cause is the `n >= 3` line above meeting a bracket whose shortest tier
@@ -278,7 +278,7 @@ def stack_variance(tiers_aligned, cy, cx, R):
     # unclipped signal. Every pixel where a third one survived the clipping cut
     # is a pixel where a partly-clipped tier happened to be dim -- the exclusion
     # keeps precisely the dim tail of a blown tier -- so the median is taken
-    # over a biased remnant instead of over agreeing tiers. The second set has
+    # over a biased remnant instead of over agreeing tiers. The other set has
     # five or six clean tiers there and never enters that regime.
     #
     # So: count the clean tiers, and refuse to report rather than report a
@@ -350,7 +350,7 @@ def limb_transition_width(lum, cy, cx, R, na=72, ref_px=5.0):
 
     It matters because `margin = 0.9 * ramp` sets the disc mask, so an
     inflated width hides real corona: 25.1 px of margin on that bracket where
-    the edge itself is 6.5 px wide. Test reports described losing prominences,
+    the edge itself is 6.5 px wide. Two test sets showed lost prominences,
     and the largest one sat inside that annulus.
     """
     H, W = lum.shape

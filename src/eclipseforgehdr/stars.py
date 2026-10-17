@@ -41,7 +41,7 @@ from scipy import ndimage
 STARS_FILE = "stars.json"
 # A change here that alters WHICH stars are found must also bump detail.LAYER_BUILD:
 # the stars are lifted out of the corona while the layers are built (detail.py).
-STARS_BUILD = 6                # 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
+STARS_BUILD = 7                # 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
 SIGMAS = (0.6, 1.0, 1.5, 2.25)        # band-pass widths, binned px (R ~ 300 px)
 RMIN = 1.4                             # inner limit, lunar radii
 Z_FLOOR = 6.0
@@ -56,12 +56,22 @@ ELL_MAX = 0.4
 PEAKFRAC_MAX = 0.12
 CLUTTER_MAX = 1.5
 FORCED_ADD = False             # catalogue stars missed by the search are NOT added (verify only)
-# ARTEFACT TEST (2026-10-10, a test stack: a "star" with no
+# ARTEFACT TEST (2026-10-10, one test stack: a "star" with no
 # catalogue star under it was a hot green photosite -- light in G only, R and
 # B BELOW the background, and twice as compact as the stack's real stars).
 # Starlight is broadband and spread by the optics; a sensor defect is neither.
 ART_GREEN_ONLY = 0.25          # R and B both under this fraction of G ...
-ART_SNR = 8.0                  # ... with G at least this significant
+ART_SNR = 8.0                  # ... with G at least this significant (the negative-colour test)
+# THE GREEN-ONLY TEST FROM 5 SIGMA (2026-10-16). One test set
+# lifted a "star" at 2.4 R with light in G only (R 0.7, G 7.0, B -0.3 sigma),
+# no Tycho-2 star within 2' and no Gaia star brighter than G 13 within 1.5'.
+# In the 19 long raw frames its signal is ONE G1 photosite at 8.5 sigma with
+# its neighbours at noise: a warm photosite, which the mount (<= 2 px drift
+# per tier) stacked onto itself. At 8 sigma the test let it through. Scanned
+# on every test set here (five, one of them FITS): from 5 sigma
+# it changes that one candidate and six green-only "possible"s; no catalogue
+# star is touched -- stars are never green only.
+ART_GREEN_SNR = 5.0
 ART_NEG_SIGMA = 3.0            # or a channel this far below the background while another is >= ART_SNR
 ART_COMPACT = 1.8              # peak/flux above this multiple of the real stars' median
 ART_COMPACT_SNR = 8.0          # (only judged when the aperture flux is this significant)
@@ -162,7 +172,7 @@ def _colour_artefact(m):
         return None
     R, G, B = m["rgb"]
     sR, sG, sB = m["rgb_snr"]
-    if sG >= ART_SNR and R < ART_GREEN_ONLY * G and B < ART_GREEN_ONLY * G:
+    if sG >= ART_GREEN_SNR and R < ART_GREEN_ONLY * G and B < ART_GREEN_ONLY * G:
         return "light in green only"
     if max(m["rgb_snr"]) >= ART_SNR and min(m["rgb_snr"]) <= -ART_NEG_SIGMA:
         return "a colour below the background"
@@ -176,8 +186,8 @@ def streamers(Lb, cy, cx, R, nmax=12):
     in units of that ring's spread, averaged over 1.25-2.8 R; peaks above 1
     and 8 deg apart; the reach is the first gap in the excess along the ray.
     Measured on the reference stack: the streamers at 281, 353, 195, 113 and
-    147 deg -- the left, top, bottom and the two lower-right ones in that
-    picture.""" 
+    147 deg -- the left, top, bottom and the two lower-right ones in its
+    rendered picture.""" 
     H, W = Lb.shape
     rad = R * np.linspace(1.25, 6.0, 48)
     ang = np.radians(np.arange(0, 360, 0.5))
@@ -278,7 +288,7 @@ def find(wd, progress=None):
 
     # a much coarser grid (a decimated stack, R well under 300 px) concentrates
     # a real star into fewer pixels too; between 0.6 and 1 the limit stays,
-    # because hot-pixel residue sits at 0.12-0.15 (a test stack)
+    # because hot-pixel residue sits at 0.12-0.15 (one test stack)
     pf_max = PEAKFRAC_MAX if ksc >= 0.6 else min(0.3, PEAKFRAC_MAX / ksc)
 
     def shape_ok(c):

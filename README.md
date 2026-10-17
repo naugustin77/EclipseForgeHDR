@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.27.0
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.28.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -33,6 +33,36 @@ preview between the composite and each individual layer; every slider on the
 right re-renders live, with no re-processing.*
 
 ---
+
+## New in 0.28.0
+
+- **Repeated brackets.** A sequence shot through the bracket several times over
+  totality is recognised from the time stamps and the exposure order; the log
+  and report give each bracket's brightness. The Moon moves against the corona
+  over minutes, so every frame is now placed on the lunar track and every
+  exposure is stacked with the Moon of one moment: the limb stays sharp instead
+  of smearing.
+- **Brackets: HDR per bracket (experimental).** Merges each bracket on its own
+  and stacks the HDRs, for sequences where the sky or the Moon's position
+  changes markedly between brackets. Not yet tested on many sets; the default
+  stays Stack per exposure.
+- **Single pass through the bracket:** the exposures are linked on the corona
+  clear of every Moon, and one Moon is used for all of them. Sharper inner
+  corona on a bracket where the Moon moved during the sequence.
+- The Moon's expected motion is computed from the eclipse elements at the
+  observing site instead of being assumed.
+- **Photometry:** the per-channel linear fit falls back to the plain scale
+  factors when a fit runs away, which removes isophote rings on short brackets.
+- **Prominences:** a core clipped in every frame rises smoothly from its edge
+  to a plateau instead of a flat patch; new **Prominence brightness** slider.
+- **Filament detail:** no more fine rings around the Moon. MGN reaches the
+  darkest parts of the corona.
+- **Looks:** Silver rays, Night navy, Midnight silver and Golden hour added;
+  Dark moody and Deep purple removed.
+- **Preview** renders on all processor cores; the 1:1 crop button sits in the
+  bar under the preview, always in reach. A timeline of the shoot under the log
+  shows which frames were stacked.
+- Caches from 0.27.0 are re-stacked once.
 
 ## New in 0.27.0
 
@@ -328,8 +358,8 @@ stopping on a line.
   alone: MGN, FNRGF, tangential filter, partial convolution, inner corona,
   inner detail, filament detail, prominences
 - Look presets that set detail, colour and tone together: EFHDR as loaded,
-  Bright desaturated streamers, Calm blue, Deep sunset, Dark moody, Deep purple,
-  Clean Steel M4 / M5 / M6
+  Bright desaturated streamers, Calm blue, Deep sunset, Clean Steel M4 / M5 / M6,
+  Silver rays, Night navy, Midnight silver, Golden hour
 - Star layer, with an optional catalogue check and a sky map of the field
 - Optional observing site and time, with a place picker for the 2026 and 2027
   eclipses
@@ -599,6 +629,17 @@ program (Siril, PixInsight) leaves where it shifted a frame. When most frames
 carry one, of different widths, the set was registered already and is stacked as
 written; otherwise EFHDR aligns it as usual. The log says which. *Always align*
 and *Keep frames as they are* overrule the check. Re-stacks.
+
+### Brackets — Stack per exposure / HDR per bracket (experimental)
+
+For a sequence shot through the bracket more than once. *Stack per exposure*
+(default) stacks each exposure across all brackets and merges once. *HDR per
+bracket* merges each bracket on its own, places the bracket HDRs on one
+another and averages them with rejection; it is meant for sequences where the
+sky or the Moon's position changes markedly between brackets (long eclipses).
+It takes about twice the time and could not be tested extensively yet. In a
+test it gave no extra detail and slightly more pixel-scale grain, because each
+frame is resampled once instead of twice. Re-stacks.
 
 ### Correlation — Semi-phase / Cross-correlation / Full phase
 

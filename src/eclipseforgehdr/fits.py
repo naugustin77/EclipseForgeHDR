@@ -323,7 +323,7 @@ def plane_clip_mask(rgb, min_px=64):
     ceiling found per plane (None where the plane shows none).
 
     A writer that scales the planes (white balance, Siril's debayer) moves the
-    clip level per plane: one test set's Siril frames clip at 59889 in red, 65520
+    clip level per plane: one FITS test set's Siril frames clip at 59889 in red, 65520
     in green and 65535 in blue, and a few hot pixels sit above the red one. So
     one ceiling for the frame (the bit depth, 65535) misses the red clip, and
     clipped red entered the merge as data (2026-10-13). The ceiling is found as

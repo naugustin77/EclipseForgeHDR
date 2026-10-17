@@ -2,9 +2,8 @@
 """The FITS paths that broke in 0.22.75 and were fixed in 0.22.76, as tests.
 
 WHY THIS EXISTS. Three FITS defects were found by reading the code, not by a
-user, and a real FITS bracket for testing may never arrive.
-A bug that can only be confirmed by test data that does not
-appear is a bug nobody is watching, so each of the three is pinned here instead:
+user, and a real FITS bracket to test against may never arrive. A bug that
+can only be confirmed by test data that does not appear is a bug nobody is watching, so each of the three is pinned here instead:
 
   1. THE SATURATION CEILING. With no SATURATE keyword and no plateau in the
      data, the ceiling was min(bit-depth, frame maximum), which is just the

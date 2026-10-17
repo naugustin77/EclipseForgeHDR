@@ -15,7 +15,7 @@ so. Nothing here needs a location or an exact clock:
     else HR, else HD, else SAO, else HIP or TYC;
   * the Sun's position comes from the frames' date and clock, but the clock is
     treated as unknown to +-14 h (cameras keep local time or no time zone at
-    all; one test camera read 21:30 for 18:30 UT). Over that span the Sun moves along
+    all; one test set read 21:30 for 18:30 UT). Over that span the Sun moves along
     the ecliptic only, so the unknown is a shift ALONG the ecliptic, and the
     true Sun must sit under the Moon's centre at totality;
   * the scale comes from the lunar radius in pixels: at any total eclipse the
@@ -25,10 +25,10 @@ so. Nothing here needs a location or an exact clock:
 A hypothesis is made from two detections and two catalogue stars (their
 separation fixes scale and rotation), kept only if its scale is a Moon's and
 it puts the Sun on the ecliptic under the Moon, and scored by how many of the
-detections land on catalogue stars. Atmospheric refraction (the Sun was low
-on one test set; the frame's top and bottom are lifted differently) and lens
+detections land on catalogue stars. Atmospheric refraction (the Sun was 7 deg
+up on one test set; the frame's top and bottom are lifted differently) and lens
 distortion are not modelled; the match tolerance grows with the distance from
-the centre to cover them: on the reference set the three matched stars sit
+the centre to cover them: on the reference test set the three matched stars sit
 12-37 px from their predicted places at 2.6-6.9 R.
 
 Measured on the reference stack: the two stars and the faint "possible" at
@@ -50,13 +50,13 @@ LINE_TOL_R = 0.25                         # Sun to the ecliptic line through the
 # accepted only if it puts the Sun within this many lunar radii of the Moon's
 # centre, and the scale on a Moon of 14.6-17 arcmin. At totality the Sun sits
 # under the Moon (about 0.03 R off at most in 2026), but the fit also carries
-# the unmodelled distortion: the reference set's 3-star solution puts it 0.062 R off, its
+# the unmodelled distortion: one test set's 3-star solution puts it 0.062 R off, its
 # true pair 0.067 R; the chance pairs in the same search 0.15-0.16 R.
 SUN_OFFSET_MAX_R = 0.10
 ZP_SPREAD = 0.8                           # mag: photometric consistency of a solution
 # Total (and hybrid) solar eclipses, from NASA's eclipse catalogue (F. Espenak).
 # Tried when the frames' own date gives no solution -- a camera whose clock
-# was never set (one test set's frames carry a wrong date).
+# was never set (one test set's frames say 13 January 2026).
 ECLIPSE_DATES = ["2008:08:01", "2009:07:22", "2010:07:11", "2012:11:13", "2013:11:03",
                  "2015:03:20", "2016:03:09", "2017:08:21", "2019:07:02", "2020:12:14",
                  "2021:12:04", "2023:04:20", "2024:04:08", "2026:08:12", "2027:08:02",
@@ -222,7 +222,7 @@ def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     # Refraction and distortion are not modelled, so the tolerance grows with
     # the distance from the centre: two stars fix a hypothesis exactly and a
     # third, 2.6-6.9 R out, then sits up to ~80 px off on one test frame (the
-    # low Sun lifts the frame's top and bottom by different amounts).
+    # 7-deg-high Sun lifts the frame's top and bottom by different amounts).
     # Loose for finding, tighter once the fit has used every match.
     if have_place:
         # refraction modelled: on that frame 12-16 px at 2.6-6.9 R
@@ -424,7 +424,7 @@ def match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     total eclipse in ECLIPSE_DATES is tried at noon UT (+-14 h covers the day);
     a date is taken only with at least five matches and two more than any
     other date -- with three, a wrong date gave a unique-looking chance fit in
-    2 of 20 trials on a test stack."""
+    2 of 20 trials on one test stack."""
     if site and site.get("ut"):
         r = _match(dets, geo, timestamp, shape, zfun, progress, site=site)
         if r is not None and not r.get("ambiguous"):

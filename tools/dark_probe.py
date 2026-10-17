@@ -46,7 +46,7 @@ WHAT THE DARK FRAMES ANSWER
   6. FIXED SPATIAL STRUCTURE. Anything that sits in the same place in every
      frame and grows with exposure time lands where the outer-field gradients
      live, and stacking cannot average it out. Amp glow is the classic case
-     and a test report says one test camera has none, which is a prediction this makes
+     and one test camera is reported to have none, a prediction this makes
      checkable rather than a reason not to look: the script reports
      centre-versus-corner and the worst edge, and writes a downsampled map, so
      "there is nothing there" becomes a number instead of an assumption.
@@ -345,7 +345,7 @@ def main():
         print()
         print("   For scale: how much does this matter to the corona? Compare "
               "the worst departure above against the outer-field signal in a "
-              "1.6 s eclipse frame, which on a long-focal-length set runs tens of ADU "
+              "1.6 s eclipse frame, which on the reference test set runs tens of ADU "
               "above black. A structure of a few ADU is a few percent there "
               "and nothing at all inside 2 R.")
     return 0

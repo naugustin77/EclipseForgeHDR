@@ -107,11 +107,11 @@ def main(verbose=False):
     import inspect
     sig = inspect.signature(_pl.run).parameters
     for key, want in (("align_corr", "semi"), ("align_filter", "isotropic"),
-                      ("stack_combine", "mean"), ("fnrgf_preset", "ours")):
+                      ("stack_combine", "clip"), ("fnrgf_preset", "published")):  # defaults since 2026-10-07
         got = sig[key].default
         if got != want:
             bad.append(f"pipeline.run default for {key} is {got!r}, and the "
-                       f"measured numbers in the comments describe {want!r}")
+                       f"test expects {want!r} (the processing defaults set 2026-10-07)")
     if _pl.ASYM_WINDOW:
         bad.append("ASYM_WINDOW is on; it measured as no help and the comment "
                    "beside it says so")
@@ -131,8 +131,8 @@ def main(verbose=False):
         cases = [
             ("align_corr", "cross", "the correlation flavour"),
             ("align_filter", "tangential", "the alignment pre-filter"),
-            ("stack_combine", "clip", "the per-tier combine"),
-            ("fnrgf_preset", "published", "the FNRGF order and attenuation"),
+            ("stack_combine", "mean", "the per-tier combine"),
+            ("fnrgf_preset", "ours", "the FNRGF order and attenuation"),
         ]
         print()
         print("each selector must CHANGE the result — otherwise it is not wired")

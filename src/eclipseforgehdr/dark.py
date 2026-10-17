@@ -265,7 +265,7 @@ def _stack(paths, shape, log, label, want_iso=None):
         info["noise"] = float(trim * _robust_sd((meanA - meanB) * np.float32(0.5)))
         # ... and per Bayer offset, because one global spread is a blend of
         # four different sensors. A camera whose blue read noise is twice its
-        # green (3.1/2.4/2.4/4.6 ADU on the reference-camera fixture) gets a threshold
+        # green (3.1/2.4/2.4/4.6 ADU on one test fixture) gets a threshold
         # that is too high in green and too low in blue, and the too-low half
         # is the one that edits good data.
         info["noise_cfa"] = [
@@ -421,7 +421,7 @@ def build(folder, bias_dir, dark_dir, shape=None, progress=None,
             # SUBTRACT ONLY WHERE THERE IS SOMETHING TO SUBTRACT.
             #
             # The verdict below compares what the master removes against the
-            # noise it injects, and on a test set of 20 darks that ratio came out 1.1x
+            # noise it injects, and on one set of 20 darks that ratio came out 1.1x
             # -- barely worth applying. The census above says why: 0.314% of
             # photosites carry measurable dark current. For the other 99.7% the
             # master's value is not dark current, it is the master's own noise,

@@ -19,19 +19,19 @@ DEFAULTS = {
     "fnMix": 0.17, "detailGain": 1.0, "baseLift": 0.255, "envGamma": 1.0,
     "logK": 0.0,
     # The partial-convolution chain. hillMix 0 renders exactly as every build before 0.22.64;
-    # hill0..hill4 are the method's 100:60:20:10 ratios at 2:4:8:16 px, extended one
+    # hill0..hill4 are the published 100:60:20:10 ratios at 2:4:8:16 px, extended one
     # octave, and hillGain is the one master that scales the set.
     # hillDenoise 3.0 (was 0): measured on the reference set at threshold 0 the
     # masks beyond 2 R are pure photon noise, amplified into visible grain; at
     # 3 sigma they are zero there and the inner corona keeps its structure.
     # 0.23.7 defaults are what the reference set settled on, viewed as
-    # the method's author views them (masks on mid grey, half size): raw base, no threshold,
+    # the published recipe views its own (masks on mid grey, half size): raw base, no threshold,
     # the 2 px mask off -- on this set it carries noise only -- and the
     # ladder starting at 4 px.
     "hillMix": 0.0, "hillGain": 0.025, "hillLogK": 3.0, "hillDenoise": 0.0,
     # hillBase: how much of the log-mapped base the Partial-conv view shows
-    # under the masks. 1 = the method's im_enhanced; 0 = the masks alone on mid
-    # grey, which is the method's "E" panel, the layer the blend overlays, and the
+    # under the masks. 1 = the recipe's im_enhanced; 0 = the masks alone on mid
+    # grey, which is its "E" panel, the layer the blend overlays, and the
     # honest way to judge them -- the default since 0.23.7.
     "hillBase": 0.0,
     "hill0": 0.0, "hill1": 1.0, "hill2": 0.6, "hill3": 0.2, "hill4": 0.1,
@@ -45,11 +45,11 @@ DEFAULTS = {
     # Where the MGN layer sits between all six scales weighted alike (0, every
     # build before 0.22) and the three FINE scales alone (1). See the long note
     # in detail.build_layers: our gains are noise-normalisation constants, not
-    # the method's 1:0.6:0.2:0.1 amplification ladder, and the difference is slabs
+    # the published 1:0.6:0.2:0.1 amplification ladder, and the difference is slabs
     # against filaments.
     #
     # DEFAULT 1.0 -- chosen by eye from a blind-ish four-way contact sheet at
-    # matched contrast, against the metric, which rates it 44% WORSE at the limb.
+    # matched contrast, against my metric, which rates it 44% WORSE at the limb.
     # amp*coh cannot see "delicate": it rewards radially coherent structure and
     # the coarse scales carry plenty. Drag to 0 for the old look.
     "detailScale": 1.0,
@@ -67,11 +67,15 @@ DEFAULTS = {
     #   promStretch the layer's own curve (lower = faint parts brighter)
     #   promRim     the chromosphere rim along the limb, 0..1
     #   promSat     the layer's colour saturation
-    #   promFade    how far the corona's partial-convolution detail is eased out under the
+    #   promFade    how far the corona's partial-conv detail is eased out under the
     #               layer (1 = fully where the layer covers it)
     "promLayer": 1.0, "promStretch": 0.5, "promRim": 1.0, "promSat": 1.3, "promFade": 1.0,
     #   promSoft    soft highlights: no flat core, no hard step to the rim (0 = off)
     "promSoft": 0.0,
+    #   promLight   the prominences ADD brightness to the corona instead of being
+    #               laid over it as an opaque colour; how close the brightest
+    #               core may come to white (0 = the opaque colour as before)
+    "promLight": 0.8,
     # THE STAR LAYER (stars.py, lab 0.25.1): stars found in the stack, lifted
     # out of the corona and laid back over the finished picture.
     #   starStrength  1 = about as bright as in the stack, 0 = starless
@@ -98,7 +102,7 @@ DEFAULTS = {
     # These were 0.9 / 1.205, a by-eye correction from 0.12.0, and tint at 1.205
     # is a straight 20% GREEN MULTIPLY. After the unit-luminance renormalisation
     # below (green carries 0.7152 of luminance) the net is green +5% and red and
-    # blue -13% relative -- the green-grey sky reported in testing, and the same cast
+    # blue -13% relative -- the green-grey sky seen in testing, and the same cast
     # the IMPORT_DEFAULTS note below had already measured and fixed for imports
     # while the raw path was left alone. Half a fix for two years.
     #
@@ -108,18 +112,18 @@ DEFAULTS = {
     # So the rendered sky chroma is just (temp, tint, 1/temp) renormalised, and
     #     R/G = temp/tint        B/G = 1/(temp*tint)
     #
-    # A hand-finished PixInsight version -- "lowered the green curve a bit and raised
+    # A PixInsight version of the same frames -- "lowered the green curve a bit and raised
     # the blue curve a little" -- measured off its JPEG, linearised, normalised
     # to green: sky R/G 1.064, B/G 1.884. Inverting the two expressions gives
     # temp 0.752, tint 0.706, which reproduces that sky exactly.
     #
     #              temp   tint    sky R/G   sky B/G
     #   was        0.900  1.205     0.747     0.922      green-dominant
-    #   now        0.752  0.706     1.064     1.884      the target, exactly
+    #   now        0.752  0.706     1.064     1.884      that target, exactly
     #
     # Relative to green this is R/G x1.425 and B/G x2.043 -- the two curve moves,
     # as numbers. It cools the corona too, which is why `satur` is the other half
-    # of that edit: saturation was pushed to restore the warm/cool separation.
+    # of that edit: it pushed saturation to restore the warm/cool separation.
     #
     # BOTH BACK TO 1.0 IN 0.22.23, and the derivation above
     # deserves the correction rather than quiet deletion.
@@ -129,15 +133,15 @@ DEFAULTS = {
     # five do not agree with each other:
     #
     #     set                    far sky R/G   B/G
-    #     test set A (2024)          1.244    0.908
+    #     test set A                 1.244    0.908
     #     test set B                 1.206    0.880
     #     test set C                 1.116    0.757
     #     reference set              0.992    0.647
-    #     test set D                 0.553    1.328
+    #     test set E                 0.553    1.328
     #
-    # So a pair of numbers solved against one rendering of one
-    # eclipse cannot transfer: they landed near the target on that set because
-    # that set's own sky chroma was folded into the fit, and they render violet on a
+    # So a pair of numbers solved against one photographer's rendering of one
+    # eclipse cannot transfer: they landed near that target on that set because
+    # its own sky chroma was folded into the fit, and they render violet on a
     # Canon whose sky chroma differs. 1.0/1.0 applies no cast at all and leaves
     # the decision where it belongs -- with the two sliders and the person
     # looking at the picture.
@@ -150,11 +154,11 @@ DEFAULTS = {
     # not this change.
     "temp": 1.0, "tint": 1.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.0, "hlDesat": 0.0,
     "outGamma": 1.0, "bgBlack": 0.02,
-    # Final sharpening (lab, Oct 2026): a Photoshop sharpening action's finish with a
+    # Final sharpening (lab, Oct 2026): a published Photoshop finish with a
     # noise gate. All off by default -- it is a finish, not a default look.
     "finalMid": 0.0, "finalDark": 0.0, "finalLight": 0.0, "finalNoise": 3.0,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
-    # block 3a: zoned partial-convolution gains, tone curve, contained whites, disc edge
+    # block 3a: zoned partial-conv gains, tone curve, contained whites, disc edge
     "hillZone": 0.0, "hillZoneR": 1.8,
     "toneCurve": [[0.0, 0.0], [1.0, 1.0]], "containWhites": 1.0,
     "discSoft": 12.0,
@@ -184,7 +188,7 @@ DEFAULTS = {
 #
 # WHY: on the raw path the merge applies the camera's daylight white balance
 # and colour matrix, and 0.9/1.205 is the by-eye correction that sat on top of
-# THAT, for THAT camera, under a low sun. It is a taste call about one
+# THAT, for THAT camera, under a sun 7 degrees up. It is a taste call about one
 # specific pipeline, not a property of coronae. Applied a second time to a file
 # that is already balanced it is simply a tint.
 #
@@ -196,8 +200,8 @@ DEFAULTS = {
 #   inner 1.15-1.5  R   1.088 .985 .889  0.853 1.058 .853  1.074 .991 .868
 #   mid   1.5 -2.5  R   1.155 .973 .811  0.902 1.050 .791  1.133 .980 .803
 #
-# Green becomes the strongest channel in every shell -- the teal cast
-# reported for it. Neutral reproduces the source to within 2%, the remainder being
+# Green becomes the strongest channel in every shell -- the teal cast seen
+# in testing. Neutral reproduces the source to within 2%, the remainder being
 # `bgNeutral` (1.5%). The per-channel sky-gradient division, the other
 # suspect, was measured on the same file at 0.1% or less: its tilt is +89 deg,
 # so it cancels in a radial median.
@@ -449,7 +453,7 @@ class Layers:
         # INTERPOLATE, do not round the radius. `prof[rid]` with
         # rid = r.astype(int) makes the divisor piecewise-constant inside each
         # one-pixel-wide annulus, so radial flattening divides the picture by a
-        # staircase and prints concentric rings. Measured on a reference-set frame,
+        # staircase and prints concentric rings. Measured on a reference frame,
         # the step between neighbouring integer radii is 0.28% of the local
         # level near the limb -- small, but perfectly circular and coherent,
         # which is what both the eye and the detail filters pick out. Reported
@@ -528,8 +532,8 @@ class Layers:
         # straight line and then stops dead draws a RING there. It was found by
         # setting the white balance to None, which puts a strong green inside
         # against the exactly-neutral far field and makes the boundary obvious;
-        # it is present at every white balance, just quieter. His check is the
-        # one that settles what it is: the ring is not in the single raws even
+        # it is present at every white balance, just quieter. The check that
+        # settles what it is: the ring is not in the single raws even
         # pushed hard in curves, and it cannot be -- this fade exists only here.
         #
         # 8 sigmas instead of 4, with a smoothstep, so both knees are C1. The
@@ -586,7 +590,7 @@ class Layers:
         # has always done this in the pipeline, gated on there being no camera
         # white balance to use -- on the theory that a raw bracket keeps the
         # body's own numbers and is therefore already right. Measured on a
-        # raw bracket that HAS camera white balance, the merged corona
+        # raw test bracket that HAS camera white balance, the merged corona
         # reads R/G 1.95 and B/G 0.28 at 1.05 R: twice the red and a quarter of
         # the blue. The pipeline's own prominence gate reports the same thing
         # from the other side ("corona R/GB 3.02") and has been calibrated
@@ -668,7 +672,7 @@ class Layers:
         # only reason this comment is not still claiming otherwise.
         _pdp = os.path.join(wd, "promdet.npy")
         self.has_promdet = os.path.exists(_pdp)
-        # THE PARTIAL-CONVOLUTION CHAIN: the log-mapped base and its set of unsharp masks. Both
+        # PARTIAL-CONVOLUTION CHAIN: the log-mapped base and its set of unsharp masks. Both
         # optional -- a workdir stacked before 0.22.64 has neither, and the
         # renderer falls back to the multiplicative path with hillMix ignored.
         _hp, _hl = os.path.join(wd, "hill.npy"), os.path.join(wd, "hill_log.npy")
@@ -1093,7 +1097,7 @@ def _detail_layers(src, P, preview=True, views=False):
     # Detail balance: blend the all-scale layer with the fine-only one. Because
     # an MGN layer is a weighted mean of its per-scale terms, this IS a ladder
     # change, not an approximation of one -- measured fine/coarse ratio 1.09 at
-    # 0, 3.18 at 1, against 3.32 for the method's true gains.
+    # 0, 3.18 at 1, against 3.32 for the published recipe's true gains.
     _ds = float(P.get("detailScale", 0.0)) if "mgn_fine" in src else 0.0
 
     def _mgsrc(suffix=None):
@@ -1146,7 +1150,7 @@ def _detail_layers(src, P, preview=True, views=False):
 
 
 # FINAL SHARPENING (lab, Oct 2026). A Photoshop finish, read out of a
-# sharpening action file and reproduced here, plus a noise
+# published action file and reproduced here, plus a noise
 # gate Photoshop cannot have.
 #
 # The action: five copies of the finished image, High Pass at 1.5 / 3 / 6 /
@@ -1161,7 +1165,7 @@ def _detail_layers(src, P, preview=True, views=False):
 # What is different here, and why:
 #   * The radii follow the solar radius (1.5 px at R = 620, the
 #     reference bracket), so the same angular scales are sharpened on any
-#     camera. The partial-convolution ladder is fixed in pixels; this one is not.
+#     camera. The published ladder is fixed in pixels; this one is not.
 #   * A noise gate. Measured on the reference set at full resolution the
 #     action raises the 1 px band by x1.7, the 2 px band by x1.5 and the
 #     8-16 px structure by x1.1-1.2: most of what it adds is grain. The
@@ -1179,7 +1183,7 @@ def _detail_layers(src, P, preview=True, views=False):
 #     export does not hold five full-size high-pass planes at once.
 
 
-# ---- block 3a: tone curve, contained whites, zoned detail gains ------------
+# ---- block 3a: tone curve, contained whites, zoned partial-conv gains -------
 def tone_lut_pts(pts, n=1024):
     """Monotone cubic (Fritsch-Carlson) through the user's points [[in, out],
     ...] on 0..1, as a LUT. Points are sorted by `in`; duplicate or reversed
@@ -1282,14 +1286,14 @@ def apply_tone(rgb, pts, ceiling, moon_pts=None, eg=None, pin=None):
 
 # THE LOOK CONTROLS (lab 0.24). Four controls that act on the finished picture
 # and set what a viewer reads as the "look" of a published eclipse, measured off
-# published reference renders and Project Helion renders (looks/refs.json):
+# Druckmüller, other published and Project Helion renders (looks/refs.json):
 #   coronaLevel  the median display brightness of the inner corona, 1.05-1.15 R.
-#                the references sit at 0.53-0.69, i.e. the corona is NOT
+#                Helion and the others sit at 0.53-0.69, i.e. the corona is NOT
 #                white there; ours was 0.9+. 0 = off (picture left as it is).
 #   skyLevel     a screen lift of everything outside the Moon towards the sky
 #                colour: the sky becomes ~skyLevel, the white corona is untouched.
 #   skyColour    the lift's hue on one axis: 0 neutral grey, 1 Helion's sky blue
-#                (R/G 0.766, B/G 1.323), 2 a deeper published-composite blue.
+#                (R/G 0.766, B/G 1.323), 2 Druckmüller's deeper blue.
 #   moonColour   the Moon disc's hue on the same axis (0 = neutral grey).
 # All four off by default, so every render before them is unchanged.
 LOOK_BLUE = np.array([0.766, 1.0, 1.323])
@@ -1419,7 +1423,7 @@ def look(rgb, P, r, R, eg, pin=None):
     return np.clip(rgb, 0, 1).astype(np.float32)
 
 
-# Zoned partial-convolution gains: a radial emphasis per mask scale, fine scales inside the
+# Zoned partial-conv gains: a radial emphasis per mask scale, fine scales inside the
 # zone radius, coarse ones outside, with a 0.4 R feather. zone 0 = as before.
 HILL_ZONE_SIGN = (1.0, 1.0, 0.0, -1.0, -1.0)      # 2, 4, 8, 16, 32 px
 HILL_ZONE_FEATHER_R = 0.4
@@ -1430,7 +1434,7 @@ def hill_zone_t(r, R, zone_r):
     return (t * t * (3 - 2 * t)).astype(np.float32)        # 0 inside, 1 outside
 
 
-INNER_DETAIL_GAIN = 6.0      # innerDetail 1 = exp(6 x layer); 6-9 judged best by eye (2026-10-10)
+INNER_DETAIL_GAIN = 6.0      # innerDetail 1 = exp(6 x layer); 6-9 looked right (2026-10-10)
 INNER_DETAIL_SPAN = 0.05     # the page receives the layer over +-this, 16-bit
 BAND_DETAIL_SPAN = 0.2      # filament detail layer, same packing
 
@@ -1531,8 +1535,8 @@ def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_row
     return out
 
 
-# STRUCTURE (2026-10-08, request: "Clarity does nothing, a Structure slider would
-# be cool"). Local contrast on the FINISHED picture's brightness, between
+# STRUCTURE (2026-10-08, from testing: "Clarity does nothing, a Structure slider
+# would be cool"). Local contrast on the FINISHED picture's brightness, between
 # 0.01 R and 0.08 R (6-50 px on the reference set) -- the width of the streamers
 # and the gaps between them. Clarity works on the MGN/FNRGF layers only, which
 # the looks mix in at 0.1-0.2, so it barely shows; this acts on everything.
@@ -1673,11 +1677,11 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     # off and 0.11 by 3 R.
     wG = edge * np.exp(-np.maximum(r - Re, 0.0) / (0.60 * R))
 
-    # THE ENVELOPE CURVE: cube root, or the method's log stretch. `bg` holds
+    # THE ENVELOPE CURVE: cube root, or the published log stretch. `bg` holds
     # xn**(1/3), so xn comes back by cubing it -- exactly here, and to 0.005% in
     # the browser, which is why that layer is sent at 16 bits.
     #
-    # The method uses log(1 + k*I) with k about a million, and its author says it is what makes
+    # The published recipe uses log(1 + k*I) with k about a million, and says it makes
     # the inner and outer corona visible at once. The reason it works is that a
     # log gives every factor of two the same display range wherever it sits.
     # Measured on the reference bracket, output units per doubling:
@@ -1687,9 +1691,9 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     #     log, k=1e6    0.050   0.050   0.050   0.050   0.050
     #
     # OFF BY DEFAULT and exactly the old curve at 0. The control is log10(k);
-    # The method's own value is 6. Turn radial flatten down as this goes up -- they do
+    # The recipe's own value is 6. Turn radial flatten down as this goes up -- they do
     # the same job from opposite ends and both at once inverts the picture.
-    # REMOVED 2026-10-08: at the method's 6 the picture went white and no look
+    # REMOVED 2026-10-08: at the recipe's 6 the test picture went white and no look
     # used it; old settings that carry logK render as 0.
     _lk = 0.0
     if _lk > 0:
@@ -1722,32 +1726,32 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         det = det * (1 - _pw) + _pw * src["promdet"]
         del _pw
     Y = B * (P["baseLift"] + P["detailGain"] * det)
-    # THE PARTIAL-CONVOLUTION CHAIN, as an alternative to the line above.
+    # PARTIAL-CONVOLUTION CHAIN, as an alternative to the line above.
     #
     #     im_enhanced = im_log + a*M_1 + b*M_2 + c*M_4 + ...
     #
     # Two differences from everything else here, and they are the point:
     #
     #   ADDITIVE, not multiplicative. The line above is envelope x detail, so a
-    #   detail layer's contrast is proportional to the local brightness. The method
+    #   detail layer's contrast is proportional to the local brightness. The recipe
     #   ADDS the masks to the log-mapped image, so a thread of a given contrast
     #   in the log domain renders the same whether it sits at 1.1 R or 6 R.
     #
     #   LINEAR, not normalised. MGN and NAFE each divide by a LOCAL
     #   statistic, which is what lets them show the whole corona at once and
     #   also what gives every part of the frame the same texture amplitude.
-    #   The method's weights are five scalars. Faint structure stays faint, and noise
+    #   The recipe's weights are five scalars. Faint structure stays faint, and noise
     #   in the far field stays noise instead of being lifted to signal level.
     #
-    # The amplification factors are the method's own 100:60:20:10 ratios at 2:4:8:16
+    # The amplification factors are the published 100:60:20:10 ratios at 2:4:8:16
     # px, extended one octave. They are divided by the rms of the FINEST mask --
     # one number for the whole set, so the ratios between scales are exactly as
-    # the method gives them -- which is what makes a slider mean the same thing on a
+    # published -- which is what makes a slider mean the same thing on a
     # different camera.
     _hmix = float(P.get("hillMix", 0.0))
     _hview = (view == "partialconv")
     # Where the log-mapped base sits in the Partial-conv view, leaving the rest
-    # of the range for the masks. The method's own base runs 0.13 to 0.75. See the
+    # of the range for the masks. The recipe's own base runs 0.13 to 0.75. See the
     # note where it is applied.
     _HILL_HEADROOM = 0.75
     if _hview and not (getattr(layers, "has_hill", False) and "hilllog" in src):
@@ -1755,7 +1759,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     if (_hmix > 0 or _hview) and getattr(layers, "has_hill", False) and "hilllog" in src:
         # THE BASE STRETCH IS LIVE, not the one the masks were built at.
         #
-        # The method's k = 1e6 is calibrated for a normalisation whose outer corona
+        # The recipe's k = 1e6 is calibrated for a normalisation whose outer corona
         # sits near 1e-6. Ours does not. On the reference bracket, xn 1.0 at the
         # limb down to 5e-4 in the far field maps to im_log 1.00 down to 0.45 --
         # so the WHOLE corona lands in the top third of the display range, the
@@ -1787,7 +1791,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
             _mscale = float(np.log1p(_Kb) / np.log1p(_Kr))
         # THE LADDER IS NORMALISED, so the five scale sliders set BALANCE and
         # the master sets STRENGTH. Without this they do both at once: all five
-        # at 2 is a sum of 10 against the method's 1.95, so dragging them up to
+        # at 2 is a sum of 10 against the recipe's 1.95, so dragging them up to
         # "see the effect better" multiplied the whole chain by five and drove
         # the composite into clipping -- which looks like a blown-out inner
         # corona, not like too much amplification.
@@ -1831,7 +1835,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         # So Donoho's soft threshold, at k times the sigma this pixel is
         # expected to carry: below it the coefficient is consistent with noise
         # and goes to zero, above it the coefficient keeps its own amplitude
-        # minus the threshold. The method's linearity survives where there is signal,
+        # minus the threshold. The recipe's linearity survives where there is signal,
         # which is the only place it means anything.
         #
         # AT 0 THIS IS EXACTLY THE OLD BEHAVIOUR, coefficient for coefficient.
@@ -1866,8 +1870,8 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         Yh = _base + _E
         _base_keep = _base if _hview else None
         del _base
-        # THE PARTIAL-CONVOLUTION RESULT ON ITS OWN, as a monochrome view -- the method's
-        # im_enhanced and nothing else: no envelope, no radial flatten, no
+        # THE PARTIAL-CONVOLUTION RESULT ON ITS OWN, as a monochrome view -- the
+        # recipe's im_enhanced and nothing else: no envelope, no radial flatten, no
         # prominence term, no disc fill, and NO level match (there is nothing
         # to match it to here). It moves with hillLogK, hillGain, hillDenoise
         # and the five scale sliders, so it can be tuned in the preview and
@@ -1883,9 +1887,9 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
             # collar just outside the Moon came out as a flat white band with
             # the detail missing -- the one place the masks are strongest.
             #
-            # The method's own log-mapped HDR (its stretching slide) runs from about
-            # 0.13 in the sky to 0.75 at the limb, and the slide says so out loud on
-            # that slide: "notice that the inner corona and prominences are not
+            # The recipe's own log-mapped HDR (its stretching slide) runs from about
+            # 0.13 in the sky to 0.75 at the limb, and the slide says so out
+            # loud: "notice that the inner corona and prominences are not
             # clipped". The room above 0.75 is where a*M1 + b*M2 + ... lands.
             #
             # Scaling base and masks TOGETHER, so this is a display scaling and
@@ -1906,7 +1910,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
             # THE DISC IS PAINTED OUT TO THE MASKS' OWN EDGE (0.23.7). The
             # masks are zero inside Rmask + HILL_LIMB_PAD by construction, so
             # that band showed the bare log base at its brightest -- a bright
-            # rim with nothing on it. The method's disc runs flat to the corona
+            # rim with nothing on it. The recipe's disc runs flat to the corona
             # edge; so does this one now, at the base's own value at the
             # Moon's centre (the composite is untouched -- its edge blend
             # covers the same band).
@@ -1922,7 +1926,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         # The crossfade mixed two images with different tone curves (the
         # log-mapped one is flat, so matched in the mean it was brighter at
         # the limb and darker outside: blow-out and lost outer detail). A
-        # multiplication by exp(k E) -- the method's straight addition in the log
+        # multiplication by exp(k E) -- the recipe's straight addition in the log
         # domain -- is right for LINEAR data, but Y here is already
         # tone-mapped, so it clipped the inner corona just the same.
         #
@@ -1930,12 +1934,12 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         # the base is multiplied, above 0.5 it is screened, and no mask can
         # push a pixel past white; the contrast it adds tapers toward either
         # end of the range. It is what a high-pass layer does in Photoshop
-        # and what the method points to ("soft light blending mode"). The grey
+        # and what the recipe points to ("soft light blending mode"). The grey
         # layer is EXACTLY what the Partial-conv view draws at Base weight
         # 0: 0.5 + 0.75 k E. So the view shows the layer, and the slider is
         # its opacity.
         _d = np.clip(np.float32(_hmix * _HILL_HEADROOM) * _E, -0.5, 0.5)
-        # THE 0.24 PROMINENCE LAYER: under the layer the corona's partial-convolution detail is
+        # THE 0.24 PROMINENCE LAYER: under the layer the corona's partial-conv detail is
         # eased out, so the trace the colour removal leaves at a prominence's
         # foot does not show through the layer's soft edge
         if getattr(layers, "has_promlayer", False) and float(P.get("promFade", 1.0)) > 0:
@@ -1995,7 +1999,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     # fraction (0.22.50), by the chroma confidence, by the sky fraction -- and
     # every one of those weights drew a boundary in the picture, because a
     # weight that varies with radius applied to a gain of about 4.7 in blue IS a
-    # visible edge. The verdict in testing on each of them was the same, and the
+    # visible edge. The test verdict on each of them was the same, and the
     # verdict on this one was "0.22.48 was still good".
     #
     # What it does out in the field is not an accident to be corrected: the far

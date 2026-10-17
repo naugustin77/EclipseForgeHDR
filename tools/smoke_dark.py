@@ -46,13 +46,17 @@ _DARK_T = 1.6             # seconds, the dark frames' exposure
 _N_TIERS, _STEP = 8, 24.0 ** (1 / 7.0)
 _T0 = _DARK_T / 24.0
 _OFFSET = 96.0            # ADU, constant electronic offset
+#: Dark current scale. At 1x the planted dark current is only ~1.7% of the
+#: outer field at 3-5 R, below what the test needs (>10%) to prove anything;
+#: 10x gives ~15% and a clear before/after (2026-10-17).
+_DARK_SCALE = 10.0
 _READ = 3.0               # ADU, read noise
 
 
 def _defects(seed=5):
     """Per-pixel dark current in ADU/s: a smooth floor plus hot photosites."""
     rng = np.random.default_rng(seed)
-    rate = rng.gamma(2.0, 1.5, size=(_H, _W)).astype(np.float32)
+    rate = (_DARK_SCALE * rng.gamma(2.0, 1.5, size=(_H, _W))).astype(np.float32)
     hot = rng.random((_H, _W)) < 0.0008
     rate[hot] += rng.uniform(60.0, 400.0, size=int(hot.sum())).astype(np.float32)
     return rate, int(hot.sum())

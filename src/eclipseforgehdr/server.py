@@ -54,7 +54,14 @@ def _gui_html():
 
 @app.get("/")
 def index():
-    return _gui_html()
+    # CROSS-ORIGIN ISOLATION (2026-10-16): the two headers let the page use
+    # shared memory, which the preview's worker pool needs (gui.html, POOL).
+    # Everything the page loads comes from this server, so nothing is blocked.
+    from flask import Response
+    r = Response(_gui_html(), mimetype="text/html")
+    r.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    r.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    return r
 
 
 @app.get("/api/version")
@@ -67,7 +74,7 @@ def version():
 # ---------- file browser ----------
 #
 # Pasting an absolute path is fine once you know what the app wants and awkward
-# every other time -- users lost time to it, one of them pasting a
+# every other time -- early test runs lost time to it, one of them pasting a
 # perfectly good path into a field whose Start button could never light up.
 #
 # This is a browser served from 127.0.0.1, so the obvious answer -- <input
@@ -213,6 +220,19 @@ def set_folder():
                     "short_dir": sd,
                     "short_count": len(list_raws(sd)) if sd else 0,
                     "tiffs": cand[:24]})
+
+
+@app.get("/api/timeline")
+def timeline_api():
+    """The shooting timeline under the log: one bar per frame (timeline.py)."""
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"})
+    try:
+        from .timeline import build
+        return jsonify(build(f, workdir(f)))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"timeline: {e}"})
 
 
 @app.post("/api/clearcache")
@@ -590,6 +610,13 @@ def start_run():
                      if request.is_json else "clip")
     if stack_combine not in ("mean", "clip"):
         stack_combine = "clip"
+    # Repeated brackets: stack each exposure across the brackets, then merge
+    # (the default), or merge each bracket on its own and stack the HDRs
+    # (bracketmode.py, lab 2026-10-16).
+    bracket_mode = (request.json.get("bracketMode", "tiers")
+                    if request.is_json else "tiers")
+    if bracket_mode not in ("tiers", "hdr"):
+        bracket_mode = "tiers"
     # The alignment pre-filter: an isotropic high-pass (ours) or an arc-length
     # one (Druckmullerova's T_sigma, which is what removes the lunar edge and
     # the moving saturation edge).
@@ -612,7 +639,7 @@ def start_run():
     # COLOUR PLANES: move red and blue onto green by the offset measured on the
     # lunar limb (atmospheric dispersion at a low Sun). Changes the merged
     # data, so it is in the cache key below.
-    # Default "auto" since 0.23.9 (21 Sep): it measures on every run and
+    # Default "auto" since 0.23.9: it measures on every run and
     # moves nothing when the offset is below 0.2 px.
     colour_planes = (request.json.get("colourPlanes", "auto")
                      if request.is_json else "auto")
@@ -636,7 +663,7 @@ def start_run():
     #
     # The implementation stays (raw.demosaic_vng, verified against LibRaw to
     # 1.5 counts in 65535) and is selected by dropping a file named
-    # `vng_demosaic.txt` in the folder of raws, the same way the partial-convolution
+    # `vng_demosaic.txt` in the folder of raws, the same way the linear-fit
     # photometry chain is. Off the toolbar, out of the way, still there for the
     # next person who wants to check us against PixInsight.
     # STATE["folder"] rather than `folder`, which is not bound until below
@@ -853,6 +880,7 @@ def start_run():
                            # denoise below (audit 2026-10-10; it forced a
                            # full re-stack before)
                            and o.get("stack_combine", "mean") == stack_combine
+                           and o.get("bracket_mode", "tiers") == bracket_mode
                            and o.get("align_filter", "isotropic") == align_filter
                            and o.get("align_corr", "semi") == align_corr
                            # ... and what the frames within a tier locked on,
@@ -897,12 +925,14 @@ def start_run():
                              "photometry": ("hill" if _photometry_requested(folder, photometry) else "scalar"),
                              "photo_solve": photo_solve, "fnrgf_preset": fnrgf_preset,
                              "stack_combine": stack_combine, "align_filter": align_filter,
+                             "bracket_mode": bracket_mode,
                              "align_corr": align_corr, "intra_lock": intra_lock,
                              "colour_planes": colour_planes, "tier_mode": tier_mode,
                              "prealigned": _want_prealigned(folder),
                              "intra_subpixel": _intra_sub(), "switches": _env_switches()}
                     _dflt = {"wb_source": "daylight", "demosaic": "mhc", "photometry": "scalar",
                              "photo_solve": "chain", "fnrgf_preset": "ours", "stack_combine": "mean",
+                             "bracket_mode": "tiers",
                              "align_filter": "isotropic", "align_corr": "semi", "intra_lock": "moon",
                              "colour_planes": "off", "tier_mode": "exposure", "feather": "plain",
                              "prealigned": False,
@@ -952,6 +982,7 @@ def start_run():
                              photo_solve=photo_solve,
                              fnrgf_preset=fnrgf_preset,
                              stack_combine=stack_combine,
+                             bracket_mode=bracket_mode,
                              align_filter=align_filter,
                              align_corr=align_corr,
                              intra_lock=intra_lock,
@@ -1003,7 +1034,7 @@ def start_run():
             # branch is `if not _hstale`, which re-derives staleness from
             # report.json, finds no "hill" entry because the run did not write
             # one, reads its build number as 1, and rebuilds. That is exactly
-            # what happened on a reference-set run: the pipeline reported
+            # what happened on a run of the reference set: the pipeline reported
             # "partial convolution: OFF" and the masks were then built anyway
             # right after "pipeline complete", turning an 18m39s run into 39
             # minutes. Whatever is on disk is also dropped, since it was built
@@ -1445,6 +1476,7 @@ _PROCESSING_KEYS = {
     "partialconv":   ("True",      "partialConv"),
     "align_filter":  ("isotropic", "alignFilter"),
     "stack_combine": ("mean",      "stackCombine"),
+    "bracket_mode":  ("tiers",     "bracketMode"),
     "fnrgf_preset":  ("ours",      "fnrgfPreset"),
     "photo_solve":   ("chain",     "photoSolve"),
     "tier_mode":     ("exposure",  "tierMode"),

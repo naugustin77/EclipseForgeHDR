@@ -3,12 +3,12 @@
 WHY A SEPARATE LAYER. Every attempt to merge the sharp prominence stack into
 the composite itself failed on the picture: the renderer normalises and tints
 the whole frame, so a deep-red, very bright prominence core either clips or
-turns into a flat red blob. The fix is to keep the prominences out of
+turns into a flat red blob. The answer is to keep the prominences out of
 the composite's hands and hand them over as their own layer -- same pixel
 grid as the 16-bit export, alpha already masked -- to be blended in
 Photoshop with Blend If / opacity / screen. This module builds that layer.
 
-TWO SOURCES, EACH FOR WHAT IT DOES WELL (measured on the reference set):
+TWO SOURCES, EACH FOR WHAT IT DOES WELL (measured on the reference test set):
   * the HDR MERGE's red excess has 2-3x less noise than the short stack, but
     is smeared (it holds only 0.33-0.58 of the short stack's peak). It decides
     WHERE a prominence is: the detection gate and the faint parts.
@@ -37,7 +37,7 @@ import numpy as np
 from scipy import ndimage
 
 BOX_R = 1.6          # half-size of the saved crop around the disc, in R
-RL_ITERS = 10        # Richardson-Lucy iterations (judged by eye: "ten iterations look best")
+RL_ITERS = 10        # Richardson-Lucy iterations (ten looked best by eye)
 LOCAL_SIG_PX = 20.0  # local-noise window of the prominence gate, px at REF_R
 #: The prominence gate, in sigma of the SMOOTHED excess map (measured, audit
 #: 2026-10-10 A11): nothing below GATE_LO, everything above GATE_HI. The gate
@@ -161,7 +161,7 @@ def prominence_colour(rgb, kR, rr, ang=None):
                 # a clear minimum: inside the scan and at least 10 % below the
                 # default's cost, else the default is as good as anything
                 # ADOPTED ONLY ON REQUEST (ECLIPSEFORGE_PROM_PG=measure). On
-                # the reference set the scan says 0.015 (corona mismatch 20 %
+                # the reference test set the scan says 0.015 (corona mismatch 20 %
                 # against 77 % at the default), which disagrees 4x with the
                 # audit's own regression (0.061); the continuity assumption
                 # may be wrong under a large prominence (a cavity, scattered
@@ -535,14 +535,14 @@ def detect(wd, geo, shape, log=None):
 # 0.24 LAB: THE PROMINENCE LAYER FROM THE SHORT FRAMES, ON A CORONA WITHOUT THEM
 # ============================================================================
 #
-# WHY A NEW DESIGN (Oct 2026, the reference set, prototype in status
+# WHY A NEW DESIGN (Oct 2026, the reference test set, prototype in status
 # 2026-10-06-prominence-layer-from-short-frames and -open-points).
 #
 # Everything before this tried to show the prominences THROUGH the corona
 # stack: brighten them inside a gate, give them their own detail, exclude them
 # from the convolutions. Every one of those draws an edge somewhere -- the gate,
 # the exclusion mask, the hole in MGN -- and the partial-convolution masks
-# amplify any edge into a line. The issue list after the Oct 5 run: dark rims,
+# amplify any edge into a line. The faults seen after the Oct 5 run: dark rims,
 # smearing, false pink patches, hard edges, no blend, a poor fit with the
 # corona. Two causes, measured:
 #
@@ -565,6 +565,7 @@ LIGHT_FILE = "prom_light.npy"        # the prominence light, linear RGB, merge u
 LIGHT_META = "prom_light.json"
 SHORT_FILE = "prom_short.npy"        # the short-frame stack (before the light is cut out of it)
 SHORT_W = "prom_short_w.npy"         # its coverage (sum of weights), 0 = no frame saw the pixel
+SHORT_WC = "prom_short_wclean.npy"   # the part of it from frames at least 8 px clear of their own clipping
 SHORT_META = "prom_short.json"
 CORONA_RGB = "corona_rgb.npy"        # the merge without prominence light, full frame
 CORONA_LUM = "corona_lum.npy"
@@ -679,8 +680,8 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
     already in merge units, extra frames not) and a bool map of clipped or
     missing pixels. Roughly placed is enough -- each item is registered here.
 
-    Per item, measured not assumed (all of it was wrong somewhere on the reference
-    set when assumed):
+    Per item, measured not assumed (all of it was wrong somewhere on the
+    reference set when assumed):
       * REGISTRATION on the red excess (the prominences), not the Moon: the
         Moon moves against the Sun by ~8 px over 22 s of short frames. FFT
         cross-correlation for the coarse shift (frames of the discarded short
@@ -706,6 +707,7 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
     ring = (rr > 1.1) & (rr < 1.4)
     Gref = ndimage.gaussian_filter(ref[..., 1], 3)
     acc = np.zeros(ref.shape, np.float64); accw = np.zeros(ref.shape[:2], np.float64)
+    accwc = np.zeros(ref.shape[:2], np.float64)
     notes = []
 
     def ss(t):
@@ -772,6 +774,7 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
             wt = float(it["sec"]) * w
             acc += rgb.astype(np.float64) * k * wt[..., None]
             accw += wt
+            accwc += float(it["sec"]) * wmoon * (wclip >= 0.999)
             note = {"name": it["name"], "sec": float(it["sec"]), "used": True,
                     "shift": [round(dy, 2), round(dx, 2)], "corr": round(cc, 3), "fine": anote,
                     "moon": [round(mcy + y0, 2), round(mcx + x0, 2), round(mR, 2)],
@@ -790,6 +793,7 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
     S[accw <= 0] = ref[accw <= 0]
     np.save(os.path.join(wd, SHORT_FILE), S.astype(np.float32))
     np.save(os.path.join(wd, SHORT_W), accw.astype(np.float32))
+    np.save(os.path.join(wd, SHORT_WC), accwc.astype(np.float32))
     json.dump({"box": [y0, y1, x0, x1], "items": notes}, open(os.path.join(wd, SHORT_META), "w"),
               indent=1)
     n = sum(1 for x in notes if x.get("used"))
@@ -991,6 +995,68 @@ def clean_corona(wd, geo, progress=None):
             "box": [y0, y1, x0, x1]}
 
 
+CORE_RAMP = 10.0      # px at REF_R over which a filled core rises from its edge to its level
+
+
+def _soft_fill(a, m, good, level, ramp):
+    """Fill values for the pixels of mask m. A membrane (Laplace) fill from the
+    measured pixels around m -- smooth inside, equal to them at the edge, no
+    seams -- lifted with a smoothstep towards `level` over `ramp` px inward
+    (or most of the core's depth), so the core is a soft dome that reaches
+    the level. Neighbours that are neither in m nor good (the uncovered band
+    at the limb, the disc) are left out (zero-flux edge)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.linalg import spsolve
+    ys, xs = np.where(m)
+    pad = 3
+    y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad + 1, m.shape[0])
+    x0, x1 = max(xs.min() - pad, 0), min(xs.max() + pad + 1, m.shape[1])
+    mb, gb = m[y0:y1, x0:x1], good[y0:y1, x0:x1] & ~m[y0:y1, x0:x1]
+    ab = np.clip(a[y0:y1, x0:x1], 0.0, level)
+    hb, wb = mb.shape
+    idx = -np.ones(mb.shape, np.int64); n = int(mb.sum()); idx[mb] = np.arange(n)
+    rows, cols, vals = [], [], []
+    rhs = np.zeros(n); diag = np.zeros(n)
+    my, mx = np.nonzero(mb); k0 = idx[my, mx]
+    for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        ny, nx = my + dy, mx + dx
+        ok = (ny >= 0) & (ny < hb) & (nx >= 0) & (nx < wb)
+        nyc, nxc = np.clip(ny, 0, hb - 1), np.clip(nx, 0, wb - 1)
+        inm = ok & mb[nyc, nxc]; ing = ok & gb[nyc, nxc]
+        diag += (inm | ing)
+        rows.append(k0[inm]); cols.append(idx[nyc[inm], nxc[inm]]); vals.append(-np.ones(int(inm.sum())))
+        np.add.at(rhs, k0[ing], ab[nyc[ing], nxc[ing]])
+    # a pixel with no usable neighbour at all keeps the level
+    lonely = diag == 0
+    diag[lonely] = 1.0; rhs[lonely] = level
+    rows.append(np.arange(n)); cols.append(np.arange(n)); vals.append(diag)
+    A = coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))), shape=(n, n)).tocsr()
+    try:
+        hv = spsolve(A, rhs)
+    except Exception:
+        hv = np.full(n, level)
+    if not np.all(np.isfinite(hv)):
+        hv = np.where(np.isfinite(hv), hv, level)
+    Hm = np.zeros(mb.shape); Hm[mb] = np.clip(hv, 0.0, level)
+    d = ndimage.distance_transform_edt(mb)
+    # THE RISE TAKES THE WHOLE DEPTH, IN RATIO (2026-10-16, a FITS test set: "not
+    # softly blending in"; the plateau is kept, with a softer ramp).
+    # It used to reach the level within 0.8 of the depth, linearly in light:
+    # most of a 5-7x rise then happened in the first few pixels in from the
+    # measured edge, which the prominence curve shows as a step from pink to
+    # white. Now the level is reached only at the deepest point, and the
+    # ratio to the edge value grows evenly, so each pixel inward is the same
+    # step brighter.
+    ramp = max(ramp, float(d.max()))
+    t = np.clip((d - 0.5) / ramp, 0.0, 1.0)
+    t = t * t * (3.0 - 2.0 * t)
+    _flo = max(1e-6 * float(level), 1e-30)
+    Hl = np.maximum(Hm, _flo)
+    out = np.zeros(a.shape, np.float64)
+    out[y0:y1, x0:x1] = np.where(mb, Hl * (max(float(level), _flo) / Hl) ** t, 0.0)
+    return out
+
+
 def build_light(wd, geo, progress=None):
     """The prominence light: H-alpha unmixed from the short-frame stack (or, for
     a cache without one, the older fast-tier stack, or the merge), with a soft
@@ -1006,6 +1072,7 @@ def build_light(wd, geo, progress=None):
     h = _height(geo, M.shape[:2], y0, x0)
     S, cov, source = None, None, "the merge (no short-frame stack in this cache)"
     Wc = None
+    Wclean = None
     for fn, cf, nm, mf in ((SHORT_FILE, SHORT_W, "the short frames", SHORT_META),
                           (STACK_FILE, None, "the fast tiers (older stack; re-stack for the short-frame one)",
                            STACK_META)):
@@ -1019,6 +1086,9 @@ def build_light(wd, geo, progress=None):
             Wc = (np.load(os.path.join(wd, cf)).astype(np.float64)
                   if cf and os.path.exists(os.path.join(wd, cf)) else None)
             cov = (Wc > 0) if Wc is not None else np.ones(S.shape[:2], bool)
+            if cf and os.path.exists(os.path.join(wd, SHORT_WC)):
+                _wcl = np.load(os.path.join(wd, SHORT_WC)).astype(np.float64)
+                Wclean = _wcl if _wcl.shape == S.shape[:2] else None
             source = nm
             break
         except Exception:
@@ -1051,7 +1121,7 @@ def build_light(wd, geo, progress=None):
     if (sig > 1e-12).any():
         sig[sig <= 1e-12] = np.median(sig[sig > 1e-12])
     sg = sig[hb]
-    # LOCAL NOISE (2026-10-07, a test set): one sigma per height
+    # LOCAL NOISE (2026-10-07, one test set): one sigma per height
     # under-rates the colour noise in a bright streamer sector, and 67 noise
     # blobs out to 0.8 R passed the gate as faint prominence light (pink
     # speckles at a low Prominence curve). The gate now uses the larger of the
@@ -1061,7 +1131,7 @@ def build_light(wd, geo, progress=None):
     sg = np.maximum(sg, 1.2533 * ndimage.gaussian_filter(np.where(cov, _ad, 0.0), LOCAL_SIG_PX * q)
                     / np.maximum(ndimage.gaussian_filter(cov.astype(np.float64), LOCAL_SIG_PX * q), 1e-6))
     del _ad
-    # SATURATED CORES (2026-10-07, a test set). Pixels saturated in
+    # SATURATED CORES (2026-10-07, one test set). Pixels saturated in
     # every short frame have no coverage and came out as zero, so the large
     # prominence printed as an arc round a hole. A hole whose rim is
     # prominence light (median > 3 sigma) is filled at that rim's 99th
@@ -1072,8 +1142,8 @@ def build_light(wd, geo, progress=None):
     # clipped pixels, so the rim of a clipped core keeps a sliver of weight
     # and a value read where red is already capped and green is not: a red
     # excess well BELOW the clipped core it surrounds. Inside the prominence
-    # that printed as a dark, blotchy core under a bright rim ("posterised",
-    # in testing). Weight lost to the Moon's own ramp is expected and does not
+    # that printed as a dark, blotchy core under a bright rim ("posterised").
+    # Weight lost to the Moon's own ramp is expected and does not
     # count: a pixel is "lost" when it holds under a quarter of the weight its
     # height above the limb should give it. Such pixels join the hole and are
     # raised to the fill where they read lower.
@@ -1084,20 +1154,70 @@ def build_light(wd, geo, progress=None):
             _wf = float(np.median(Wc[_ring]))
             _t = np.clip((h - 1.0) / (12.0 * q), 0.0, 1.0)
             _wexp = _wf * _t * _t * (3.0 - 2.0 * _t)
-            lost = cov & (_wexp > 0.2 * _wf) & (Wc < 0.25 * _wexp)
+            if Wclean is not None:
+                # LOST MEANS NO CLEAN FRAME, NOT LITTLE WEIGHT (2026-10-15,
+                # one test set). "Under a quarter of the expected
+                # weight" also caught a prominence core that is clipped from
+                # 1/500 s up but measured cleanly in the 1/1000 s tier: the
+                # shortest tier carries only 1/30 of a five-tier ladder's
+                # weight, so 639 px of real data were replaced by one flat
+                # value -- the posterised core. Now a pixel is lost only when
+                # the frames clear of their own clipping hold under a tenth of
+                # its weight, i.e. what it has comes from clip-ramp slivers.
+                lost = cov & (_wexp > 0.2 * _wf) & (Wclean < 0.1 * Wc)
+            else:
+                lost = cov & (_wexp > 0.2 * _wf) & (Wc < 0.25 * _wexp)
     hole = (~cov | lost) & (h > -3) & (h < 0.5 * R)
     if hole.any():
-        labh, nh = ndimage.label(hole)
+        # THE CORE IS LABELLED ABOVE THE LIMB BAND (2026-10-16, one test
+        # set). The short stack leaves the first pixels at the limb uncovered
+        # (the Moon's own ramp: 99 % uncovered at -4..-2 px, 56 % at -2..0 px
+        # on that set), so a clipped core touching the limb joined one 4900 px
+        # component with an arc along the whole limb; its rim was then mostly
+        # plain corona, failed the 3-sigma test, and the large prominence came
+        # out hollow. Components are found where h > HOLE_H0; each filled core
+        # then takes in the uncovered pixels of the band beneath it (down to
+        # h = -3, as the hole always did) within 6 px, so its base reaches the
+        # limb, and its fill level is read from the rim of core and base together.
+        _h0 = max(3.0, 3.0 * q)
+        core = hole & (h > _h0)
+        band = hole & (h <= _h0)
+        labh, nh = ndimage.label(core)
         for k in range(1, nh + 1):
             m = labh == k
             if m.sum() < 4:
                 continue
             br = ndimage.binary_dilation(m, iterations=3) & ~hole & cov
-            if br.sum() < 5 or np.median(a[br] / sg[br]) < 3.0:
+            if br.sum() < 5:
                 continue
+            # The rim test. A hole whose rim is prominence light (median > 3
+            # sigma) is a core. So is a hole the short frames do not cover at
+            # all for most of its area -- saturated even in the shortest frame,
+            # above the limb band, which nothing but a prominence core is --
+            # when its rim still reads a red excess above 1 sigma: on one
+            # test set the core's rim is 2.6 ring sigma (the corona near the
+            # limb is bright, so its sigma is large) and the 3-sigma test left
+            # the large prominence hollow (2026-10-16).
+            _rs = float(np.median(a[br] / sg[br]))
+            if _rs < 3.0 and not (float((~cov[m]).mean()) >= 0.5 and _rs >= 1.0):
+                continue
+            m = m | (band & ndimage.binary_dilation(m, iterations=int(round(max(6.0, 6.0 * q)))))
+            # the fill level from the rim of the core WITH its base, as before
+            # the band was split off (the prominence is brightest at its base)
+            br = ndimage.binary_dilation(m, iterations=3) & ~hole & cov
             # a lower bound: a lost pixel that reads higher keeps its value
             _fv = float(np.percentile(a[br], 99))
-            a[m] = np.maximum(np.where(cov[m], a[m], 0.0), _fv)
+            # A SOFT FILL, NOT A PLATEAU (2026-10-16, one test set: "too
+            # hard in the edge, posterised"). One flat value against a rim that
+            # reads lower made a step at the core's edge. Now a membrane fill
+            # from the measured pixels around the core, lifted towards the level
+            # inward (see _soft_fill): continuous at the edge, no seams.
+            _fl = _soft_fill(a, m, cov & ~hole, _fv, max(CORE_RAMP * q, 3.0))
+            # the fill replaces the core outright: its pixels are uncovered or
+            # "lost" (weight from clip-ramp slivers), so what they read is not
+            # a measurement; keeping the higher of the two left bright arcs and
+            # facets inside the core
+            a[m] = _fl[m]
             nfill += int(m.sum())
         if nfill:
             asm = ndimage.gaussian_filter(a, GSM)
@@ -1232,7 +1352,7 @@ def overlay(rgb, maps, P):
     y = np.clip(maps["L"], 0, None) ** np.float32(gam)
     y = np.where(y < 0.9, y, 0.9 + 0.1 * np.tanh((y - 0.9) / 0.1)).astype(np.float32)
     alpha = np.clip(y * (maps["W1"] + rim * maps["W2"]) * np.float32(1.5 * s), 0, 1)
-    # SOFT HIGHLIGHTS (lab 0.25.1, 2026-10-10; reported: the step from the darker
+    # SOFT HIGHLIGHTS (lab 0.25.1, 2026-10-10; the step from the darker
     # core to the brighter rim is too abrupt). Two hard edges made it: the
     # opacity reached 1 and stopped, and where the colour left the gamut every
     # channel was divided by the largest, so the core sat at one flat colour
@@ -1252,6 +1372,34 @@ def overlay(rgb, maps, P):
     else:
         C = maps["C"]
     ch = np.clip(1 + (C - 1) * np.float32(sat), 0, None)
+    # PROMINENCE LIGHT (lab, 2026-10-15; "should the core not be brighter
+    # than the rim? Now the core has the darker pink and the rim the brighter
+    # pink"). Laid OVER the corona, an opaque core became the plain prominence
+    # colour -- a saturated pink, darker than the light inner corona under it
+    # -- while the half-transparent rim still carried that corona: on one
+    # test set the core rendered at luminance 0.38 and its rim at 0.55,
+    # although the light measured 3x brighter in the core. And once opaque, the
+    # colour no longer followed the light, so the core's structure went flat.
+    # Here the prominence ADDS brightness: the result's luminance rises from
+    # the corona's towards white with alpha x the layer's own curve x
+    # promLight, and the prominence hue is put in as far as the display gamut
+    # allows at that luminance. Faint or tall parts over darker corona stay
+    # fully pink; a core brighter than a light corona goes pale pink, as an
+    # overexposed prominence does. 0 = the opaque colour as before.
+    light = float(np.clip(P.get("promLight", 0.0) or 0.0, 0.0, 1.0))
+    if light > 0:
+        lw = np.array([0.2126, 0.7152, 0.0722], np.float32)
+        Lb = np.clip(rgb @ lw, 0.0, 1.0)
+        Lt = Lb + (1.0 - Lb) * np.clip(alpha * y * np.float32(light * peak), 0.0, 1.0)
+        bc = np.where((Lb > 1e-4)[..., None], rgb / np.maximum(Lb, 1e-4)[..., None], np.float32(1.0))
+        d = ch - bc
+        lim = np.where(d > 1e-6, (1.0 / np.maximum(Lt, 1e-6)[..., None] - bc) / np.maximum(d, 1e-6),
+                       np.float32(np.inf))
+        s_ = np.minimum(alpha, np.clip(lim.min(-1), 0.0, 1.0))
+        out = Lt[..., None] * (bc + s_[..., None] * d)
+        np.clip(out, 0, 1, out=out)
+        rgb[...] = out
+        return alpha, out
     if soft > 0:
         _cm = ch.max(-1)
         _t = np.clip((y * _cm - 1.0) / np.maximum(y * (_cm - 1.0), 1e-6), 0, 1)

@@ -40,7 +40,7 @@ H, W = 400, 600
 _READ = (3.1, 2.4, 2.4, 4.6)       # per Bayer offset: R, G, G, B
 _GAIN = 0.42                        # ADU per electron-ish, for the light frames
 _N_DEFECTS = 260
-_RATE = 0.23                        # ADU/s, roughly the reference camera at 30 C
+_RATE = 0.23                        # ADU/s, roughly one test camera at 30 C
 
 
 def _rn_map():
@@ -193,7 +193,7 @@ def main(verbose=False):
 # ---------------------------------------------------------------------------
 # 3. DOES PINNING THE INTERCEPT HELP?
 #
-# On a reference-set run, feeding the measured read noise into the light-frame
+# On the reference run, feeding the measured read noise into the light-frame
 # detector took the count from 3675 to 1848. Fewer is not the same as better,
 # and the run itself cannot say which is right -- so plant the truth.
 #

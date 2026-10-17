@@ -21,11 +21,11 @@ for a black level and wrong for sky, because sky scales with the exposure
 exactly like the corona and so survives the merge as a constant added to every
 pixel. On a FITS test set that constant is 2.4x the corona in red and 6.8x in
 blue at 2.85 R, with the opposite colour -- which is the warm-inside,
-blue-outside picture reported for it.
+blue-outside picture that set's render showed.
 
 THE LIMIT, stated plainly. One number per frame per channel cannot follow a sky
-that varies across the frame. On that FITS test set (2.9 R to the frame edge) it works.
-On the reference set the sky's brightness varies about 28% corner to corner, and
+that varies across the frame. On the FITS test set (2.9 R to the frame edge) it works.
+On the reference test set the sky's brightness varies about 28% corner to corner, and
 subtracting a constant leaves broad colour blobs beyond ~4 R -- the failure
 documented in docs/SKY_SUBTRACTION.md, which no version of this has escaped.
 So: judge the output by eye, expect it to win on some sets and not others, and

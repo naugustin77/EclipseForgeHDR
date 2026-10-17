@@ -121,7 +121,7 @@ METHODS = [
      "numerator and the normalisation, so nothing is smeared out of them into the "
      "corona. Additive and linear, where MGN is multiplicative and "
      "locally normalised. Masks are soft-thresholded against a per-pixel photon-noise "
-     "model carried through the derivative of the log map. After the talk "
+     "model carried through the derivative of the log map. After the method in "
      "\"Advanced Solar Eclipse Photography\""),
     ("Inner corona",
      "separate MGN of a saturation-weighted stack of the shortest tiers -- up to "
@@ -277,6 +277,44 @@ def build(stats):
         A("")
         A(f"tiers        : {len(tiers)}   frames stacked: {n_used}"
           f"   files found: {stats.get('n_files', n_used)}")
+        _bkz = stats.get("brackets") or {}
+        if _bkz.get("repeated"):
+            _sp = _bkz.get("span_s")
+            A(f"brackets     : {_bkz.get('n')} repeated brackets"
+              + (f" over {_sp:.0f} s" if _sp is not None else "")
+              + " -- found from the time stamps and the exposure order")
+            for _r in (_bkz.get("brightness") or []):
+                A(f"             : bracket {_r['bracket']:>2}: brightness long tiers "
+                  f"{'-' if _r['long'] is None else format(_r['long'], '.2f')}, short tiers "
+                  f"{'-' if _r['short'] is None else format(_r['short'], '.2f')}"
+                  "  (frame gain against the tier median)")
+        _bhz = stats.get("bracket_hdr") or {}
+        if _bhz.get("used"):
+            A(f"bracket HDRs : {_bhz.get('n')} brackets merged on their own and stacked "
+              f"({100 * (_bhz.get('rejected_frac') or 0):.2f}% of samples rejected, cut "
+              f"{_bhz.get('cut_sigma', 0):.1f} sigma)")
+            for _r in (_bhz.get("brackets") or []):
+                if _r.get("skipped") or _r.get("failed"):
+                    A(f"             : bracket {_r['bracket']:>2}: left out "
+                      f"({_r.get('skipped') or _r.get('failed')})")
+                    continue
+                _o = _r.get("offset_px") or [0, 0]
+                A(f"             : bracket {_r['bracket']:>2}: {_r['frames']} frames"
+                  + (f", t {_r['t']:.0f} s" if _r.get("t") is not None else "")
+                  + f", placed ({_o[0]:+.1f}, {_o[1]:+.1f}) px (scatter {_r.get('offset_scatter_px') or 0:.2f}),"
+                  f" transparency {_r.get('transparency', 1):.3f}"
+                  + (f", Moon {_r['moon_from_target_px']:.1f} px from the target"
+                     if _r.get("moon_from_target_px") is not None else ""))
+        elif _bhz.get("why"):
+            A(f"bracket HDRs : not used ({_bhz['why']})")
+        _pfz = stats.get("perframe_moon") or {}
+        if _pfz.get("tiers"):
+            _v = _pfz.get("v_px_s")
+            A(f"Moon placed  : per frame on {len(_pfz['tiers'])} tier(s), every tier stacked with the Moon of "
+              f"{_pfz.get('t_ref_s', 0):.0f} s into the shoot"
+              + (f"; Moon against the corona {math.hypot(*_v):.3f} px/s" if _v else ""))
+            A("             : (corona aligned clear of every Moon, frames placed on the lunar track,")
+            A("             : limb zone averaged from the frames that saw it as the target instant)")
         A(f"exposure span: {_fmt_exp(min(secs))} .. {_fmt_exp(max(secs))}"
           f"   = {math.log2(max(secs) / min(secs)):.1f} EV")
         A(f"integration  : {integ:.2f} s total open-shutter time"
@@ -579,7 +617,7 @@ def build(stats):
         if _spr:
             A(f"frame bright.: spread within a tier up to {max(_spr):.1f}% "
               f"(median {float(np.median(_spr)):.1f}%), corrected per frame"
-              + (f"; {_out} frame(s) left out as cloud/haze (>15% off the median)" if _out else ""))
+              + (f"; {_out} frame(s) left out for brightness (>15% off the tier median; darker or brighter, cause not known)" if _out else ""))
     # sky subtraction (TODO 22, lab 0.24)
     _ss = stats.get("sky_sub") or {}
     if _ss:
@@ -797,6 +835,9 @@ def build(stats):
                 ("tier combine ", "stack_combine", "mean",
                  {"mean": "mean (no per-pixel rejection)",
                   "clip": "clipped mean (kappa-sigma)"}),
+                ("brackets     ", "bracket_mode", "tiers",
+                 {"tiers": "stack per exposure, then one HDR",
+                  "hdr": "HDR per bracket, then the HDRs stacked (experimental)"}),
                 ("FNRGF        ", "fnrgf_preset", "ours",
                  {"ours": "EFHDR (order 6, hard cutoff)",
                   "published": "published (order 30, attenuated)"}),

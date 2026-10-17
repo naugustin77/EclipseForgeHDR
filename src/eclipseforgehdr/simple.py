@@ -131,7 +131,7 @@ def _flag_clipped_planes(a, min_px=64):
     A Bayer raw has its saturation flagged on the sensor's numbers (below); a
     3-plane FITS came here without that, so its clipped core went into the
     tier mean and the alignment as data (2026-10-13). The writer's scaling
-    moves the ceiling per plane -- one test set's Siril frames clip at 59889 in red,
+    moves the ceiling per plane -- a FITS test set's Siril frames clip at 59889 in red,
     65520 in green and 65535 in blue, and a few hot pixels sit above the red
     one -- so the ceiling is found as a spike in each plane's histogram: the
     most common value in the upper half, held by at least `min_px` pixels
@@ -353,7 +353,7 @@ def _feature(g):
       * the sensor's fixed pattern -- hot pixels and pixel-scale noise. Phase
         correlation whitens the spectrum, so in a long frame the thousands of
         hot pixels outweigh the corona and the peak lands on the SENSOR's
-        offset between the frames. On Siril-registered test frames that is
+        offset between the frames. On Siril-registered frames that is
         the registration shift Siril applied (3, -7 px between two 10 s
         frames, the same in every patch of the sky), not a sky motion. A 3x3
         median and a 1 px blur take it out;
@@ -650,7 +650,7 @@ def run(folder, progress, denoise="off", demosaic_method="mhc",
                      + ", ".join(k for k in ("bias", "rate", "flat") if k in calib)
                      .replace("rate", "dark"), None)
     is_planes = _planes_direct(files[0]) is not None
-    # FRAMES THE WRITER ALREADY REGISTERED (2026-10-13, a Siril test set). A
+    # FRAMES THE WRITER ALREADY REGISTERED (2026-10-13, a Siril-registered test set). A
     # registering program (Siril, PixInsight) pads every shifted frame with a
     # black border of its own width. Such a set is kept as written: the
     # writer aligned each frame on its full data, and re-aligning it here only
@@ -681,7 +681,7 @@ def run(folder, progress, denoise="off", demosaic_method="mhc",
     # A 3-PLANE FITS THAT REPORTS NO BLACK LEVEL: measured from pairs of tiers
     # (pipeline.measure_black_from_tiers), as the full pipeline does. The
     # shortest frame's corners carry a little sky and a writer's border can
-    # reach them; on a FITS test set they read 6-17 ADU above the measured floors.
+    # reach them; on that set they read 6-17 ADU above the measured floors.
     _black_meas = None
     if is_planes:
         try:
@@ -700,14 +700,14 @@ def run(folder, progress, denoise="off", demosaic_method="mhc",
     # tied to the first frame of the shortest tier. A long frame shares almost
     # nothing with it -- its inner corona is clipped where the short frame has
     # all its structure, and the short frame is noise where the long one has
-    # its streamers -- so on a FITS test set the longest frame did not correlate at
+    # its streamers -- so on that set the longest frame did not correlate at
     # all (shift > 400 px, set to 0) and the long tiers came out 11-25 px rms.
     # Each tier is now aligned to the previous tier's finished stack, which is
     # already in the reference frame's coordinates and is the closest exposure
     # there is. The feature ignores hot pixels and clipped pixels (_feature).
     # A peak that does not stand PEAK_MIN times above the next candidate is
     # not trusted: the frame keeps the previous tier's shift. On
-    # Siril-registered test frames that is what the long single frames get (their
+    # Siril-registered frames that is what the long single frames get (their
     # unclipped field is faint, flat outer corona); on a bracket with
     # structure every tier peaks 3-12x above the next.
     tier_feat = None

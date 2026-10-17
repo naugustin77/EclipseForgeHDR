@@ -1,6 +1,6 @@
 """A small diagnostic bundle, written at the end of every run.
 
-WHY THIS EXISTS. Testers report things like "there is ringing in MGN, FNRGF and
+WHY THIS EXISTS. Users report things like "there is ringing in MGN, FNRGF and
 NAFE" and the only way to chase that has been to ask for raw frames. People are
 reasonably reluctant to hand over their eclipse raws -- it is a shot they may
 have travelled to another continent for, and it is theirs. So diagnosis stalls,

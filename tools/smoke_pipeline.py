@@ -6,7 +6,7 @@ build_layers, so everything before it -- decode, stack, align, photometric
 calibration, the shared pedestal, the per-tier radial check, LDIC, the merge,
 the sky fit -- had no test that ran it at all. 0.22.67 shipped a crash in
 exactly that kind of untested wiring, at the end of an 18-minute stack on a
-test machine. 0.22.76 rewrites the frame three of those estimators sample
+user's machine. 0.22.76 rewrites the frame three of those estimators sample
 in, which is the same class of change.
 
 FITS rather than raw, because it needs no camera library and because it also

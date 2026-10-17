@@ -202,7 +202,7 @@ class RawFile:
         # `white_level` is the container's -- 16383 for 14-bit Canon data.
         # `camera_white_level_per_channel` is LibRaw's linear_max: the level at
         # which the sensor stops responding linearly, which is where the data
-        # actually stops. On one test set's Canon body they differ by 8.6%:
+        # actually stops. On one Canon test set they differ by 8.6%:
         #
         #     one CR2 frame  white_level 16383   linear_max 15092   black 2047
         #
@@ -214,7 +214,7 @@ class RawFile:
         # disagreement rim, and concentric arcs sitting within 0.6 px of a clip
         # contour. Adobe writes the true value into a DNG (white_level 15092
         # there), which is why the same code gave a clean run on DNGs of the
-        # same nine frames -- a test in 0.22.33, and the thing that found it.
+        # same nine frames -- the test, 0.22.33, that found it.
         #
         # Guarded, because linear_max is not always populated: use it only when
         # every channel reports a positive value below the container ceiling and
@@ -225,7 +225,7 @@ class RawFile:
         # Reported in the log, because "the reported white level" was printed on
         # a run whose number actually came from the observed maximum -- true and
         # misleading at the same time, on exactly the line that exists to make
-        # this diagnosable. A reference-set run, 0.22.36.
+        # this diagnosable. A run on the reference test set, 0.22.36.
         self.sat_source = "white_level"
         _lm = _lm_raw
         if _lm is not None:
@@ -333,7 +333,7 @@ def pick_wb(rf, source="camera"):
     of the camera model rather than of a menu setting and so is reproducible
     between photographers. That argument is weaker than it looked: for a body
     LibRaw has no table entry for, `daylight_whitebalance` is DERIVED from the
-    colour matrix, not measured. On one Panasonic body it comes out at
+    colour matrix, not measured. On one Panasonic test body it comes out at
     R 2.258 / B 1.232 against the camera's own Fine Weather preset of
     R 2.227 / B 1.707 -- a 39% difference in blue, all of it in the direction
     that renders the corona too orange.
@@ -392,7 +392,7 @@ def cfa_clip_max(cfa):
     then declared valid and enters the merge at full weight carrying a value
     reconstructed, in part, from a photosite that hit the ceiling.
 
-    Measured on the reference set: adjacent tiers disagree by up to 3x within
+    Measured on the reference test set: adjacent tiers disagree by up to 3x within
     0-8 px outside the longer tier's saturated region and by ~1% beyond
     8-16 px. This is one of the two mechanisms that can produce that collar --
     the other, charge spill or veiling glare off the saturated area, is real
@@ -753,7 +753,7 @@ def _outlier_flags(bayer, k=6.0, read_noise=None):
                     # print both. The bench cannot settle which number is
                     # right on a given sensor: on a synthetic tier the fit
                     # comes out HIGH (pinning found 97 defects against 80),
-                    # on the reference set it must have come out LOW (the
+                    # on the reference test set it must have come out LOW (the
                     # count fell 3675 -> 1848). Same failure, opposite sign,
                     # so the only way to know is to look at the two numbers
                     # for the data in hand.
@@ -867,7 +867,7 @@ def isolated_hot(bayer, sat_level, k=6.0, ratio=0.15, spread=5.0, read_noise=Non
 
     The neighbours' excess is measured against the same-colour photosites four
     away, outside anything one defect touches, and each colour is put on the
-    centre's scale by its level. Measured on a test set's frames: hot
+    centre's scale by its level. Measured on one test set's frames: hot
     pixels score 0.00-0.05, the star at 6.8 R scores 0.45 on its brightest
     photosite.
     """
@@ -886,7 +886,7 @@ def isolated_hot(bayer, sat_level, k=6.0, ratio=0.15, spread=5.0, read_noise=Non
     # Noise per Bayer offset, MEASURED against level rather than fitted: the
     # spread of d in bins of equal population, interpolated. A photon+read
     # line fitted over the whole range came out with a negative intercept on a
-    # test-set frame (fine structure adds variance faster than the level) and
+    # long-focal-length frame (fine structure adds variance faster than the level) and
     # put sigma at a third of the truth in the dark sky -- 11 000 false hits.
     sig = np.empty_like(b)
     for oy in (0, 1):

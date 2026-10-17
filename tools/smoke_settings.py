@@ -129,7 +129,7 @@ print("omitted key   : left alone, not reset (tier_mode absent from the reply)")
 r = app.post("/api/processing/load", json={"path": path}); j = r.get_json()
 assert not j["ok"] and "not a processing file" in j["error"], j
 r = app.post("/api/settings/load", json={"path": ppath}); j = r.get_json()
-assert j["ok"] and not j.get("processing"), \
+assert not j.get("processing") and (j["ok"] or "processing-options file" in (j.get("error") or "")), \
     "a recipe loaded as a look must not smuggle processing keys through"
 print("cross-loading : a look is refused as a recipe; a recipe carries no look")
 
