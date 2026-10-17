@@ -1,0 +1,27 @@
+# The README carried "version 0.22.13" while the package was at 0.22.28 --
+# fifteen releases of drift, spotted by a user on GitHub rather than by us.
+# pyproject.toml already reads the version from src/eclipseforgehdr/__init__.py,
+# so that file is the single source of truth and the README is the only place
+# that repeats it. This makes repeating it safe.
+name: version consistency
+on: [push, pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: README version must match __init__.py
+        run: |
+          python - <<'EOF'
+          import re, sys, pathlib
+          v = re.search(r'__version__ = "([^"]+)"',
+                        pathlib.Path("src/eclipseforgehdr/__init__.py").read_text()).group(1)
+          readme = pathlib.Path("README.md").read_text()
+          m = re.search(r"version ([0-9]+\.[0-9]+\.[0-9]+)", readme)
+          if not m:
+              sys.exit("README.md has no 'version X.Y.Z' line to check")
+          if m.group(1) != v:
+              sys.exit(f"README.md says {m.group(1)} but "
+                       f"src/eclipseforgehdr/__init__.py says {v}")
+          print(f"ok: both say {v}")
+          EOF
