@@ -3,6 +3,7 @@ from __future__ import annotations
 import os, sys, json
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 from scipy.special import erf
 from PIL import Image
 
@@ -78,7 +79,8 @@ DEFAULTS = {
     "promLight": 0.8,
     # THE STAR LAYER (stars.py, lab 0.25.1): stars found in the stack, lifted
     # out of the corona and laid back over the finished picture.
-    #   starStrength  1 = about as bright as in the stack, 0 = starless
+    #   starStrength  1 = as bright as in the stack, above 1 brighter; the page
+    #                 does not go below 1 (the stars are part of the stack)
     #   starColour    the stars' measured colour, 0 = white, 1 = as measured
     "starStrength": 1.0, "starColour": 1.0,
     # THE INNER DETAIL LAYER (detail.build_inner_detail): loops and fine
@@ -180,7 +182,13 @@ DEFAULTS = {
     # the picked colours). promHue*: the prominence colour used in mode 2.
     # promPeak: the prominences' brightest channel is held to this (1 = off).
     "colourMode": 0, "promHueR": 1.0, "promHueG": 0.70, "promHueB": 0.75, "promPeak": 1.0,
+    # coronaHue*: the corona's tint in mode 2 (2026-10-18). In place of the
+    # measured chroma the bright corona takes this colour and the faint
+    # corona and the sky take the Sky colour, blended by brightness between
+    # TINT_GRADE (stage luminance); white = grey.
+    "coronaHueR": 1.0, "coronaHueG": 1.0, "coronaHueB": 1.0,
 }
+TINT_GRADE = (0.10, 0.30)
 
 # An IMPORTED image has already been through somebody's colour management --
 # that is what makes it an import rather than a stack -- so `temp` and `tint`
@@ -506,7 +514,7 @@ class Layers:
         pel = np.load(pelp) if os.path.exists(pelp) else np.full(lum.shape, 0.5, np.float32)
         from .pipeline import load_big
         hdr = load_big(os.path.join(wd, _plm.CORONA_RGB if _use_corona else "hdr_rgb.npy"))
-        Ls = ndimage.gaussian_filter(lum, 6)
+        Ls = _pgauss(lum, 6)
         # Colour is only meaningful where something was actually detected.
         #
         # The divisor used to be floored at a literal 1e-3 in linear luminance
@@ -569,7 +577,7 @@ class Layers:
         self.colour_fade_to = _fade_to
         ratio = np.empty(lum.shape + (3,), np.float32)
         for c in range(3):
-            rc = ndimage.gaussian_filter(
+            rc = _pgauss(
                 np.ascontiguousarray(hdr[:, :, c]), 6) / np.maximum(Ls, _floor)
             ratio[:, :, c] = _fade_to[c] + _conf * (rc - _fade_to[c])
             del rc
@@ -785,8 +793,8 @@ class Layers:
         for key in (("mgn", "fnrgf") + (("nafe",) if self.has_nafe else ())
                     + (("mgn_fine",) if self.has_mgn_fine else ())):
             f = _fill_disc(self.prev[key], self.cy / q, self.cx / q, self.Rmask / q)
-            self.prev[key + "_lo"] = ndimage.gaussian_filter(f, 8.0 / q * 2)
-            self.prev[key + "_sm"] = ndimage.gaussian_filter(f, 0.6)
+            self.prev[key + "_lo"] = _pgauss(f, 8.0 / q * 2)
+            self.prev[key + "_sm"] = _pgauss(f, 0.6)
             del f
         self.prev_decim = q
         # THE 0.24 PROMINENCE LAYER: its maps on the disc box at full resolution
@@ -1074,9 +1082,9 @@ def _variant(src, key, kind, preview):
     sigma = 16.0 if kind == "lo" else 0.6 * 4   # full-res equivalents
     g = _geom_for_fill.get("g")
     if g is not None:
-        out = ndimage.gaussian_filter(_fill_disc(src[key], *g), sigma)
+        out = _pgauss(_fill_disc(src[key], *g), sigma)
     else:
-        out = ndimage.gaussian_filter(src[key], sigma)
+        out = _pgauss(src[key], sigma)
     # CACHED on the full-res dict (audit 2026-10-10): the export rebuilt the six
     # variants from scratch every time, ~21 s of parameter-independent blurs.
     # 174 MB each; only the ones a render actually asks for are kept.
@@ -1305,6 +1313,23 @@ def look_chroma(t, base=None):
     return (c / (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])).astype(np.float32)
 
 
+def mono_tint(P, Y):
+    """Mode 2: unit-luminance chroma per pixel, the Sky colour in the dark
+    (sky, faint corona) grading into the Corona colour in the bright corona.
+    Y is the stage luminance before the highlight knee, clamped to 0-1."""
+    def _n(keys, dflt):
+        h = np.clip(np.array([float(P.get(k, d)) for k, d in zip(keys, dflt)], np.float64), 0.02, 1.0)
+        return np.log(h / (0.2126 * h[0] + 0.7152 * h[1] + 0.0722 * h[2])).astype(np.float32)
+    ls = _n(("skyHueR", "skyHueG", "skyHueB"), (0.579, 0.756, 1.0))
+    lc = _n(("coronaHueR", "coronaHueG", "coronaHueB"), (1.0, 1.0, 1.0))
+    y0, y1 = TINT_GRADE
+    g = np.clip((np.asarray(Y, np.float32) - y0) / (y1 - y0), 0.0, 1.0)
+    g = g * g * (3.0 - 2.0 * g)
+    t = np.exp((1.0 - g)[:, :, None] * ls[None, None, :] + g[:, :, None] * lc[None, None, :])
+    tl = 0.2126 * t[:, :, 0] + 0.7152 * t[:, :, 1] + 0.0722 * t[:, :, 2]
+    return (t / np.maximum(tl, 1e-6)[:, :, None]).astype(np.float32)
+
+
 def sky_base(P):
     """The sky lift's direction from the picked colour (display RGB), green as
     the reference channel; the default pick is LOOK_BLUE / 1.323, the old axis."""
@@ -1459,7 +1484,7 @@ def _noise_response(radii):
     band to the other bands"""
     rng = np.random.default_rng(7)
     n = rng.standard_normal((256, 256)).astype(np.float32)
-    g = [ndimage.gaussian_filter(n, s) for s in radii]
+    g = [_pgauss(n, s) for s in radii]
     out = [float((n - g[0]).std())]
     for i in range(1, len(radii)):
         out.append(float((g[i - 1] - g[i]).std()))
@@ -1485,12 +1510,12 @@ def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_row
     # the noise amplitude of the finest band, per tile, smoothed, back on the grid
     sig = None
     if k > 0:
-        b1 = Y - ndimage.gaussian_filter(Y, radii[0])
+        b1 = Y - _pgauss(Y, radii[0])
         ty, tx = max(H // tile, 1), max(W // tile, 1)
         bt = b1[:ty * tile, :tx * tile].reshape(ty, tile, tx, tile)
         s = 1.4826 * np.median(np.abs(bt), axis=(1, 3)).astype(np.float32)
         del b1, bt
-        s = ndimage.gaussian_filter(s, 1.0)
+        s = _pgauss(s, 1.0)
         sig = ndimage.zoom(s, (H / s.shape[0], W / s.shape[1]), order=1).astype(np.float32)
         sig = sig[:H, :W]
         if sig.shape != (H, W):
@@ -1506,7 +1531,7 @@ def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_row
             gates = []
             prev = Yb
             for i, s in enumerate(radii):
-                cur = ndimage.gaussian_filter(Yb, s)
+                cur = _pgauss(Yb, s)
                 gates.append(erf(np.abs(prev - cur) / np.maximum(k * FINAL_GATE[i] * resp[i] * sig[a0:a1], 1e-6)).astype(np.float32))
                 prev = cur
             del prev, cur
@@ -1514,7 +1539,7 @@ def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_row
         for c in range(3):
             prev = blk[:, :, c]; acc = np.zeros(prev.shape, np.float32)
             for i, s in enumerate(radii):
-                cur = ndimage.gaussian_filter(blk[:, :, c], s)
+                cur = _pgauss(blk[:, :, c], s)
                 band = prev - cur
                 if gates is not None:
                     band = band * gates[i]
@@ -1566,7 +1591,7 @@ def structure_boost(rgb, cy, cx, R, s, pin=None):
     lm = l * m
     del l
     s1, s2 = max(STRUCT_R[0] * R, 0.5), max(STRUCT_R[1] * R, 1.0)
-    band = (ndimage.gaussian_filter(lm, s1) / np.maximum(ndimage.gaussian_filter(m, s1), 1e-4)).astype(np.float32)
+    band = (_pgauss(lm, s1) / np.maximum(_pgauss(m, s1), 1e-4)).astype(np.float32)
     # the wide blur on a block-averaged copy (sigma 49 px at full size), then
     # back up: the same field to ~1e-3, a fraction of the time and memory
     q = int(s2 // 6) if s2 > 12 else 1
@@ -1575,7 +1600,7 @@ def structure_boost(rgb, cy, cx, R, s, pin=None):
         def _dn(a):
             p = np.pad(a, ((0, H2 * q - H), (0, W2 * q - W)), mode="edge")
             return p.reshape(H2, q, W2, q).mean((1, 3)).astype(np.float32)
-        lo = ndimage.gaussian_filter(_dn(lm), s2 / q) / np.maximum(ndimage.gaussian_filter(_dn(m), s2 / q), 1e-4)
+        lo = _pgauss(_dn(lm), s2 / q) / np.maximum(_pgauss(_dn(m), s2 / q), 1e-4)
         yi = (np.arange(H, dtype=np.float32) + 0.5) / q - 0.5
         xi = (np.arange(W, dtype=np.float32) + 0.5) / q - 0.5
         for y0 in range(0, H, 1024):
@@ -1584,7 +1609,7 @@ def structure_boost(rgb, cy, cx, R, s, pin=None):
             band[y0:y1] -= ndimage.map_coordinates(lo, [YY, XX], order=1, mode="nearest")
         del lo, YY, XX
     else:
-        band -= (ndimage.gaussian_filter(lm, s2) / np.maximum(ndimage.gaussian_filter(m, s2), 1e-4))
+        band -= (_pgauss(lm, s2) / np.maximum(_pgauss(m, s2), 1e-4))
     del lm
     rb = rp.astype(np.int32)
     sel = m > 0
@@ -2029,6 +2054,8 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     al = (0.2126 * a[:, :, 0] + 0.7152 * a[:, :, 1] + 0.0722 * a[:, :, 2])
     a /= np.maximum(al, 1e-6)[:, :, None]
     del al
+    if int(P.get("colourMode", 0) or 0) == 2:
+        a = a * mono_tint(P, np.clip(Y, 0.0, 1.0))      # mono + tints: sky colour -> corona colour by brightness
     a = a * edge[:, :, None] + (1 - edge)[:, :, None]   # neutral moon disc
     # PROMINENCE STRUCTURE, CARRIED IN COLOUR RATHER THAN BRIGHTNESS.
     #
@@ -2424,3 +2451,4 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
         except Exception:
             pass
     return out_path
+

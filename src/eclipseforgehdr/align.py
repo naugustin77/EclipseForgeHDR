@@ -17,6 +17,7 @@ the prominences.
 from __future__ import annotations
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 
 
 # ---------- enhancement ----------
@@ -25,10 +26,10 @@ def enhance(img, sigma_lo=25.0, sigma_hi=2.0, eps=1e-3):
     """Local-contrast-normalized log image: structure at every brightness is
     brought to comparable amplitude, which is what phase correlation needs."""
     L = np.log1p(np.clip(img, 0, None) / max(float(np.median(np.abs(img))), eps))
-    hp = L - ndimage.gaussian_filter(L, sigma_lo)
-    sc = ndimage.gaussian_filter(np.abs(hp), sigma_lo)
+    hp = L - _pgauss(L, sigma_lo)
+    sc = _pgauss(np.abs(hp), sigma_lo)
     out = hp / np.maximum(sc, np.percentile(sc, 20) + eps)
-    return ndimage.gaussian_filter(out, sigma_hi).astype(np.float32)
+    return _pgauss(out, sigma_hi).astype(np.float32)
 
 
 def signal_coverage(img, sat=None, region=None):
@@ -39,7 +40,7 @@ def signal_coverage(img, sat=None, region=None):
     sub = img if region is None else img[region]
     med = float(np.median(sub))
     sig = 1.4826 * float(np.median(np.abs(sub - med)))
-    good = ndimage.gaussian_filter(sub, 3) > med + 5 * sig
+    good = _pgauss(sub, 3) > med + 5 * sig
     if sat is not None:
         good &= ~(sat if region is None else sat[region])
     return float(good.mean())

@@ -139,9 +139,51 @@ def build(folder, wd):
         frames.append({"name": n, "sec": sec[p], "t": round(t[p], 3),
                        "bracket": int(res["of"].get(p, 0)),
                        "status": status.get(n), "gain": gain.get(n)})
-    return {"ok": True, "n": len(frames), "frames": frames,
+    # THE SHORT EXPOSURES (2026-10-18): the frames kept apart for the
+    # prominence layer belong to the shoot too, often the first frames after
+    # C2. Drawn on the same time axis, own colour, not part of any bracket.
+    n_short = 0
+    if have_t:
+        try:
+            from .pipeline import find_short_dir
+            sd = find_short_dir(folder)
+            if sd:
+                sraws = list_raws(sd)
+                stab = _exif_table(sd, sraws, wd)
+                t0 = min(ep.values())
+                sgrp = {}
+                for p in sraws:
+                    sc, ts = stab.get(os.path.basename(p), (None, None))
+                    e = epoch_of(ts)
+                    if sc and e is not None:
+                        sgrp.setdefault(e, []).append((p, float(sc)))
+                for e, g in sgrp.items():
+                    for i, (p, sc) in enumerate(sorted(g, key=lambda q: _natural(os.path.basename(q[0])))):
+                        frames.append({"name": os.path.basename(p), "sec": sc,
+                                       "t": round((e - t0) + (i + 0.5) / len(g), 3),
+                                       "bracket": -1, "status": "short", "gain": None})
+                        n_short += 1
+                frames.sort(key=lambda f: f["t"])
+        except Exception:
+            pass
+    # C2, mid-totality and C3 at the site, when the site is known (contacts.py)
+    contacts = None
+    if have_t:
+        try:
+            from . import observer as _ob, contacts as _ct
+            site = _ob.load(folder)
+            ct = _ct.shoot_contacts(site, [tab[os.path.basename(p)][1] for p in paths],
+                                    contacts=_ct.contact_stamps(folder, wd))
+            if ct:
+                contacts = {"c2": ct["c2_s"], "mid": ct["mid_s"], "c3": ct["c3_s"],
+                            "duration_s": ct["duration_s"], "clock": _ct.offset_text(ct),
+                            "outside_s": ct.get("outside_s", 0.0),
+                            "contact_c2": ct.get("contact_c2_s"), "contact_c3": ct.get("contact_c3_s")}
+        except Exception:
+            contacts = None
+    return {"ok": True, "n": len(frames) - n_short, "frames": frames,
             "unread": len(raws) - len(paths), "timed": have_t,
             "repeated": bool(res["repeated"]), "n_brackets": int(res["n"]),
             "span_s": res["span_s"], "reason": res.get("reason"),
             "exposures": sorted({float(f"{s:.4g}") for s in sec.values()}),
-            "ran": ran, "t_ref": t_ref, "moon_v": v}
+            "ran": ran, "t_ref": t_ref, "moon_v": v, "contacts": contacts, "n_short": n_short}

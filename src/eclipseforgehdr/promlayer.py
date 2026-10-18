@@ -35,6 +35,7 @@ from __future__ import annotations
 import os, json
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 
 BOX_R = 1.6          # half-size of the saved crop around the disc, in R
 RL_ITERS = 10        # Richardson-Lucy iterations (ten looked best by eye)
@@ -220,8 +221,8 @@ def richardson_lucy(img, sigma, iters=RL_ITERS):
     img = np.maximum(img.astype(np.float32), 1e-6)
     est = img.copy()
     for _ in range(iters):
-        conv = ndimage.gaussian_filter(est, sigma)
-        est *= ndimage.gaussian_filter(img / np.maximum(conv, 1e-6), sigma)
+        conv = _pgauss(est, sigma)
+        est *= _pgauss(img / np.maximum(conv, 1e-6), sigma)
     return est
 
 
@@ -236,7 +237,7 @@ def _sector_affine(E_ref, E_mov, rr, ang, R, nsec=24, patch=96):
     from skimage.registration import phase_cross_correlation
     zone = (rr > 1.0) & (rr < 1.3)
     n, m = _mad(E_ref[zone])
-    sE = ndimage.gaussian_filter(E_ref, 2)
+    sE = _pgauss(E_ref, 2)
     sec = (ang / (360.0 / nsec)).astype(int) % nsec
     h, w = E_ref.shape
     hp = patch // 2
@@ -348,7 +349,7 @@ def _detect(M, kR, rr, ang, R, cy, cx, y0, x0, pG):
     a_m = (M[..., 0] - kR * M[..., 1]) / (1 - kR * pG)
     zz = (rr > 1.03) & (rr < 1.3)
     moon = np.clip((rr * R - (R - 1)) / 2, 0, 1)
-    sm = ndimage.gaussian_filter(a_m, 1.5)
+    sm = _pgauss(a_m, 1.5)
     n_sm, b_sm = _mad(sm[zz]); sig = (sm - b_sm) / n_sm
     # chromosphere band out: polar, background = 30th pct along +-2.5 deg
     NA, NR = 3600, int(300 * q) + 20
@@ -375,7 +376,7 @@ def _detect(M, kR, rr, ang, R, cy, cx, y0, x0, pG):
     keep = np.isin(lab, 1 + np.flatnonzero(sz >= minpx))
     nprom = int((sz >= minpx).sum())
     ramp = _ss(np.clip((resxy - 6) / 14, 0, 1))
-    alpha_soft = ndimage.gaussian_filter(ramp * ndimage.binary_dilation(keep, iterations=3), 1.0) * moon
+    alpha_soft = _pgauss(ramp * ndimage.binary_dilation(keep, iterations=3), 1.0) * moon
     return sig, resxy, keep, ramp, alpha_soft, nprom, a_m
 
 
@@ -410,33 +411,33 @@ def build_layer(wd, geo, log=print):
             have_stack = False
     if have_stack:
         kS = corona_ratio(S, rr, ang)
-        a_s = ndimage.gaussian_filter((S[..., 0] - kS * S[..., 1]) / (1 - kS * pG), 0.8)
+        a_s = _pgauss((S[..., 0] - kS * S[..., 1]) / (1 - kS * pG), 0.8)
         n_s, b_s = _mad(a_s[zz]); a_s = np.clip(a_s - b_s, 0, None)
         # same units as the merge: compare both smoothed to the merge's blur
         pr = keep & (rr > 1.0)
         if pr.sum() > 50:
-            g1 = ndimage.gaussian_filter(a_s, 4)[pr]; g2 = ndimage.gaussian_filter(am, 4)[pr]
+            g1 = _pgauss(a_s, 4)[pr]; g2 = _pgauss(am, 4)[pr]
             scale = float(np.median(g2 / np.maximum(g1, 1e-9)))
             if np.isfinite(scale) and 0.2 < scale < 5:
                 a_s *= scale; n_s *= scale
-        wt = np.clip((ndimage.gaussian_filter(a_s, 2) / n_s - 20) / 40, 0, 1)
+        wt = np.clip((_pgauss(a_s, 2) / n_s - 20) / 40, 0, 1)
         amt = wt * a_s + (1 - wt) * am
-        shape = ndimage.gaussian_filter(a_s, 1.2)
+        shape = _pgauss(a_s, 1.2)
     else:
         amt = am
-        shape = ndimage.gaussian_filter(am, 1.2)
+        shape = _pgauss(am, 1.2)
     # --- tight edge, relative to each prominence's own peak ---
     gate = ndimage.binary_dilation(keep, iterations=4)
     lpk = ndimage.maximum_filter(np.where(gate, shape, 0), size=int(41 * q) | 1)
     rel = np.where(lpk > 0, shape / np.maximum(lpk, 1e-12), 0)
     tr = _ss(np.clip((rel - 0.12) / (0.35 - 0.12), 0, 1))
-    alpha_t = ndimage.gaussian_filter(tr * gate * np.clip(ramp * 1.5, 0, 1), 0.7) * moon
+    alpha_t = _pgauss(tr * gate * np.clip(ramp * 1.5, 0, 1), 0.7) * moon
     # prominences that rise well above the band keep the soft mask whole: their
     # faint inner parts sit far below their bright core
     lab2, k2 = ndimage.label(ndimage.binary_dilation(keep, iterations=4))
     if k2:
         mxh = ndimage.maximum(np.where(rr > 1, hgt, 0), lab2, range(1, k2 + 1))
-        tallxy = ndimage.gaussian_filter(
+        tallxy = _pgauss(
             np.isin(lab2, 1 + np.flatnonzero(np.asarray(mxh) > 45 * q)).astype(float), 2)
     else:
         tallxy = np.zeros_like(alpha_t)
@@ -602,7 +603,7 @@ def _fit_moon(G, c0, R0):
     """Lunar limb of one frame on a box grid: steepest rise of log G along 360
     rays, circle fit with outlier rejection. Returns (cy, cx, R)."""
     cy, cx = float(c0[0]), float(c0[1])
-    Gs = ndimage.gaussian_filter(np.asarray(G, np.float32), 1.5)
+    Gs = _pgauss(np.asarray(G, np.float32), 1.5)
     # floored well above the noise inside the disc: a log of near-zero noise
     # has the steepest "rise" in the frame (it found R = 585 for 617 without this): a tenth of the inner corona
     _yy = np.arange(Gs.shape[0], dtype=np.float32)[:, None] - np.float32(cy)
@@ -643,7 +644,7 @@ def _red_hp(rgb, kR, moon, R):
     match toward the Moon (correlation 0.2-0.3 against 0.7-0.97 this way, on
     the reference set's short frames)."""
     x = np.clip(rgb[..., 0] - kR * rgb[..., 1], 0, None)
-    x = ndimage.gaussian_filter(x, 1.5) - ndimage.gaussian_filter(x, 12.0)
+    x = _pgauss(x, 1.5) - _pgauss(x, 12.0)
     my, mx, mR = moon
     yy = np.arange(rgb.shape[0], dtype=np.float32)[:, None] - np.float32(my)
     xx = np.arange(rgb.shape[1], dtype=np.float32)[None, :] - np.float32(mx)
@@ -705,7 +706,7 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
     c0 = (cy - y0, cx - x0)
     E_ref = _red_hp(ref, kref, _fit_moon(ref[..., 1], c0, R), R)
     ring = (rr > 1.1) & (rr < 1.4)
-    Gref = ndimage.gaussian_filter(ref[..., 1], 3)
+    Gref = _pgauss(ref[..., 1], 3)
     acc = np.zeros(ref.shape, np.float64); accw = np.zeros(ref.shape[:2], np.float64)
     accwc = np.zeros(ref.shape[:2], np.float64)
     notes = []
@@ -767,7 +768,7 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
             m = ring & (w > 0.99)
             k = 1.0
             if m.sum() > 2000:
-                Gs = ndimage.gaussian_filter(rgb[..., 1], 3)
+                Gs = _pgauss(rgb[..., 1], 3)
                 k = float(np.median(Gref[m] / np.maximum(Gs[m], 1e-12)))
                 if not np.isfinite(k) or not (0.3 < k < 3.0):
                     k = 1.0
@@ -871,7 +872,7 @@ def _fill_core_polar(cor, core, cy, cx, hmap, q=1.0, feather=4.0):
     cols = np.flatnonzero(Pm.any(0)); ja, jb = int(cols.min()), int(cols.max())
     nwin = max(3, int(round(win / dt)))
     sm = 6.0 * q / 0.5                       # 6q px in grid samples
-    Ps = ndimage.gaussian_filter(P, (sm, sm, 0))
+    Ps = _pgauss(P, (sm, sm, 0))
     # A: per circle, interpolation across [ja, jb] from the windows beside it
     A = Ps.copy()
     # from the SMOOTHED corona: the texture T below carries the rest, so the
@@ -895,7 +896,7 @@ def _fill_core_polar(cor, core, cy, cx, hmap, q=1.0, feather=4.0):
     vals = np.stack([np.exp(ndimage.map_coordinates(F[..., k], [fi, fj], order=1, mode="nearest")) for k in range(C)], -1)
     vals = np.minimum(vals, _hi[None, :])
     filled = np.zeros_like(cor); filled[yh, xh] = vals
-    wc = np.clip(ndimage.gaussian_filter(core.astype(np.float64), feather * q) * 2.0, 0, 1)
+    wc = np.clip(_pgauss(core.astype(np.float64), feather * q) * 2.0, 0, 1)
     wc = np.maximum(wc, core.astype(float)); wc[~hole] = 0.0
     wc = wc * wc * (3 - 2 * wc)
     return cor * (1 - wc[..., None]) + filled * wc[..., None], wc
@@ -938,17 +939,17 @@ def clean_corona(wd, geo, progress=None):
     # inside the prominence patches (feathered), where it carries the
     # prominence's own detail.
     _sm = max(2.0, 4.0 * q)
-    a_lo = ndimage.gaussian_filter(a, _sm)
+    a_lo = _pgauss(a, _sm)
     _sh0 = np.clip(_lum(a[..., None] * p[None, None, :]) / np.maximum(_lum(M), 1e-12), 0, 1)
-    _pm = ndimage.gaussian_filter(_sh0, max(1.0, 2.0 * q)) > 0.03
+    _pm = _pgauss(_sh0, max(1.0, 2.0 * q)) > 0.03
     _pm = ndimage.binary_dilation(_pm, iterations=int(round(4 * q)) or 1)
-    _pw = ndimage.gaussian_filter(_pm.astype(np.float64), max(1.5, 3.0 * q))
+    _pw = _pgauss(_pm.astype(np.float64), max(1.5, 3.0 * q))
     a = a_lo + (a - a_lo) * np.clip(_pw, 0.0, 1.0)
     del a_lo, _sh0, _pm, _pw
     prom = a[..., None] * p[None, None, :]
     cor = M - prom
     share = np.clip(_lum(prom) / np.maximum(_lum(M), 1e-12), 0, 1)
-    core = ndimage.gaussian_filter(share, 1.0) > 0.4
+    core = _pgauss(share, 1.0) > 0.4
     lab, n = ndimage.label(core)
     if n:
         sz = ndimage.sum(core, lab, range(1, n + 1))
@@ -1106,8 +1107,8 @@ def build_light(wd, geo, progress=None):
     # smoothed amplitude so the edge is not decided pixel by pixel
     GSM = 2.0
     hb = np.clip(np.round(h).astype(np.int32) + 20, 0, 4000)
-    asm = ndimage.gaussian_filter(a, GSM)
-    dev = a - ndimage.gaussian_filter(a, 6.0)
+    asm = _pgauss(a, GSM)
+    dev = a - _pgauss(a, 6.0)
     sig = np.zeros(4001)
     zone = cov & (h > -10) & (h < 1500)
     order = np.argsort(hb[zone], kind="stable"); hs = hb[zone][order]; vs = dev[zone][order]
@@ -1128,8 +1129,8 @@ def build_light(wd, geo, progress=None):
     # ring's sigma and the local one (mean |deviation|, clipped at 4 ring
     # sigma so prominence structure does not raise its own threshold).
     _ad = np.minimum(np.abs(dev), 4.0 * sg)
-    sg = np.maximum(sg, 1.2533 * ndimage.gaussian_filter(np.where(cov, _ad, 0.0), LOCAL_SIG_PX * q)
-                    / np.maximum(ndimage.gaussian_filter(cov.astype(np.float64), LOCAL_SIG_PX * q), 1e-6))
+    sg = np.maximum(sg, 1.2533 * _pgauss(np.where(cov, _ad, 0.0), LOCAL_SIG_PX * q)
+                    / np.maximum(_pgauss(cov.astype(np.float64), LOCAL_SIG_PX * q), 1e-6))
     del _ad
     # SATURATED CORES (2026-10-07, one test set). Pixels saturated in
     # every short frame have no coverage and came out as zero, so the large
@@ -1220,13 +1221,13 @@ def build_light(wd, geo, progress=None):
             a[m] = _fl[m]
             nfill += int(m.sum())
         if nfill:
-            asm = ndimage.gaussian_filter(a, GSM)
+            asm = _pgauss(a, GSM)
             log(f"[odd] prominence layer: {nfill} px saturated in every short frame, filled from the rim (lower bound)")
     # sigma of the smoothed map, MEASURED on the prominence-free deviations
     # rather than assumed as sg / GSM (audit A11)
     _cl = cov & (np.abs(dev) < 3.0 * sg)
-    _dsm = ndimage.gaussian_filter(np.where(_cl, dev, 0.0), GSM) \
-        / np.maximum(ndimage.gaussian_filter(_cl.astype(np.float64), GSM), 1e-6)
+    _dsm = _pgauss(np.where(_cl, dev, 0.0), GSM) \
+        / np.maximum(_pgauss(_cl.astype(np.float64), GSM), 1e-6)
     _r0 = 1.4826 * float(np.median(np.abs(dev[_cl] - np.median(dev[_cl])))) + 1e-12
     _r1 = 1.4826 * float(np.median(np.abs(_dsm[_cl] - np.median(_dsm[_cl])))) + 1e-12
     _sm_ratio = float(np.clip(_r1 / _r0, 0.05, 1.0)) if _cl.sum() > 1000 else 1.0 / (2.0 * GSM)
@@ -1239,14 +1240,14 @@ def build_light(wd, geo, progress=None):
     if n:
         szs = ndimage.sum(np.ones_like(z), lab, range(1, n + 1))
         keep = np.isin(lab, 1 + np.flatnonzero(szs >= 15 * q * q))
-        z = z * ndimage.gaussian_filter(ndimage.binary_dilation(keep, iterations=3).astype(float), 1.0)
+        z = z * _pgauss(ndimage.binary_dilation(keep, iterations=3).astype(float), 1.0)
     # THE FRINGE: bright structure keeps its own pixels; where the light is a few
     # sigma only, it is taken from a smoothed copy, so the edge fades instead of
     # breaking into grain
     snr = a / sg
     wsh = np.clip((snr - 3.0) / 5.0, 0, 1); wsh = wsh * wsh * (3 - 2 * wsh)
-    a = wsh * a + (1 - wsh) * ndimage.gaussian_filter(a, 1.5)
-    a = np.clip(a, 0, None) * np.clip(ndimage.gaussian_filter(z, 1.5), 0, 1)
+    a = wsh * a + (1 - wsh) * _pgauss(a, 1.5)
+    a = np.clip(a, 0, None) * np.clip(_pgauss(z, 1.5), 0, 1)
     # DETACHED FAINT PIECES (2026-10-07): a piece (light above 0.1% of the
     # prominence light near the limb) that starts more than 0.05 R above the
     # limb and peaks below 5% of it is corona colour noise, not a prominence
@@ -1311,7 +1312,7 @@ def display_maps(wd, geo):
         promm = np.isin(lab, 1 + np.flatnonzero(np.asarray(reach) > RIMH))
     else:
         promm = np.zeros(on.shape, bool)
-    promw = np.clip(ndimage.gaussian_filter(ndimage.binary_dilation(promm, iterations=2)
+    promw = np.clip(_pgauss(ndimage.binary_dilation(promm, iterations=2)
                                             .astype(np.float32), 1.5) * 1.5, 0, 1)
     band = np.clip((RIMH + 3 - h) / 4.0, 0, 1); band = band * band * (3 - 2 * band)
     rimw = (1 - promw) * band
@@ -1334,7 +1335,7 @@ def display_maps(wd, geo):
         pass
     rr_ = max(float(np.percentile(rem[sel], 99.97)) if sel.any() else 0.0, 1e-30)
     remw = np.clip(np.sqrt(np.clip(rem / rr_, 0, None)) * 1.5, 0, 1) * deep
-    F = np.clip(ndimage.gaussian_filter(np.maximum(np.maximum(alpha, afd), remw), 2.0) * 2.0, 0, 1)
+    F = np.clip(_pgauss(np.maximum(np.maximum(alpha, afd), remw), 2.0) * 2.0, 0, 1)
     return (y0, y1, x0, x1), {"L": Ln, "C": ch.astype(np.float32), "W1": W1.astype(np.float32),
                               "W2": W2.astype(np.float32), "F": F.astype(np.float32)}
 

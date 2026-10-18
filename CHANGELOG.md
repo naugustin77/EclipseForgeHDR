@@ -5,6 +5,61 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.29.0
+
+**Caches from 0.28.0 stay valid**; the stars are checked again on the next
+Start (stars build 8).
+
+**Speed**
+- **Stacking on several processor cores:** the raw frames of a tier are decoded
+  in parallel, the long-exposure hot-pixel test runs per frame in parallel, the
+  next tier is demosaiced and shifted while the current one is merged, and
+  every Gaussian filter of the stack and the layers runs in row or column
+  strips on several threads. Results are bit-identical; on a 41-frame test set
+  the run went from 16 to 12 minutes. `ECLIPSEFORGE_THREADS` sets the number of
+  threads (default: the processor cores, for the steps that hold a tier each at
+  most 4 and at most one per 8 GB of memory; the filters use up to 8).
+- **Time estimate:** "finishing" only past 97 % of the bar; once the profile of
+  the previous run is used up, the remaining time is paced on the current run.
+
+**Contacts and the camera clock**
+- With the observing site entered, second and third contact and mid-totality
+  are computed at the site. The camera clock is set from the contact frames in
+  a subfolder named with `diamond`, `ring`, `bead` or `contact` (the last frame
+  before the bracket is C2, the first after it C3); without them, from a
+  whole-hour search, with a warning when frames fall more than 10 s outside
+  the predicted totality.
+- Repeated brackets: the Moon of every tier is placed at mid-totality when the
+  shoot spans it, else at the middle of the shoot.
+- Shooting timeline: C2, C3, mid-totality, the contact frames and the short
+  exposures are drawn on the time axis. Report line *totality*.
+- The log gives the Moon's rate from the eclipse elements next to the measured
+  one.
+
+**Stars**
+- Catalogue to magnitude 10: 61,282 stars (18,944 Hipparcos, 42,338 Tycho).
+  `tools/build_star_catalogue.py --mag` sets the limit.
+- The match is still found and ranked on the stars to 8.5. Afterwards the
+  remaining candidates are matched to the stars 8.5–10, but only down to the
+  depth of the picture: the first catalogue star on open sky with no signal at
+  its place sets it. A candidate on a fainter star is not confirmed. In tests
+  0.3 % of random candidates were confirmed by chance, none below the depth.
+- An unmatched candidate estimated brighter than magnitude 9 (was 7.5) is not
+  used.
+- **Star gain** runs from 1 (as in the stack) to 10; a saved value below 1
+  loads as 1.
+
+**Colour**
+- **Mono + tints: Corona colour.** The bright corona takes the picked colour
+  and blends outwards by brightness into the Sky colour, which now tints the
+  faint corona and the sky without the sky lift. White for both gives the
+  previous grey rendering exactly.
+- **Sky lift colour** runs from 0 (grey) to 2.5; the negative side (the
+  opposite of the Sky colour) is gone, a saved negative value loads as 0.
+
+**Documentation**
+- README chapters *Folder layout* and *Repeated brackets*.
+
 ## 0.28.0
 
 **Caches from 0.27.0 are re-stacked once**: the stack changed for repeated

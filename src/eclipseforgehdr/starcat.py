@@ -5,7 +5,7 @@ that the search could only call "possible" is confirmed when a catalogue star
 sits exactly there, and a "star" that matches nothing keeps its class but says
 so. Nothing here needs a location or an exact clock:
 
-  * the catalogue (CAT_FILE) is every star to mag 8.5 within 12 deg of the
+  * the catalogue (CAT_FILE) is every star to mag 10 within 12 deg of the
     ecliptic -- the Sun is always on it -- J2000 positions with proper motion,
     built by tools/build_star_catalogue.py from the CDS files of the
     Hipparcos and Tycho catalogues (ESA 1997, I/239), with HD numbers from
@@ -43,7 +43,15 @@ D2R = np.pi / 180.0
 SD_RANGE = (14.6 / 60.0, 17.0 / 60.0)    # lunar semi-diameter at a total eclipse, deg
 CLOCK_SPAN_H = 14.0
 MAG_PAIRS = 8.0                           # catalogue stars that may seed a hypothesis
-MAG_SCORE = 8.5
+MAG_SCORE = 8.5                           # ... and that score a hypothesis
+# lab 0.28.1 (2026-10-18): the catalogue goes to V 10 (61k stars), but the
+# solution is still found and ranked on the stars to MAG_SCORE, so that the
+# denser faint catalogue cannot add chance alignments; only once the solution
+# is chosen, the remaining detections are matched to the stars to MAG_CONFIRM
+# at the fit tolerance. A detection that the search could only call "faint"
+# or "possible" is kept when a catalogue star sits under it; the long high
+# eclipses that reach past mag 8.5 are what this is for.
+MAG_CONFIRM = 10.0
 LINE_TOL_R = 0.25                         # Sun to the ecliptic line through the Moon, lunar radii
 # Two stars are enough when the place and time are given (lab 0.25.1,
 # 2026-10-10): the pair fixes scale, rotation and offset exactly, and is
@@ -380,8 +388,49 @@ def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     rot = np.angle(a)
     best = (None, None, None, None, mir)
     S = np.conj(sky) if best[4] else sky
+    # CONFIRMATION PASS: the solution stands; the detections it did not use
+    # are now tried against the catalogue to MAG_CONFIRM, nearest star within
+    # the fit tolerance, each catalogue star at most once
+    faint_cat = np.flatnonzero((mag > MAG_SCORE) & (mag <= MAG_CONFIRM))
+    confirm_lim, confirm_miss = MAG_CONFIRM, None
+    if len(faint_cat):
+        P = a * S[faint_cat] + b
+        used = set(pr.values())
+        free = [i for i in range(len(D)) if i not in pr]
+        # HOW DEEP THE PICTURE GOES: the same logic as missed() above, now for
+        # the faint stars. Walk the catalogue stars the solution puts on open
+        # sky (inside the frame's margins, clear of the corona) from bright
+        # to faint; the first one with no signal at its place sets the limit.
+        # A candidate on a star fainter than that is not confirmed: if a
+        # mag-9.2 star left nothing in the stack, a detection on a mag-9.8
+        # star is noise that happens to sit there (2026-10-18).
+        py, px = cy - P.imag, cx + P.real
+        m = 0.06 * min(H, W)
+        ins = (px > m) & (px < W - m) & (py > m) & (py < H - m) & (np.abs(P) > 1.6 * R)
+        for q in np.argsort(mag[faint_cat]):
+            if not ins[q]:
+                continue
+            seen = zfun is not None and zfun(py[q], px[q]) >= 3.0
+            if not seen and len(D):
+                seen = bool(np.min(np.abs(D - P[q])) < (tol_fit.max() if np.ndim(tol_fit) else tol_fit))
+            if not seen:
+                confirm_miss = float(mag[faint_cat[q]])
+                confirm_lim = min(MAG_CONFIRM, confirm_miss + 0.3)
+                break
+        if free:
+            dist = np.abs(D[free][:, None] - P[None, :])
+            j = np.argmin(dist, axis=1)
+            dmin = dist[np.arange(len(free)), j]
+            for q in np.argsort(dmin):
+                i = free[q]
+                c = int(faint_cat[j[q]])
+                if dmin[q] < tol_fit[i] and c not in used and mag[c] <= confirm_lim:
+                    used.add(c); pr[int(i)] = c
     resid = {i: float(abs(D[i] - (a * S[c] + b))) for i, c in pr.items()}
-    out = {"ambiguous": False, "matches": len(pr), "mirror": bool(best[4]), "score": float(sc),
+    out = {"ambiguous": False, "matches": nmatch, "confirmed_faint": len(pr) - nmatch,
+           "confirm_limit_mag": round(float(confirm_lim), 2),
+           "confirm_missing_mag": (round(confirm_miss, 2) if confirm_miss is not None else None),
+           "mirror": bool(best[4]), "score": float(sc),
            "scale_px_per_deg": float(abs(a)), "arcsec_per_px": float(3600.0 / abs(a)),
            "rotation_deg": float(np.degrees(rot)),
            "moon_sd_arcmin": float(R / abs(a) * 60.0),

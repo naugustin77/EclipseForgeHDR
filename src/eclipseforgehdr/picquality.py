@@ -14,6 +14,7 @@ here from first principles rather than copied.
 """
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 
 OK, CHECK, BAD = "ok", "check", "bad"
 
@@ -105,7 +106,7 @@ def grade(rgb, cy, cx, R, Rmask=None):
     if rs.size > 10:
         th = np.radians(np.arange(nth) + 0.5)
         py = cyb + np.outer(np.sin(th), rs * Rb); px = cxb + np.outer(np.cos(th), rs * Rb)
-        P = ndimage.map_coordinates(ndimage.gaussian_filter(Y, 1.0), [py, px], order=1, mode="nearest")
+        P = ndimage.map_coordinates(_pgauss(Y, 1.0), [py, px], order=1, mode="nearest")
         Gp = ndimage.map_coordinates(sm[..., 1], [py, px], order=1, mode="nearest")
         Rp = ndimage.map_coordinates(sm[..., 0], [py, px], order=1, mode="nearest")
         red = Rp > 1.25 * np.maximum(Gp, 1e-4)
@@ -224,7 +225,7 @@ def grade(rgb, cy, cx, R, Rmask=None):
     # ---- detail (acutance): fine structure at 1.3-2 R, log Y high-pass at R/150 scales
     s = Rb / 150.0
     Lg = np.log(np.maximum(Y, 1e-3))
-    hpd = ndimage.gaussian_filter(Lg, 1 * s) - ndimage.gaussian_filter(Lg, 8 * s)
+    hpd = _pgauss(Lg, 1 * s) - _pgauss(Lg, 8 * s)
     m = (rr > 1.3) & (rr < 2.0)
     if m.sum() > 500:
         d = float(np.std(hpd[m]))

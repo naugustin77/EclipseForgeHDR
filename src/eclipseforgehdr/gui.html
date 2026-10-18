@@ -492,7 +492,7 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
           <option value="midnightSilver">Midnight silver</option>
           <option value="goldenHour">Golden hour</option>
         </select></label>
-      <label class="opt" title="Monochrome removes all colour; the composite then exports as a single channel. Mono + tints is a stylized rendering that discards the corona's measured color and replaces it with a chosen tint.">
+      <label class="opt" title="Monochrome removes all colour; the composite then exports as a single channel. Mono + tints is a stylized rendering that discards the corona's measured color and replaces it with chosen tints: the Corona colour in the bright corona blending into the Sky colour outwards, plus the Moon and Prominence colours.">
         <span class="optname">Colour</span>
         <select id="colourmode" class="sel">
           <option value="0" selected>From the data</option>
@@ -628,7 +628,7 @@ const DEFS = [
  ["promSoft","Prominence soft highlights",0,1,0.01,"prom"],
  ["promLight","Prominence brightness (0 = opaque colour)",0,1,0.01,"prom"],
  ["promFade","Calm the corona detail under prominences",0,1,0.01,"prom"],
- ["starStrength","Star gain (0 = no stars, 1 = as shot, >1 = brighter)",0,10,0.01,"stars"],
+ ["starStrength","Star gain (1 = as in the stack, higher = brighter)",1,10,0.01,"stars"],
  ["starColour","Star colour (0 = white, 1 = as measured)",0,2,0.01,"stars"],
  ["temp","Temperature (blue ← → yellow)",0.30,1.84,0.001,"color"],
  ["tint","Tint (green ← → magenta)",0.544,1.84,0.001,"color"],
@@ -637,7 +637,7 @@ const DEFS = [
  ["hlCompress","Highlight compression",0,1,0.01,"color"],
  ["hlDesat","Highlight desaturation",0,0.8,0.01,"color"],
  ["skyLevel","Sky lift (0 = off)",0,0.4,0.005,"color"],
- ["skyColour","Sky lift colour (-1 warm, 0 grey, 1 blue, 2 deep blue)",-1.5,2.5,0.01,"color"],
+ ["skyColour","Sky lift colour strength (0 = grey, 1 = the Sky colour, 2 = deeper)",0,2.5,0.01,"color"],
  ["outGamma","Output gamma",0.8,1.8,0.01,"tone"],
  ["bgBlack","Black point",0,0.12,0.001,"tone"],
  ["coronaLevel","Inner corona level, 1.05-1.15 R (0 = off)",0,0.9,0.005,"tone"],
@@ -764,7 +764,7 @@ function buildSliders(defaults){
   if (k === "bandCoarse") div.title = "How much of the coarse filament texture (6-24 px) the filament detail carries. 1 = as before; lower takes out the blotchy texture next to the limb and keeps the fine filaments.";
   if (k === "bandDetail") div.title = "Lifts filaments and loops size by size, each only as far as its own measured noise allows, so the grain stays down. Full effect at 100 % in the export. Double-click to reset.";
   if (k === "innerDetail") div.title = "Lifts loops and small structure close to the limb, where the stack is cleanest; straight radial rays are held back. Full effect at 100 % in the export, the preview shows it reduced. Double-click to reset.";
-    if (k === "starStrength") div.title = "Brightness of the stars measured in the stack: 0 leaves them out, 1 keeps them as bright as in the stack, above 1 brightens them. Double-click to reset.";
+    if (k === "starStrength") div.title = "Brightness of the stars found in the stack: 1 keeps them as they are in the stack, above 1 brightens them. Double-click to reset.";
     if (k === "starColour") div.title = "Colour of the stars relative to the inner corona; 0 makes them white. Double-click to reset.";
     if (k === "structure") div.title = "Local contrast of the finished picture at the width of the streamers (0.01\u20130.08 R); the preview follows a moment after the slider. Double-click to reset.";
     const el = div.querySelector("input");
@@ -828,7 +828,11 @@ function drawTimeline(){
     for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; return e; };
   while (svg.firstChild) svg.removeChild(svg.firstChild);
   const F = j.frames, padL = 4, padR = 4, top = 13, bot = 3;
-  const t0 = Math.min(...F.map(f => f.t)), t1 = Math.max(...F.map(f => f.t));
+  let t0 = Math.min(...F.map(f => f.t)), t1 = Math.max(...F.map(f => f.t));
+  // with the site known the strip runs over the whole of totality (C2 to C3),
+  // so the shoot is seen in its place; a shoot longer than that keeps its own span
+  const CT = j.contacts || null;
+  if (CT){ t0 = Math.min(t0, CT.c2, CT.contact_c2 ?? t0); t1 = Math.max(t1, CT.c3, CT.contact_c3 ?? t1); }
   const span = Math.max(t1 - t0, 1e-6);
   const X = t => padL + (t - t0) / span * (W - padL - padR);
   const smin = Math.min(...F.map(f => f.sec)), smax = Math.max(...F.map(f => f.sec));
@@ -836,7 +840,7 @@ function drawTimeline(){
   const hOf = s => 5 + (smax > smin ? Math.log(s / smin) / lr : 0.6) * (H - top - bot - 5);
   const bw = Math.max(1.2, Math.min(6, (W - padL - padR) / (F.length * 1.7)));
   const COL = ["#5aa0f0", "#3a76c8"];
-  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d"};
+  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d", short: "#3fb8a6"};
   const MOONC = "#e6e9ee";
   // brackets: alternate shading behind each, number on top
   if (j.repeated){
@@ -854,11 +858,12 @@ function drawTimeline(){
   // FRAMES TOO CLOSE TO SEPARATE (a burst of short exposures within one
   // second) are drawn as one bar with their count on top, the bar split by
   // what happened to them; hover lists them.
-  const why = {excluded: "not stacked (not a totality frame / unreadable)",
+  const why = {short: "short exposure: prominence layer only",
+               excluded: "not stacked (not a totality frame / unreadable)",
                brightness: "left out: brightness more than 15 % off the tier median",
                dropped: "left out by the sharpness cut"};
-  const tip1 = f => `${f.name} · ${tlExp(f.sec)} · +${f.t.toFixed(1)} s` +
-      (j.repeated ? ` · bracket ${f.bracket + 1}` : "") +
+  const tip1 = f => `${f.name} · ${tlExp(f.sec)} · ${f.t >= 0 ? "+" : ""}${f.t.toFixed(1)} s` +
+      (j.repeated && f.bracket >= 0 ? ` · bracket ${f.bracket + 1}` : "") +
       (f.status ? ` · ${why[f.status] || f.status}` : "") +
       (f.gain != null ? (f.status === "brightness"
           ? ` (${Math.round(Math.abs(f.gain - 1) * 100)} % ${f.gain < 1 ? "darker" : "brighter"} than the tier median; cause not known)`
@@ -870,7 +875,7 @@ function drawTimeline(){
       g.push(f);
     else groups.push([f]);
   }
-  const ORDER = ["stacked", "brightness", "dropped", "excluded", null];
+  const ORDER = ["stacked", "short", "brightness", "dropped", "excluded", null];
   for (const g of groups){
     const f0 = g[0], h = hOf(f0.sec);
     const xa = X(f0.t) - bw / 2, xb = X(g[g.length - 1].t) + bw / 2;
@@ -893,11 +898,35 @@ function drawTimeline(){
         "font-size": 8.5, "text-anchor": "middle", "font-family": "ui-monospace,monospace"},
         String(g.length)));
   }
+  if (CT){
+    const CC = "#e8a33d";
+    for (const [tc, lab] of [[CT.c2, "C2"], [CT.c3, "C3"]]){
+      const x = X(tc);
+      const ln = el("line", {x1: x, x2: x, y1: top - 2, y2: H - bot, stroke: CC, "stroke-width": 1, "stroke-dasharray": "3,2"});
+      ln.appendChild(el("title", {}, `${lab} at the site, ${tc >= 0 ? "+" : ""}${tc.toFixed(0)} s from the first frame`));
+      svg.appendChild(ln);
+      svg.appendChild(el("text", {x: lab === "C2" ? x + 2 : x - 14, y: 9, fill: CC, "font-size": 9,
+        "font-family": "ui-monospace,monospace"}, lab));
+    }
+    const xm = X(CT.mid);
+    svg.appendChild(el("line", {x1: xm, x2: xm, y1: top - 2, y2: top + 4, stroke: CC, "stroke-width": 1}));
+    // the contact frames themselves (diamond ring, beads), when the clock came from them
+    for (const [tc, lab] of [[CT.contact_c2, "C2"], [CT.contact_c3, "C3"]]){
+      if (tc == null) continue;
+      const x = X(tc);
+      const tri = el("path", {d: `M${x - 3},${H - bot} L${x + 3},${H - bot} L${x},${H - bot - 5} Z`, fill: CC});
+      tri.appendChild(el("title", {}, `contact frame (${lab}), ${tc >= 0 ? "+" : ""}${tc.toFixed(0)} s from the first frame`));
+      svg.appendChild(tri);
+    }
+  }
   if (j.t_ref != null && j.t_ref >= t0 - 1 && j.t_ref <= t1 + 1){
     const x = X(j.t_ref);
     svg.appendChild(el("line", {x1: x, x2: x, y1: top - 2, y2: H - bot, stroke: MOONC, "stroke-width": 1.5}));
-    svg.appendChild(el("text", {x: Math.min(x + 3, W - 30), y: 9, fill: MOONC, "font-size": 9,
-      "font-family": "ui-monospace,monospace"}, "Moon"));
+    const ml = el("text", {x: Math.min(x + 3, W - 30), y: 9, fill: MOONC, "font-size": 9,
+      "font-family": "ui-monospace,monospace"}, "Moon");
+    ml.appendChild(el("title", {}, `every tier stacked with the Moon of +${j.t_ref.toFixed(0)} s` +
+      (CT && Math.abs(j.t_ref - CT.mid) < 1.5 ? " (mid-totality)" : "")));
+    svg.appendChild(ml);
   }
   // the line underneath
   const ex = j.exposures, cnt = k => F.filter(f => f.status === k).length;
@@ -906,8 +935,11 @@ function drawTimeline(){
     (j.repeated ? `${j.n_brackets} repeated brackets over ${tlDur(j.span_s)}`
                 : `one bracket${j.span_s != null ? " over " + tlDur(j.span_s) : ""}${j.reason ? " (" + j.reason + ")" : ""}`);
   if (!j.timed) s += " · no time stamps: shown in file-name order";
+  if (CT) s += ` · totality ${tlDur(CT.duration_s)} at the site, C2 ${CT.c2 >= 0 ? "+" : ""}${Math.round(CT.c2)} s, C3 +${Math.round(CT.c3)} s from the first ${j.n_short ? "bracket " : ""}frame (${CT.clock})` +
+    (CT.outside_s > 10 ? ` · frames up to ${Math.round(CT.outside_s)} s outside the predicted totality: camera clock or site time off by about that much` : "");
   if (j.unread) s += ` · ${j.unread} without an exposure time`;
   let leg = "";
+  if (j.n_short) leg += `<i style="background:${SC.short}"></i>short exposures ${j.n_short}`;
   if (j.ran){
     leg += `<i style="background:${COL[0]}"></i>stacked ${cnt("stacked")}`;
     if (cnt("brightness")) leg += `<i style="background:${SC.brightness}"></i>brightness off ${cnt("brightness")}`;
@@ -1140,6 +1172,15 @@ function runEstimate(e){
     if (f - f0 > 0.03 && tr - t0 > 8) T = t0 + (tr - t0)*(1 - f0)/(f - f0);
   }
   if (T == null || !isFinite(T)) return null;
+  // A stored run that no longer describes this one (the stacking got faster,
+  // the layers did not; 2026-10-18) runs the estimate out while the pipeline
+  // is still in the middle: never say "finishing" below 97 % of the bar, and
+  // once the stored time is used up, pace the rest on this run's own progress.
+  if (T - e < 5 && f < 0.97){
+    const f0 = RUN_TL.f0 ?? 0, t0 = RUN_TL.t0 ?? 0;
+    const own = (f - f0 > 0.03) ? t0 + (tr - t0)*(1 - f0)/(f - f0) : e/Math.max(f, 0.05);
+    T = Math.max(T, own, e + 6);
+  }
   return {T, left: T - e};
 }
 function runStart(kind){
@@ -1602,6 +1643,7 @@ const RCACHE = {L: null, N: 0, key: "", draft: false};
 function stageKeyA(Q){
   const o = {};
   for (const k of Object.keys(Q).sort()) if (!STAGE_B_KEYS.has(k)) o[k] = Q[k];
+  if ((Q.colourMode|0) === 2) for (const k of ["skyHueR", "skyHueG", "skyHueB"]) o[k] = Q[k];   // the sky colour tints stage A in mono + tints
   return JSON.stringify(o);
 }
 let RENDER_DRAFT = false, RENDER_DRAFT_STEP = 2;
@@ -1797,7 +1839,7 @@ function _stageA(S, y0, y1){
   const {P, N, W, H, DEC, draft, DS, fnMix, detailGain, baseLift, envGamma, radialFlatten, innerMix,
          innerDim, promGain, temp, satur, hlDesat, discLevel, discTrim, earthShine, knee, LOGK, KK, LKN,
          RPROF, BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK} = S;
-  const V0 = S.V0, V1 = S.V1, V2 = S.V2, EGA = S.EG;
+  const V0 = S.V0, V1 = S.V1, V2 = S.V2, EGA = S.EG, CT = S.CT || null;
   const bg=L.bg, rp=L.rprof, ear=L.earth, pr=L.prom, ch=L.ratio, wf=L.wf, rr_=L.r;
   const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
   const HL = [];
@@ -1875,6 +1917,10 @@ function _stageA(S, y0, y1){
         if (satur !== 1){ a0 = Math.pow(a0, satur); a1 = Math.pow(a1, satur); a2 = Math.pow(a2, satur); }
         const alum = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
         a0 /= alum; a1 /= alum; a2 /= alum;
+        if (CT){   // mono + tints: sky colour -> corona colour by brightness -- render.py mono_tint
+          const li = 3*Math.max(0, Math.min(255, Math.round(Y*255)));
+          a0 *= CT[li]; a1 *= CT[li+1]; a2 *= CT[li+2];
+        }
         a0 = a0*eg+(1-eg); a1 = a1*eg+(1-eg); a2 = a2*eg+(1-eg);
         // prominence structure in green/blue -- see render.py
         if (P.promChroma !== 0 && L.promdet){
@@ -2435,6 +2481,7 @@ function renderNow(){
                   fnMix, detailGain, baseLift, envGamma, radialFlatten, innerMix, innerDim, promGain,
                   temp, satur, hlDesat, discLevel, discTrim, earthShine, knee, LOGK, KK, LKN, RPROF,
                   BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK,
+                  CT: ((P.colourMode|0) === 2) ? monoTintLut(P) : null,
                   V0: C.V0, V1: C.V1, V2: C.V2, EG: C.EG};
       _parRun("A", SA);
       C.L = L; C.N = N; C.key = keyA; C.draft = RENDER_DRAFT;
@@ -2529,6 +2576,23 @@ function skyBase(P){
 function moonBase(P){
   const h = [P.moonHueR ?? 0.579, P.moonHueG ?? 0.756, P.moonHueB ?? 1.0].map(v => Math.min(1, Math.max(0.02, +v)));
   return h.map(v => v/h[1]);
+}
+// mono + tints -- render.py mono_tint: a 256-entry table over the stage
+// luminance of unit-luminance chroma, the Sky colour in the dark grading into
+// the Corona colour in the bright corona between TINT_GRADE
+const TINT_GRADE = [0.10, 0.30];
+function monoTintLut(P){
+  const nrm = h => { h = h.map(v => Math.min(1, Math.max(0.02, +v))); const l = 0.2126*h[0] + 0.7152*h[1] + 0.0722*h[2]; return h.map(v => Math.log(v/l)); };
+  const ls = nrm([P.skyHueR ?? 0.579, P.skyHueG ?? 0.756, P.skyHueB ?? 1.0]);
+  const lc = nrm([P.coronaHueR ?? 1, P.coronaHueG ?? 1, P.coronaHueB ?? 1]);
+  const T = new Float32Array(256*3);
+  for (let i = 0; i < 256; i++){
+    let g = Math.min(1, Math.max(0, (i/255 - TINT_GRADE[0])/(TINT_GRADE[1] - TINT_GRADE[0]))); g = g*g*(3 - 2*g);
+    const t = [0,1,2].map(c => Math.exp((1-g)*ls[c] + g*lc[c]));
+    const l = Math.max(0.2126*t[0] + 0.7152*t[1] + 0.0722*t[2], 1e-6);
+    T[i*3] = t[0]/l; T[i*3+1] = t[1]/l; T[i*3+2] = t[2]/l;
+  }
+  return T;
 }
 function lookChromaB(t, b){
   const c = b.map(v => Math.pow(v, t));
@@ -3498,6 +3562,9 @@ function applyParams(np, opts){
   if ("coronaLevel" in np && !("skyHueR" in np)) setSkyHueDefault();
   for (const hk of SKYHUE_KEYS) if (hk in np) P[hk] = +np[hk];
   syncSkyHue();
+  if ("coronaLevel" in np && !("coronaHueR" in np)) setCorHueDefault();
+  for (const hk of CORHUE_KEYS) if (hk in np) P[hk] = +np[hk];
+  syncCorHue();
   if ("coronaLevel" in np && !("promHueR" in np)) setPromHueDefault();
   for (const hk of PROMHUE_KEYS) if (hk in np) P[hk] = +np[hk];
   syncPromHue();
@@ -3507,6 +3574,8 @@ function applyParams(np, opts){
   for (const [k,,,,,] of DEFS){
     if (!(k in np)) continue;
     P[k] = np[k];
+    if (k === "starStrength" && !(P[k] >= 1)) P[k] = 1;   // the stars are part of the stack: never below as-shot (2026-10-18)
+    if (k === "skyColour" && P[k] < 0) P[k] = 0;           // the negative side (the opposite colour) is gone (2026-10-18)
     const el = $("s_"+k);
     if (el && !el.disabled){ el.value = dispTo(k, np[k]); }
     const v = $("v_"+k);
@@ -3680,7 +3749,7 @@ const BYPASS = {
   "Partial convolution": {hillMix:0},
   "Inner corona": {innerMix:0, innerDim:0},
   "Prominences": {promGain:0, promChroma:0, promLayer:0},
-  "Stars": {starStrength:0},
+  "Stars": {starStrength:1},
   "Color": {temp:1, tint:1, satur:1, bgNeutral:0, hlCompress:0, hlDesat:0, skyLevel:0},
   "Tone": {outGamma:1, bgBlack:0, toneCurve:[[0,0],[1,1]], containWhites:1, coronaLevel:0},
   "Moon": {earthShine:0, moonColour:0, moonCurve:[[0,0],[1,1]]},
@@ -3731,7 +3800,7 @@ function pickStartFor(kind, targetId){
 // ---------------------------------------------------------------- block 3c: an eye per slider
 // What a control renders at while its eye is shut: 0 for an amount, 1 for a
 // gain or gamma, the default where there is no 'off' (a radius, a stretch).
-const ITEM_ONE = new Set(["temp","tint","satur","outGamma","envGamma","detailGain","containWhites","ringScale","promSat"]);
+const ITEM_ONE = new Set(["temp","tint","satur","outGamma","envGamma","detailGain","containWhites","ringScale","promSat","starStrength"]);
 const ITEM_DEFAULT = new Set(["detailScale","hillLogK","hillZoneR","discLevel","discSoft","promStretch"]);
 const HIDDENK = new Set();
 function itemOff(k){
@@ -3785,6 +3854,7 @@ function setupCurve(){
   if (a1) makeCurve("toneCurve", "Tone curve (everything but the Moon)", a1.closest(".ctl"));
   if (a2) makeMoonHue(a2.closest(".ctl"));
   { const a3 = $("s_skyColour"); if (a3) makeSkyHue(a3.closest(".ctl")); }
+  { const a5 = document.querySelector(".skyhuectl"); if (a5) makeCorHue(a5); }
   { const a4 = $("s_promSat"); if (a4) makePromHue(a4.closest(".ctl")); }
   if (P.colourMode == null) P.colourMode = SLIDER_DEFAULTS.colourMode ?? 0;
   syncColourMode();
@@ -3874,7 +3944,7 @@ function syncSkyHue(){ const el = $("skyhue"); if (el) el.value = skyHueHex(); }
 function makeSkyHue(row){
   SKYHUE_KEYS.forEach(k => { if (P[k] == null) P[k] = SLIDER_DEFAULTS[k] ?? 1; });
   const div = document.createElement("div"); div.className = "ctl skyhuectl";
-  div.title = "Target colour of the sky lift; Sky lift colour sets how far towards it (1 = this colour, 0 = grey). Double-click to reset.";
+  div.title = "Colour of the sky lift; Sky lift colour strength sets how far towards it (1 = this colour, 0 = grey). In Mono + tints also the colour of the sky and the faint outer corona. Double-click to reset.";
   div.innerHTML = '<label><span>Sky colour</span><span class="val"><input type="color" id="skyhue" style="width:44px;height:22px;padding:0;border:1px solid var(--line);background:none;cursor:pointer"></span></label>';
   row.parentElement.insertBefore(div, row.nextSibling);
   const el = div.querySelector("input"); el.value = skyHueHex();
@@ -3883,6 +3953,27 @@ function makeSkyHue(row){
     scheduleRender();
   });
   div.addEventListener("dblclick", e => { if (e.target === el) return; setSkyHueDefault(); scheduleRender(); });
+}
+
+// THE CORONA COLOUR: Colour mode "Mono + tints" only -- the corona's tint in
+// place of its measured colour; white = grey, as it was before the picker.
+const CORHUE_KEYS = ["coronaHueR", "coronaHueG", "coronaHueB"];
+function corHueHex(){ return "#" + CORHUE_KEYS.map(k => _hex(P[k] ?? SLIDER_DEFAULTS[k] ?? 1)).join(""); }
+function corHueIsDefault(){ return CORHUE_KEYS.every(k => SLIDER_DEFAULTS[k] == null || Math.abs((P[k] ?? SLIDER_DEFAULTS[k]) - SLIDER_DEFAULTS[k]) < 0.003); }
+function setCorHueDefault(){ CORHUE_KEYS.forEach(k => { if (SLIDER_DEFAULTS[k] != null) P[k] = SLIDER_DEFAULTS[k]; }); syncCorHue(); }
+function syncCorHue(){ const el = $("corhue"); if (el) el.value = corHueHex(); }
+function makeCorHue(row){
+  CORHUE_KEYS.forEach(k => { if (P[k] == null) P[k] = SLIDER_DEFAULTS[k] ?? 1; });
+  const div = document.createElement("div"); div.className = "ctl corhuectl";
+  div.title = "Mono + tints: colour of the bright inner corona, blending outwards into the Sky colour (white = grey). Double-click to reset.";
+  div.innerHTML = '<label><span>Corona colour</span><span class="val"><input type="color" id="corhue" style="width:44px;height:22px;padding:0;border:1px solid var(--line);background:none;cursor:pointer"></span></label>';
+  row.parentElement.insertBefore(div, row.nextSibling);
+  const el = div.querySelector("input"); el.value = corHueHex();
+  el.addEventListener("input", () => {
+    const h = el.value; P.coronaHueR = parseInt(h.slice(1,3),16)/255; P.coronaHueG = parseInt(h.slice(3,5),16)/255; P.coronaHueB = parseInt(h.slice(5,7),16)/255;
+    scheduleRender();
+  });
+  div.addEventListener("dblclick", e => { if (e.target === el) return; setCorHueDefault(); scheduleRender(); });
 }
 
 // THE PROMINENCE COLOUR: used in Colour mode "Mono + tints" only.
@@ -3981,6 +4072,7 @@ function markDefaults(){
   document.querySelectorAll(".curvebox").forEach(cb => { const g = cb.closest(".group"); const nd = !curveIsIdentity(P[cb.dataset.key] || []); if (nd && g) grpnd.set(g, true); });
   { const hc = document.querySelector(".moonhuectl"); if (hc){ const nd = !moonHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
   { const hc = document.querySelector(".skyhuectl"); if (hc){ const nd = !skyHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
+  { const hc = document.querySelector(".corhuectl"); if (hc){ const nd = !corHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
   { const hc = document.querySelector(".promhuectl"); if (hc){ const nd = !promHueIsDefault(); hc.classList.toggle("nd", nd); const g = hc.closest(".group"); if (nd && g) grpnd.set(g, true); } }
   for (const [grp, nd] of grpnd) grp.classList.toggle("nd", nd);
 }
@@ -3995,6 +4087,7 @@ document.querySelectorAll(".group .grouphead .reset").forEach(b => b.addEventLis
   grp.querySelectorAll(".curvebox").forEach(cb => { P[cb.dataset.key] = [[0, 0], [1, 1]]; });
   if (grp.querySelector(".moonhuectl")) setMoonHueDefault();
   if (grp.querySelector(".skyhuectl")) setSkyHueDefault();
+  if (grp.querySelector(".corhuectl")) setCorHueDefault();
   if (grp.querySelector(".promhuectl")) setPromHueDefault();
   if (grp.querySelector("#colourmode")){ P.colourMode = 0; syncColourMode(); }
   scheduleRender();

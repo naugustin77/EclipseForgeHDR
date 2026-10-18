@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.28.0
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.29.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -33,6 +33,29 @@ preview between the composite and each individual layer; every slider on the
 right re-renders live, with no re-processing.*
 
 ---
+
+## New in 0.29.0
+
+- **Faster stacking.** Raw decoding, the hot-pixel test and the filters run on
+  several processor cores; on a 41-frame test set the stack took about a third
+  less time, with identical results.
+- **Camera clock from the contact frames.** With the observing site entered,
+  the time stamps of the frames in a `diamond ring/` subfolder (or `beads`,
+  `contact`) set the camera clock against the predicted second and third
+  contact. The shooting timeline shows C2, C3 and the short exposures; on
+  repeated brackets the Moon is placed at mid-totality. See *Folder layout*.
+- **Stars:** the catalogue goes to magnitude 10 (about 61,000 stars). A fainter
+  candidate is confirmed only down to the depth the picture reaches: when a
+  brighter catalogue star on open sky left no signal, a fainter match is not
+  trusted. **Star gain** starts at 1 (as in the stack): the stars are part of
+  the stack and are not taken out.
+- **Mono + tints:** new **Corona colour**; the bright corona takes it and
+  blends outwards into the Sky colour, which now also tints the faint corona
+  and the sky without the sky lift. **Sky lift colour** runs from grey (0) to
+  the Sky colour (1) and beyond.
+- The time estimate in the pipeline bar no longer says "finishing" too early.
+- New chapters: *Folder layout* and *Repeated brackets*.
+- Caches from 0.28.0 stay valid; the stars are checked again on the next Start.
 
 ## New in 0.28.0
 
@@ -536,6 +559,80 @@ the limb); their sharp edges and cores come from a stack of the fast tiers,
 each registered onto the merge by its prominences and Richardson–Lucy
 deconvolved with the blur measured on the lunar limb. Tested on one bracket.
 
+## Folder layout
+
+One folder per eclipse. The light frames sit directly in it; everything else
+goes in subfolders. Only the files directly in the folder are read as lights,
+so nothing in a subfolder can end up in the corona stack by mistake.
+
+    my_eclipse/
+      frame_0001.RW2 ...        <- the bracket: every corona exposure
+      short exposures/          <- optional: the fastest frames, prominences only
+      diamond ring/             <- optional: contact frames (diamond ring, beads)
+      flats/                    <- optional: flat frames
+      darks/                    <- optional: dark frames
+      bias/                     <- optional: bias frames
+      .eclipseforgehdr/         <- the cache, written by the app
+      eclipseforge_output/      <- exports, written by the app
+
+**Lights.** Raw files of one camera, one ISO, shot through the exposure ladder.
+The ladder may be shot once or repeated (see below). Frames of the partial
+phases, the diamond rings and Baily's beads do not belong here: they are not
+totality and the stack has no use for them.
+
+**Short exposures.** A subfolder whose name contains `short` or `prom`, for the
+fastest frames (1/2000 s, 1/4000 s and the like): they feed the prominence
+layer only and are kept out of the corona merge. See *Short exposures for the
+prominences*.
+
+**Contact frames.** A subfolder whose name contains `diamond`, `ring`, `bead`
+or `contact`, for the frames shot at second and third contact. They are not
+stacked. With the observing site entered, their time stamps set the camera
+clock against the predicted contacts, so the timeline shows where the shoot
+sits in totality and, on repeated brackets, the Moon is placed at
+mid-totality. Without them the camera clock is taken as it is, to the hour.
+
+**Flats.** `flats/` (also `flat/`, `flatfield/`, `masterflat/`). The box next
+to the folder path takes another location, or `off`. See *Flat-field
+calibration*.
+
+**Darks and bias.** `darks/` (also `dark/`, `dark_frames/`) and `bias/` (also
+`biases/`, `offset/`). Found and used automatically; the summary line under the
+processing options reports how many were found. Darks and bias must be shot at
+the same ISO as the lights; the exposure time of the darks need not match. The
+log reports what each master removes against the noise it injects, and warns
+when more frames are needed.
+
+Folder names are matched case-insensitively, one level down. A finished HDR
+(TIFF or FITS) may sit in the folder beside the raws: it is not counted as a
+frame as long as raw files are present.
+
+## Repeated brackets
+
+A sequence shot through the same exposure ladder several times during totality
+is recognised from the time stamps and the exposure times, in shooting order: a
+bracket ends when an exposure time comes round again or when the gap to the
+next frame is far longer than usual. The ladder may be shot short-to-long,
+long-to-short or back and forth. A set shot tier by tier (all 1/500 s frames,
+then all 1/250 s, ...) is a single pass, not repeated brackets.
+
+The log reports the brackets found, their span and each bracket's brightness
+against the exposure's median (sky transparency). All frames go in the raw folder; do
+not sort them into subfolders per bracket.
+
+With *Brackets — Stack per exposure* (default, see *Processing settings*) each exposure is stacked across
+all brackets, with every frame placed on the Moon's track so the limb stays
+sharp, and the merge runs once. *HDR per bracket (experimental)* merges each
+bracket on its own and stacks the bracket HDRs; it is meant for long eclipses
+where the sky or the Moon's position changes markedly between brackets and has
+not been tested extensively. Changing the setting re-stacks.
+
+The frames need a clock: brackets are ordered by their EXIF time stamps.
+Without time stamps the order is the file name order and brackets are found
+from the exposure cycle alone, with no gap rule. The clock need not be right
+to the second; contact frames (see *Folder layout*) tell the app where
+totality is on the camera's clock.
+
 ## Processing settings — what each one does, and when to change it
 
 The defaults are what the measurements in this repository were made on. Leave
@@ -867,13 +964,13 @@ the star's own profile measured, its colour from the data and pulled towards
 white where the signal is weak), and put back over the finished picture at the
 end, at the brightness it had in the stack relative to the corona around it.
 
-- **Star gain**: 0 leaves the stars out (a starless picture), 1 as in the stack,
-  above 1 brighter.
+- **Star gain**: 1 keeps the stars as they are in the stack, above 1 brightens
+  them. The stars are part of the stack and are never taken out.
 - **Star colour**: 0 white, 1 the measured colour.
 
 **The catalogue check.** The package carries a star catalogue: every star to
-magnitude 8.5 within 12 degrees of the ecliptic (the Sun is always on it),
-about 13,800 stars, with their HIP, HD, HR and SAO numbers. It is built from
+magnitude 10 within 12 degrees of the ecliptic (the Sun is always on it),
+about 61,000 stars, with their HIP, HD, HR and SAO numbers. It is built from
 the Hipparcos and Tycho catalogues (ESA 1997), the Bright Star Catalogue
 (Hoffleit & Warren 1991) and the SAO catalogue, all from the CDS in
 Strasbourg; `tools/build_star_catalogue.py` rebuilds it from those files. The
@@ -888,13 +985,18 @@ detected stars are matched against it:
 - a match needs 3 detected stars that land on catalogue stars with consistent
   brightness, or 2 when the observing site and time are given; two stars must
   then also put the Sun under the Moon and give a Moon of the right size;
+- the match itself is found and ranked on the stars to magnitude 8.5; the
+  fainter stars to magnitude 10 only confirm candidates afterwards, and only
+  down to the depth the picture reaches: the catalogue stars the match puts on
+  open sky are checked from bright to faint, and the first one with no signal
+  at its place sets that depth;
 - candidates slightly below the search's own limit (between 4.5 and 5 times
   the local noise) take part only as confirmations: one is kept, as a star,
   only when a match puts a catalogue star exactly there; it never starts a
   match, and the others are dropped.
 
 What the match does: a candidate that sits on a catalogue star is confirmed as
-a star; a bright candidate (brighter than about magnitude 7.5) with no catalogue
+a star; a bright candidate (brighter than about magnitude 9) with no catalogue
 star at its place is not used. **It never adds a star** that the search did not
 find. Without a match, the detected stars are used as they are, unconfirmed.
 
@@ -937,7 +1039,7 @@ the field size and, with the site given, the Sun's altitude.
   stars found, not false ones.
 - In the bright inner corona a star is hard to tell from coronal structure;
   candidates there may be classed as corona and left in it.
-- Stars fainter than magnitude 8.5, or more than 12 degrees from the ecliptic,
+- Stars fainter than magnitude 10, or more than 12 degrees from the ecliptic,
   are not in the catalogue and cannot be confirmed by it.
 - Lens distortion is not modelled; the match tolerance grows towards the frame
   edge to allow for it.

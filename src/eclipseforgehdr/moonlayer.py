@@ -27,6 +27,7 @@ models differ most).
 import os, json
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 from scipy.signal import fftconvolve
 
 MOON_FILE = "moon_layer.npy"
@@ -55,7 +56,7 @@ def needs_build(wd):
 
 def _fit_limb(G, cy, cx, R0, iters=3):
     """Circle through the steepest rise of log G along 360 rays near R0."""
-    L = np.log(np.maximum(ndimage.gaussian_filter(G, 2.0), 1e-3))
+    L = np.log(np.maximum(_pgauss(G, 2.0), 1e-3))
     for _ in range(iters):
         pts = []
         rs = np.arange(0.93 * R0, 1.07 * R0, 0.25)
@@ -268,7 +269,7 @@ def build(folder, wd, progress=None, frames=None):
     # sensor's fine scale, below 0.3 R
     w = inside.astype(np.float64)
     def nconv(a, sg):
-        return ndimage.gaussian_filter(a * w, sg) / np.maximum(ndimage.gaussian_filter(w, sg), 1e-6)
+        return _pgauss(a * w, sg) / np.maximum(_pgauss(w, sg), 1e-6)
     s_lo = max(3.0, 0.012 * mR); s_hi = 0.3 * mR
     Eb = np.where(inside, nconv(E, s_lo) - nconv(E, s_hi), 0.0)
     # ---- 5b: THE LIMB BAND (build 2, 2026-10-07). Measured on two

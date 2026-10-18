@@ -37,11 +37,12 @@ expect from noise alone.
 import os, json
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 
 STARS_FILE = "stars.json"
 # A change here that alters WHICH stars are found must also bump detail.LAYER_BUILD:
 # the stars are lifted out of the corona while the layers are built (detail.py).
-STARS_BUILD = 7                # 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
+STARS_BUILD = 8                # 8: catalogue to mag 10, faint candidates confirmed only down to the depth the picture reaches (2026-10-18). 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
 SIGMAS = (0.6, 1.0, 1.5, 2.25)        # band-pass widths, binned px (R ~ 300 px)
 RMIN = 1.4                             # inner limit, lunar radii
 Z_FLOOR = 6.0
@@ -194,7 +195,7 @@ def streamers(Lb, cy, cx, R, nmax=12):
     yy = cy - np.cos(ang)[None, :] * rad[:, None]
     xx = cx + np.sin(ang)[None, :] * rad[:, None]
     ok = (yy > 2) & (yy < H - 3) & (xx > 2) & (xx < W - 3)
-    v = ndimage.map_coordinates(np.log(np.maximum(ndimage.gaussian_filter(Lb, 1.5), 1e-12)), [yy.ravel(), xx.ravel()], order=1).reshape(yy.shape)
+    v = ndimage.map_coordinates(np.log(np.maximum(_pgauss(Lb, 1.5), 1e-12)), [yy.ravel(), xx.ravel()], order=1).reshape(yy.shape)
     v = np.where(ok, v, np.nan)
     # excess over the corona's broad azimuthal shape (25 deg), so rays and
     # streamers stand out of the polar-hole / equator contrast
@@ -245,9 +246,9 @@ def find(wd, progress=None):
     ok[:edge] = False; ok[-edge:] = False; ok[:, :edge] = False; ok[:, -edge:] = False
     Z = np.empty((len(sigmas), H2, W2), np.float32)
     for i, s in enumerate(sigmas):
-        D = ndimage.gaussian_filter(Lb, s) - ndimage.gaussian_filter(Lb, 3 * s)
+        D = _pgauss(Lb, s) - _pgauss(Lb, 3 * s)
         Z[i] = D / _local_rms(D)
-    Dc = ndimage.gaussian_filter(Lb, max(0.5, ksc)) - ndimage.gaussian_filter(Lb, 3.0 * max(0.5, ksc))
+    Dc = _pgauss(Lb, max(0.5, ksc)) - _pgauss(Lb, 3.0 * max(0.5, ksc))
     hf = Lb - ndimage.uniform_filter(Lb, 3)
 
     def clutter(y, x, r0=max(4, int(round(8 * ksc))), r1=max(12, int(round(25 * ksc)))):
@@ -449,7 +450,7 @@ def _catalogue_check(wd, g, out, Zpos, f, shape, sky_ok, progress=None):
             if c["class"] == "star" and i not in pairs:
                 est = m0 - 2.5 * np.log10(max(c["z"], 1e-3))
                 c["mag_est"] = round(float(est), 2)
-                if est <= _sc.MAG_SCORE - 1.0:
+                if est <= _sc.MAG_CONFIRM - 1.0:
                     c["class"] = "unconfirmed"
                     demoted += 1
         added = 0
@@ -483,7 +484,10 @@ def _catalogue_check(wd, g, out, Zpos, f, shape, sky_ok, progress=None):
                             **{"class": "star", "confirmed": "catalogue (forced)",
                                "catalogue": {k2: p[k2] for k2 in ("mag", "ra", "dec")}}))
             added += 1
-        info = {"status": "solved", "matches": sol["matches"], "mirror": sol["mirror"],
+        info = {"status": "solved", "matches": sol["matches"],
+                "confirmed_faint": sol.get("confirmed_faint", 0),
+                "confirm_limit_mag": sol.get("confirm_limit_mag"),
+                "confirm_missing_mag": sol.get("confirm_missing_mag"), "mirror": sol["mirror"],
                 "arcsec_per_px": round(sol["arcsec_per_px"], 4),
                 "rotation_deg": round(sol["rotation_deg"], 2),
                 "north_deg_cw_from_up": round(sol["north_deg_cw_from_up"], 1),
@@ -503,6 +507,9 @@ def _catalogue_check(wd, g, out, Zpos, f, shape, sky_ok, progress=None):
         _log(progress, f"stars: catalogue match on {sol['matches']} stars "
                        f"({sol['arcsec_per_px']:.2f}\"/px, north {info['north_deg_cw_from_up']:.1f} deg "
                        f"clockwise from up{', mirrored' if sol['mirror'] else ''}); "
+                       f"{info['confirmed_faint']} more on catalogue stars to mag {sol.get('confirm_limit_mag', _sc.MAG_CONFIRM):.1f}"
+                       + (f" (brightest star with no signal: mag {sol['confirm_missing_mag']:.1f})"
+                          if sol.get("confirm_missing_mag") is not None else "") + ", "
                        f"{info['confirmed']} confirmed, {added} added, {demoted} demoted", None)
         return info
     except Exception as e:
@@ -603,10 +610,10 @@ def remove(wd, progress=None, classes=("star",)):
         ex = img - bg
         E = 0.2126 * ex[..., 0] + 0.7152 * ex[..., 1] + 0.0722 * ex[..., 2]
         # re-centre on the star's own light
-        Es0 = ndimage.gaussian_filter(E, max(1.0, c["sigma"] / 2.0))
+        Es0 = _pgauss(E, max(1.0, c["sigma"] / 2.0))
         k = np.unravel_index(np.argmax(np.where(rr <= ra / 2 + 1, Es0, -np.inf)), Es0.shape)
         rr = np.hypot(oy - (k[0] - hb), ox - (k[1] - hb))
-        Es = ndimage.gaussian_filter(E, max(0.8, c["sigma"] / 2.0))
+        Es = _pgauss(E, max(0.8, c["sigma"] / 2.0))
         w = np.where(rr <= ra, 1.0, np.where(rr <= ra + 3, 0.5 * (1 + np.cos(np.pi * (rr - ra) / 3.0)), 0.0))
         ap = rr <= ra
         ring = (rr >= ra + 1) & (rr <= 2 * ra) & ~other
@@ -620,7 +627,7 @@ def remove(wd, progress=None, classes=("star",)):
         ss = max(0.8, c["sigma"] / 2.0)
         S = Es.copy()
         for _ in range(3):
-            S += Es - ndimage.gaussian_filter(S, ss)
+            S += Es - _pgauss(S, ss)
         # NOT CLIPPED AT ZERO (audit 2026-10-10, A8). 21-37 % of the aperture
         # is negative noise; clipping kept the positive half and lifted
         # 20-65 % too much light (8240 -> 8969 counts on one star), leaving a

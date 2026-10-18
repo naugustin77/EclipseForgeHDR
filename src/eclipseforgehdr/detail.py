@@ -4,6 +4,7 @@ from __future__ import annotations
 import os, json
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 
 
 from .nafe import nafe_vn
@@ -312,9 +313,9 @@ def radial_scale_blur(L, r, R, s_max, r_a=1.3, r_b=3.0, valid=None):
         if s <= 0.0:
             b = L
         elif valid is None:
-            b = ndimage.gaussian_filter(L, s)
+            b = _pgauss(L, s)
         else:
-            b = ndimage.gaussian_filter(Lm, s) / np.maximum(ndimage.gaussian_filter(m, s), 1e-3)
+            b = _pgauss(Lm, s) / np.maximum(_pgauss(m, s), 1e-3)
         lo = levels[i - 1] if i > 0 else -1.0
         hi = levels[i + 1] if i + 1 < len(levels) else s_max + 1.0
         w = np.where(sig <= s, np.clip((sig - lo) / max(s - lo, 1e-6), 0, 1),
@@ -400,9 +401,9 @@ _DF = _detail_fracs()
 def photon_floor(sig_lin, r, r_sky=(0.75, 0.95)):
     """Sigma of log10 luminance from photon noise: C/sqrt(L), calibrated in the
     structure-free far field (fractions of max radius)."""
-    sm = np.maximum(ndimage.gaussian_filter(sig_lin, 8), 1.0)
+    sm = np.maximum(_pgauss(sig_lin, 8), 1.0)
     L = np.log10(np.clip(sig_lin, 1.0, None))
-    hp = L - ndimage.gaussian_filter(L, 2.5)
+    hp = L - _pgauss(L, 2.5)
     rmax = r.max()
     sky = (r > r_sky[0] * rmax) & (r < r_sky[1] * rmax)
     if sky.sum() < 10000:
@@ -553,8 +554,8 @@ def fourier_background(L, r, cy, cx, r0, order=2, na=360, smooth=6.0, dense=Fals
             w = 1.0 / np.maximum(np.abs(res) / (2.0 * sg), 1.0)
         mu[i] = Adm @ coef
     blend = (1.0 - np.clip((cov_r - 0.3) / 0.4, 0, 1))[:, None].astype(np.float32)
-    mu = ((1 - blend) * ndimage.gaussian_filter(mu, (smooth, 0))
-          + blend * ndimage.gaussian_filter(mu, (8 * smooth, 0)))
+    mu = ((1 - blend) * _pgauss(mu, (smooth, 0))
+          + blend * _pgauss(mu, (8 * smooth, 0)))
     th = np.arctan2(np.arange(H, dtype=np.float32)[:, None] - cy,
                     np.arange(W, dtype=np.float32)[None, :] - cx)
     tidx = (th % (2 * np.pi)) / (2 * np.pi) * na
@@ -612,7 +613,7 @@ def structure_extent(L, r, R, cy, cx, valid, n=256, angles=18):
             if valid is not None and not valid[y0:y0 + n, x0:x0 + n].all():
                 continue
             C = L[y0:y0 + n, x0:x0 + n].astype(np.float64)
-            C = (C - ndimage.gaussian_filter(C, 40.0)) * han
+            C = (C - _pgauss(C, 40.0)) * han
             P = np.abs(np.fft.fft2(C)) ** 2
             d = np.abs(((fang - ang) + np.pi / 2) % np.pi - np.pi / 2)
             row = []
@@ -758,20 +759,20 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
         if bandlimit > 0.0 and wsc >= bandlimit_min:
             sb = float(wsc) * float(bandlimit)
             if m is None:
-                xs = ndimage.gaussian_filter(xn, sb)
+                xs = _pgauss(xn, sb)
             else:
-                xs = ndimage.gaussian_filter(xn, sb) / np.maximum(
-                    ndimage.gaussian_filter(m, sb), 1e-3) * m
+                xs = _pgauss(xn, sb) / np.maximum(
+                    _pgauss(m, sb), 1e-3) * m
         else:
             xs = xn
         if m is None:
-            B = ndimage.gaussian_filter(xn, wsc)
-            S = np.sqrt(np.maximum(ndimage.gaussian_filter((xs - B) ** 2, wsc), 1e-12))
+            B = _pgauss(xn, wsc)
+            S = np.sqrt(np.maximum(_pgauss((xs - B) ** 2, wsc), 1e-12))
         else:
-            Vb = np.maximum(ndimage.gaussian_filter(m, wsc), 1e-3)
-            B = ndimage.gaussian_filter(xn, wsc) / Vb
+            Vb = np.maximum(_pgauss(m, wsc), 1e-3)
+            B = _pgauss(xn, wsc) / Vb
             d = (xs - B) * m
-            S = np.sqrt(np.maximum(ndimage.gaussian_filter(d * d, wsc) / Vb, 1e-12))
+            S = np.sqrt(np.maximum(_pgauss(d * d, wsc) / Vb, 1e-12))
             del d, Vb
         S = np.maximum(S, 0.004)
         if fl is not None:
@@ -1279,8 +1280,8 @@ def prominence_mask(wd, geo, shape, r, R, pct=99.0, grow=8, rmax=1.35,
     try:
         prgb = np.nan_to_num(np.load(p).astype(np.float32), nan=0.0,
                              posinf=0.0, neginf=0.0)
-        red = ndimage.gaussian_filter(prgb[:, :, 0], 2) / np.maximum(
-            ndimage.gaussian_filter(0.5 * (prgb[:, :, 1] + prgb[:, :, 2]), 2), 1e-3)
+        red = _pgauss(prgb[:, :, 0], 2) / np.maximum(
+            _pgauss(0.5 * (prgb[:, :, 1] + prgb[:, :, 2]), 2), 1e-3)
         del prgb
         # prom_rgb is a half-res single tier; upsample onto the layer grid
         m = _fit(red.repeat(2, 0).repeat(2, 1), shape)
@@ -1572,10 +1573,10 @@ def fnrgf_robust(lum, r, cy, cx, r0, order=6, na=1440, rmax=None,
     far = np.clip((rr_ax - 2.0 * r0) / (2.0 * r0), 0, 1)
     poor = 1.0 - np.clip((cov_r - 0.35) / 0.35, 0, 1)
     blend = np.maximum(far, poor)[:, None].astype(np.float32)
-    mu_g = (1 - blend) * ndimage.gaussian_filter(mu_g, (4, 0)) + \
-        blend * ndimage.gaussian_filter(mu_g, (30, 0))
-    sd_g = (1 - blend) * ndimage.gaussian_filter(sd_g, (10 * sd_smooth, 0)) + \
-        blend * ndimage.gaussian_filter(sd_g, (40 * sd_smooth, 0))
+    mu_g = (1 - blend) * _pgauss(mu_g, (4, 0)) + \
+        blend * _pgauss(mu_g, (30, 0))
+    sd_g = (1 - blend) * _pgauss(sd_g, (10 * sd_smooth, 0)) + \
+        blend * _pgauss(sd_g, (40 * sd_smooth, 0))
     theta = np.arctan2(np.arange(H, dtype=np.float32)[:, None] - cy,
                        np.arange(W, dtype=np.float32)[None, :] - cx)
     tidx = (theta % (2 * np.pi)) / (2 * np.pi) * na
@@ -1644,7 +1645,7 @@ def resolution_floor(L, r, R, lo=1.3, hi=3.0):
     prev = L
     sd = []
     for s in ss:
-        cur = ndimage.gaussian_filter(L, float(s))
+        cur = _pgauss(L, float(s))
         sd.append(float((prev - cur)[m].std()))
         prev = cur
     sd = np.maximum(np.array(sd), 1e-12)
@@ -1881,16 +1882,16 @@ def along_gate(L, r, cy, cx, R, win_R=0.015, lo=0.08, hi=0.45):
     xx = np.arange(w, dtype=np.float32)[None, :] - cx2
     rr = np.maximum(np.sqrt(yy * yy + xx * xx), 1.0)
     ur, vr = yy / rr, xx / rr
-    F = Ls - ndimage.gaussian_filter(Ls, 20.0 / k)
-    Fb = ndimage.gaussian_filter(F, 1.0)
+    F = Ls - _pgauss(Ls, 20.0 / k)
+    Fb = _pgauss(F, 1.0)
     gy, gx = np.gradient(Fb)
     gr = gy * ur + gx * vr
     gt = -gy * vr + gx * ur
     del F, Fb, gy, gx, ur, vr
     sw = win_R * R2
-    Jrr = ndimage.gaussian_filter(gr * gr, sw)
-    Jtt = ndimage.gaussian_filter(gt * gt, sw)
-    Jrt = ndimage.gaussian_filter(gr * gt, sw)
+    Jrr = _pgauss(gr * gr, sw)
+    Jtt = _pgauss(gt * gt, sw)
+    Jrt = _pgauss(gr * gt, sw)
     del gr, gt
     tr = Jrr + Jtt
     disc = np.sqrt(np.maximum((Jrr - Jtt) ** 2 + 4.0 * Jrt * Jrt, 0.0))
@@ -1898,7 +1899,7 @@ def along_gate(L, r, cy, cx, R, win_R=0.015, lo=0.08, hi=0.45):
     radial = np.clip((Jtt - Jrr) / np.maximum(tr, 1e-14), 0.0, 1.0)
     g = np.clip((coh * radial - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
     del Jrr, Jtt, Jrt, tr, disc, coh, radial
-    g = ndimage.gaussian_filter(g, 2.0)
+    g = _pgauss(g, 2.0)
     # back to full size, nearest radius: bilinear zoom of a smooth field
     out = ndimage.zoom(g, (r.shape[0] / g.shape[0], r.shape[1] / g.shape[1]), order=1)
     return np.clip(out, 0.0, 1.0).astype(np.float32)
@@ -2253,8 +2254,8 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
                 if _pp.any():
                     _sg = max(8.0, 2.0 * float(sg_))
                     _g = good.astype(np.float32)
-                    _num = ndimage.gaussian_filter(m * _g, _sg)
-                    _den = ndimage.gaussian_filter(_g, _sg)
+                    _num = _pgauss(m * _g, _sg)
+                    _den = _pgauss(_g, _sg)
                     m[_pp] = (_num[_pp] / np.maximum(_den[_pp], 1e-3)).astype(np.float32)
                     del _num, _den, _g
                 del _pp
@@ -2361,7 +2362,7 @@ def _prom_feather(pm, k):
     m = np.asarray(pm, bool)
     if k <= 0:
         return m.astype(np.float32)
-    f = ndimage.gaussian_filter(
+    f = _pgauss(
         ndimage.binary_dilation(m, iterations=int(round(k))).astype(np.float32), k)
     return np.maximum(f, m.astype(np.float32))
 
@@ -2383,7 +2384,7 @@ def merged_noise_floor(wd, lum, r, R, nf=None, progress=None, lstats=None):
         _mn = np.load(_mnp).astype(np.float32)
         if _mn.shape != nf.shape:
             return nf, None
-        _mn = ndimage.gaussian_filter(_mn, 4.0) / np.log(10.0)    # relative -> sigma of log10
+        _mn = _pgauss(_mn, 4.0) / np.log(10.0)    # relative -> sigma of log10
         _rmax = r.max()
         _sky = (r > 0.75 * _rmax) & (r < 0.95 * _rmax) & (_mn > 0)
         if _sky.sum() <= 1000:
@@ -3106,8 +3107,8 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
             del _Lrad
             _s = max(NAFE_FLATTEN_R * R, 4.0)
             _w = (~disc_m).astype(np.float32)
-            _num = ndimage.gaussian_filter(_Lin * _w, _s)
-            _den = ndimage.gaussian_filter(_w, _s)
+            _num = _pgauss(_Lin * _w, _s)
+            _den = _pgauss(_w, _s)
             _glob = float(np.sum(_Lin * _w) / max(float(np.sum(_w)), 1.0))
             del _w
             # 1e-3 not 1e-6: below about a thousandth of full weight the quotient is
@@ -3309,8 +3310,8 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
             progress.log("[odd] prominence stack: non-finite samples, "
                          "sanitising", None)
             prgb = np.nan_to_num(prgb, nan=0.0, posinf=0.0, neginf=0.0)
-        Rc = ndimage.gaussian_filter(prgb[:, :, 0], 2)
-        GB = ndimage.gaussian_filter(0.5 * (prgb[:, :, 1] + prgb[:, :, 2]), 2)
+        Rc = _pgauss(prgb[:, :, 0], 2)
+        GB = _pgauss(0.5 * (prgb[:, :, 1] + prgb[:, :, 2]), 2)
         redness = Rc / np.maximum(GB, 1e-3)
         h2, w2 = redness.shape
         yyh = np.arange(h2, dtype=np.float32)[:, None] - cy / 2
@@ -3377,16 +3378,16 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
                     del _nd, _nh
             except Exception as _e:
                 progress.log(f"[warn] merge-based prominence detection not used ({_e})", None)
-            g = ndimage.gaussian_filter(g, 2)
+            g = _pgauss(g, 2)
             gate = _fit(np.clip(g * 1.6, 0, 1).repeat(2, 0).repeat(2, 1), (H, W))
-            gate = ndimage.gaussian_filter(gate, 2)
+            gate = _pgauss(gate, 2)
             # ...and the prominences' own fine structure, which no corona layer
             # can carry. See prominence_detail.
             try:
                 _pd = prominence_detail(prgb[:, :, 0], g)
                 _pdf = _fit(_pd.repeat(2, 0).repeat(2, 1), (H, W))
                 del _pd
-                _pdf = ndimage.gaussian_filter(_pdf, 1.0)
+                _pdf = _pgauss(_pdf, 1.0)
                 np.save(os.path.join(wd, "promdet.npy"), _pdf.astype(np.float32))
                 lstats["prom"]["detail_layer"] = True
                 progress.log("[ok] prominence detail layer: H-alpha tier red "
@@ -3612,13 +3613,13 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
           / np.maximum(ndimage.uniform_filter1d(cnt.astype(np.float64), 3), 1e-9))
     lY = (lY - pr[rb].astype(np.float32)) * v
     def nc(s):
-        return ndimage.gaussian_filter(lY, s) / np.maximum(ndimage.gaussian_filter(v, s), 1e-3)
+        return _pgauss(lY, s) / np.maximum(_pgauss(v, s), 1e-3)
     fine0 = (lY - nc(s0)) * v
     band = (nc(s1) - nc(s2)) * v
     rng = np.random.default_rng(0)
     w = rng.standard_normal((256, 256)).astype(np.float32)
-    rf = (w - ndimage.gaussian_filter(w, s0))[32:-32, 32:-32].std()
-    rbw = (ndimage.gaussian_filter(w, s1) - ndimage.gaussian_filter(w, s2))[32:-32, 32:-32].std()
+    rf = (w - _pgauss(w, s0))[32:-32, 32:-32].std()
+    rbw = (_pgauss(w, s1) - _pgauss(w, s2))[32:-32, 32:-32].std()
     ty, tx = H // tile, W // tile
     ft = np.abs(fine0[:ty * tile, :tx * tile]).reshape(ty, tile, tx, tile)
     vt = v[:ty * tile, :tx * tile].reshape(ty, tile, tx, tile)
@@ -3629,7 +3630,7 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
             if m.sum() > 64:
                 sig[i, j] = 1.4826 * np.median(ft[i, :, j, :][m])
     del ft, vt, fine0
-    sig = ndimage.gaussian_filter(ndimage.grey_dilation(sig, 3), 1.0)
+    sig = _pgauss(ndimage.grey_dilation(sig, 3), 1.0)
     sigm = ndimage.zoom(sig, (H / ty, W / tx), order=1)[:H, :W]
     if sigm.shape != (H, W):
         sigm = np.pad(sigm, ((0, H - sigm.shape[0]), (0, W - sigm.shape[1])), mode="edge")
@@ -3660,7 +3661,7 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
                 wk = float(np.percentile(_mad / np.maximum(_nt, 1e-9), 5))
                 if np.isfinite(wk) and wk > 0:
                     # the band's own sigma map: factor x merge noise (ln units)
-                    Nn = ndimage.gaussian_filter(N, 2.0 * s2) * np.float32(wk)
+                    Nn = _pgauss(N, 2.0 * s2) * np.float32(wk)
                     _zone = (r > 1.1) & (r < r_zero) & (v > 0)
                     _old = float(np.median((sigm * noise_fac)[_zone]))
                     _new = float(np.median(Nn[_zone]))
@@ -3675,14 +3676,14 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
         progress.log(f"  inner detail: band noise {noise_src}", None)
     gate = _erf(np.abs(band) / np.maximum(k * sigm * noise_fac, 1e-9)).astype(np.float32)
     # rays damped: structure varying only across the radius
-    bs = ndimage.gaussian_filter(band, 0.7 * sc)
+    bs = _pgauss(band, 0.7 * sc)
     gy_, gx_ = np.gradient(bs)
     rr_ = np.maximum(rp, 1.0)
     uy, ux = yy / rr_, xx / rr_
     gr = gx_ * ux + gy_ * uy
     gt = -gx_ * uy + gy_ * ux
-    Tt = ndimage.gaussian_filter(gt * gt, 1.5 * s2)
-    Tr = ndimage.gaussian_filter(gr * gr, 1.5 * s2)
+    Tt = _pgauss(gt * gt, 1.5 * s2)
+    Tr = _pgauss(gr * gr, 1.5 * s2)
     aniso = np.clip((Tt - Tr) / (Tt + Tr + 1e-20), 0, 1)
     gate *= (1.0 - INNER_DETAIL_RAY_DAMP * aniso).astype(np.float32)
     del bs, gy_, gx_, gr, gt, Tt, Tr, aniso
@@ -3704,7 +3705,7 @@ def build_inner_detail(wd, geo, progress=None, k=2.0, tile=32, r_full=1.3, r_zer
     pp = os.path.join(wd, "prom.npy")
     if os.path.exists(pp):
         pg = np.asarray(np.load(pp, mmap_mode="r")[y0:y1, x0:x1], np.float32)
-        pw = ndimage.gaussian_filter(np.clip(pg * 3.0, 0, 1), 4 * sc)
+        pw = _pgauss(np.clip(pg * 3.0, 0, 1), 4 * sc)
         F *= np.clip(1.0 - 2.0 * pw, 0, 1)
     out = np.lib.format.open_memmap(os.path.join(wd, INNER_DETAIL_FILE), mode="w+",
                                     dtype=np.float16, shape=(Hf, Wf))
@@ -3811,7 +3812,7 @@ def _earthshine(wd, r, cy, cx, R):
         np.save(os.path.join(wd, "earth.npy"), np.full((H, W), 0.5, np.float32))
         return
     longL = np.load(p)
-    Ll = ndimage.gaussian_filter(np.log10(np.clip(longL, 1.0, None)), 6)
+    Ll = _pgauss(np.log10(np.clip(longL, 1.0, None)), 6)
     # low-order Fourier glare model on rings inside the disc
     order, na = 3, 720
     ang = np.linspace(0, 2 * np.pi, na, endpoint=False)
@@ -3832,7 +3833,7 @@ def _earthshine(wd, r, cy, cx, R):
             s = 1.4826 * np.median(np.abs(res[keep]))
             keep = np.abs(res) < 2.5 * max(s, 1e-6)
         mu_g[i] = Adm @ coef
-    mu_g = ndimage.gaussian_filter(mu_g, (4, 0))
+    mu_g = _pgauss(mu_g, (4, 0))
     theta = np.arctan2(np.arange(H, dtype=np.float32)[:, None] - cy,
                        np.arange(W, dtype=np.float32)[None, :] - cx)
     tidx = (theta % (2 * np.pi)) / (2 * np.pi) * na
@@ -3842,7 +3843,7 @@ def _earthshine(wd, r, cy, cx, R):
     res = np.where(r < R - 12, Ll - model, 0).astype(np.float32)
     # denoise at coarse scale (earthshine features are large), then normalize
     b = res[: H // 8 * 8, : W // 8 * 8].reshape(H // 8, 8, W // 8, 8).mean(axis=(1, 3))
-    b = ndimage.gaussian_filter(b, 1.6)
+    b = _pgauss(b, 1.6)
     up = _fit(ndimage.zoom(b, 8, order=1), (H, W))
     innerm = r < R - 40
     s = up[innerm].std() if innerm.any() else 1.0
@@ -3905,7 +3906,7 @@ def prominence_detail(red_half, gate_half, floor_map=None):
     # octave spacing with decreasing weight, the usual unsharp ladder; the
     # finest scale carries most of it because prominence structure is fine
     for sig, gain in ((1.0, 1.0), (2.0, 0.7), (4.0, 0.5), (8.0, 0.35)):
-        acc += gain * (L - ndimage.gaussian_filter(L, sig))
+        acc += gain * (L - _pgauss(L, sig))
     del L
     # Scale by the spread INSIDE the prominences, so the layer uses its range on
     # them rather than on whatever else the frame contains. Dilated, so the
@@ -3934,13 +3935,13 @@ def denoise_loglum(L, noise_map, ks=(1.5, 1.0, 0.0, 0.0), levels=4):
     resp = []
     gp_prev = probe
     for s in sigmas:
-        gp = ndimage.gaussian_filter(probe, s)
+        gp = _pgauss(probe, s)
         resp.append(float(np.std(gp_prev - gp)))
         gp_prev = gp
     g_prev = L
     details = []
     for s in sigmas:
-        g = ndimage.gaussian_filter(L, s)
+        g = _pgauss(L, s)
         details.append(g_prev - g)
         g_prev = g
     base = g_prev
@@ -4023,7 +4024,7 @@ SIGMA_FLOOR_PX = 1.2
 def _band_white_factors(sigmas):
     rng = np.random.default_rng(0)
     w = rng.standard_normal((512, 512)).astype(np.float32)
-    g = [w] + [ndimage.gaussian_filter(w, s) for s in sigmas]
+    g = [w] + [_pgauss(w, s) for s in sigmas]
     return [float((g[i] - g[i + 1])[48:-48, 48:-48].std()) for i in range(len(sigmas))]
 
 
@@ -4119,8 +4120,8 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
 
     def nc(a, s):
         if nv[0] is None or nv[0][0] != s:
-            nv[0] = (s, np.maximum(ndimage.gaussian_filter(v, s), 1e-3))
-        return ndimage.gaussian_filter(a * v, s) / nv[0][1]
+            nv[0] = (s, np.maximum(_pgauss(v, s), 1e-3))
+        return _pgauss(a * v, s) / nv[0][1]
     wf = _band_white_factors(sig)
     _T = BAND_NOISE_TILE
     _ht, _wt = H // _T, W // _T
@@ -4153,7 +4154,7 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
             if np.isfinite(wk) and wk > 0:
                 wf[k] = wk
         nb = N * wf[k]
-        c2 = ndimage.gaussian_filter(b * b * v, win * s) / np.maximum(ndimage.gaussian_filter(v, win * s), 1e-3)
+        c2 = _pgauss(b * b * v, win * s) / np.maximum(_pgauss(v, win * s), 1e-3)
         srms = np.sqrt(np.maximum(c2 - nb * nb, 0.0))
         del c2
         T = BAND_TARGETS[k]
@@ -4183,14 +4184,14 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
         rr4 = r[::8, ::8]
         if k == 1 and hold is not None:
             b0, g0 = hold
-            g0 = ndimage.gaussian_filter((1.0 + (g0 - 1.0) * gate).astype(np.float32), 2 * sig[0])
+            g0 = _pgauss((1.0 + (g0 - 1.0) * gate).astype(np.float32), 2 * sig[0])
             F += ((g0 - 1.0) * b0).astype(np.float32)
             F2 += ((g0 - 1.0) * b0).astype(np.float32)
             med.append([round(float(np.median(g0[::8, ::8][(rr4 > a) & (rr4 < a + 0.2)])), 2) for a in (1.1, 1.4, 2.4)])
             del b0, g0
             hold = None
         if k >= 2:
-            bs = ndimage.gaussian_filter(b, 0.5 * s)
+            bs = _pgauss(b, 0.5 * s)
             gy_, gx_ = np.gradient(bs)
             del bs
             if _ur is None:
@@ -4202,8 +4203,8 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
             gr = gx_ * ux + gy_ * uy
             gt = -gx_ * uy + gy_ * ux
             del gy_, gx_
-            Tt = ndimage.gaussian_filter(gt * gt, 3 * s)
-            Tr = ndimage.gaussian_filter(gr * gr, 3 * s)
+            Tt = _pgauss(gt * gt, 3 * s)
+            Tr = _pgauss(gr * gr, 3 * s)
             del gt, gr
             an = (Tt - Tr) / (Tt + Tr + 1e-20)
             del Tt, Tr
@@ -4217,13 +4218,13 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
         if gk2 is not None:
             gk2 = 1.0 + (gk2 - 1.0) * gate
         del gate
-        gk = ndimage.gaussian_filter(gk.astype(np.float32), 2 * s)
+        gk = _pgauss(gk.astype(np.float32), 2 * s)
         _bb = (b - bP).astype(np.float32)
         F += ((gk - 1.0) * _bb).astype(np.float32)
         if gk2 is None:
             F2 += ((gk - 1.0) * _bb).astype(np.float32)
         else:
-            gk2 = ndimage.gaussian_filter(gk2.astype(np.float32), 2 * s)
+            gk2 = _pgauss(gk2.astype(np.float32), 2 * s)
             F2 += ((gk2 - 1.0) * _bb).astype(np.float32)
             del gk2
         del bP, _bb
@@ -4250,7 +4251,7 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
     pp = os.path.join(wd, "prom.npy")
     if os.path.exists(pp):
         pg = np.asarray(np.load(pp, mmap_mode="r"), np.float32)
-        _pf = np.clip(1.0 - 2.0 * ndimage.gaussian_filter(np.clip(pg * 3.0, 0, 1), 4 * sc), 0, 1)
+        _pf = np.clip(1.0 - 2.0 * _pgauss(np.clip(pg * 3.0, 0, 1), 4 * sc), 0, 1)
         F *= _pf
         F2 *= _pf
         del pg, _pf

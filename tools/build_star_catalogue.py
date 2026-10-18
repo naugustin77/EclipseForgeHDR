@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Rebuild src/eclipseforgehdr/star_catalogue.npz from the CDS source files.
 
-The bundled catalogue holds every star to V 8.5 within 12 degrees of the
+The bundled catalogue holds every star to V 10 within 12 degrees of the
 ecliptic (the Sun is always on it, so these are the only stars that can stand
 in an eclipse picture), with its J2000 position and proper motion, V magnitude
 and catalogue numbers. Sources, all from the CDS (cdsarc.cds.unistra.fr):
@@ -11,14 +11,15 @@ and catalogue numbers. Sources, all from the CDS (cdsarc.cds.unistra.fr):
   V/50   catalog(.gz)   The Bright Star Catalogue, 5th rev. ed. (Hoffleit &
                         Warren 1991): HR number, Bayer/Flamsteed name, SAO
   I/131A sao.dat(.gz)   The SAO Star Catalog (SAO Staff 1966): SAO number by HD
-  I/239  tyc_main.dat   The Tycho Catalogue (ESA 1997): the stars to V 8.5 that
-                        Hipparcos did not observe (optional)
+  I/239  tyc_main.dat   The Tycho Catalogue (ESA 1997): the stars to the limit
+                        that Hipparcos did not observe (optional)
 
 Usage:
-  python3 tools/build_star_catalogue.py HIP_MAIN BSC_CATALOG [SAO_DAT] [--tycho TYC_MAIN] OUT.npz
+  python3 tools/build_star_catalogue.py HIP_MAIN BSC_CATALOG [SAO_DAT] [--tycho TYC_MAIN] [--mag V] OUT.npz
 
-tyc_main.dat is 350 MB; only its lines with V <= 8.5 are used, so a file
-holding just those lines works the same.
+--mag sets the faint limit (default 10; the catalogue to 8.5 was 0.5 MB, to
+10 it is 2 MB with 61k stars). tyc_main.dat is 350 MB; only its lines to the
+limit are used, so a file holding just those lines works the same.
 
 Gzipped or plain files both work. Columns are read at the byte positions of
 each catalogue's ReadMe.
@@ -28,7 +29,7 @@ import sys
 
 import numpy as np
 
-MAG_LIMIT = 8.5
+MAG_LIMIT = 10.0
 ECL_LAT_MAX = 12.0                  # degrees from the ecliptic
 OBLIQUITY = np.radians(23.4392911)  # J2000
 EPOCH_HIP = 1991.25
@@ -190,6 +191,11 @@ def main(argv):
     if "--tycho" in args:
         i = args.index("--tycho")
         tyc_path = args[i + 1]
+        del args[i:i + 2]
+    global MAG_LIMIT
+    if "--mag" in args:
+        i = args.index("--mag")
+        MAG_LIMIT = float(args[i + 1])
         del args[i:i + 2]
     if len(args) not in (3, 4):
         print(__doc__)

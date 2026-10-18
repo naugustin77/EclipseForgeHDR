@@ -7,6 +7,7 @@ from __future__ import annotations
 import os, json, time
 import numpy as np
 from scipy import ndimage
+from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 from skimage.registration import phase_cross_correlation
 
 from . import align
@@ -335,7 +336,7 @@ def find_disc(lum, target=520.0):
     h, w = lum.shape
     dec = max(1, int(round(min(h, w) / float(target))))
     s = np.asarray(lum[::dec, ::dec], np.float32)
-    s = ndimage.gaussian_filter(np.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0), 1.5)
+    s = _pgauss(np.nan_to_num(s, nan=0.0, posinf=0.0, neginf=0.0), 1.5)
     lo = float(np.percentile(s, 1.0))
     span = float(np.percentile(s, 99.9)) - lo
     if not np.isfinite(span) or span <= 0:
@@ -472,7 +473,7 @@ def find_center(lum):
     d = find_disc(lum)
     if d is not None:
         return d[0], d[1]
-    sm = ndimage.gaussian_filter(lum, 8)
+    sm = _pgauss(lum, 8)
     thr = np.percentile(sm, 98.0)
     ys, xs = np.nonzero(sm >= thr)
     if ys.size == 0:
@@ -691,8 +692,8 @@ def _semi_phase_shift(a, b, pq=SEMI_PQ, upsample=20):
 
 def sharpness(crop, satmask):
     valid = ~ndimage.binary_dilation(satmask, iterations=3)
-    hf = crop - ndimage.gaussian_filter(crop, 2.0)
-    sig = ndimage.gaussian_filter(crop, 4.0)
+    hf = crop - _pgauss(crop, 2.0)
+    sig = _pgauss(crop, 4.0)
     lvl = np.percentile(sig, 90)
     m = valid & (sig > 0.25 * lvl)
     if m.sum() < 1000:
@@ -710,7 +711,7 @@ def sharpness(crop, satmask):
 
 def prep_pc(crop):
     x = np.log1p(np.clip(crop, 0, None))
-    x = x - ndimage.gaussian_filter(x, 30)
+    x = x - _pgauss(x, 30)
     return x * np.hanning(x.shape[0])[:, None] * np.hanning(x.shape[1])[None, :]
 
 
@@ -786,18 +787,18 @@ def prep_corona(crop, sat, hp=25.0, erode=8):
         sat = np.zeros(crop.shape, bool)
     c = np.clip(crop, 0, None).astype(np.float32)
     dark = float(np.percentile(c, 5))
-    hp3 = c - ndimage.gaussian_filter(c, 3)
+    hp3 = c - _pgauss(c, 3)
     sig = 1.4826 * float(np.median(np.abs(hp3))) + 1e-6
     floor = dark + 5.0 * sig
     good = (~ndimage.binary_dilation(sat, iterations=4)) & (
-        ndimage.gaussian_filter(c, 3) > floor)
+        _pgauss(c, 3) > floor)
     good = ndimage.binary_erosion(good, iterations=erode)
     frac = float(good.mean())
     if frac <= 0.0:
         return None, None
     g = good.astype(np.float32)
-    num = ndimage.gaussian_filter(c * g, 20.0)
-    den = ndimage.gaussian_filter(g, 20.0)
+    num = _pgauss(c * g, 20.0)
+    den = _pgauss(g, 20.0)
     fill = num / np.maximum(den, 1e-4)
     c = np.where(good, c, fill)
     x = np.log1p(c / max(floor, 1e-3))
@@ -821,7 +822,7 @@ def prep_corona(crop, sat, hp=25.0, erode=8):
         s_ = np.bincount(ri, x.ravel().astype(np.float64), minlength=4096)
         prof = s_ / np.maximum(n_, 1)
         x = x - prof[ri].reshape(x.shape).astype(np.float32)
-    x -= ndimage.gaussian_filter(x, hp)
+    x -= _pgauss(x, hp)
     # NOT weighted here. The weight must be the SAME function on both frames
     # of a pair -- see corona_shift -- or its envelope, which is centred on
     # each frame's own Moon, is itself a feature that moves with the Moon and
@@ -853,7 +854,7 @@ def corona_shift(ref, mov, sat_ref, sat_mov, upsample=20, lock=None):
     if float(common.mean()) < _floor:
         sh, err = pc_shift(ref, mov, upsample)
         return sh, err, "moon"
-    wgt = ndimage.gaussian_filter(common.astype(np.float32), 5)
+    wgt = _pgauss(common.astype(np.float32), 5)
     wgt *= np.hanning(a.shape[0])[:, None] * np.hanning(a.shape[1])[None, :]
     sh, err, _ = phase_cross_correlation(a * wgt, b * wgt, upsample_factor=upsample,
                                          normalization=None)
@@ -1058,9 +1059,9 @@ def _frame_moon_fit(lum):
 def _moonfree_log(c):
     c = np.clip(c, 0, None).astype(np.float32)
     dark = float(np.percentile(c, 5))
-    sig = 1.4826 * float(np.median(np.abs(c - ndimage.gaussian_filter(c, 3)))) + 1e-6
+    sig = 1.4826 * float(np.median(np.abs(c - _pgauss(c, 3)))) + 1e-6
     x = np.log1p(np.maximum(c - dark, 0.0) / (5.0 * sig))
-    return x, ndimage.gaussian_filter(c, 3) > dark + 5.0 * sig
+    return x, _pgauss(c, 3) > dark + 5.0 * sig
 
 
 def corona_shift_moonfree(ref, mov, sat_ref, sat_mov, mref, mmov, R,
@@ -1098,12 +1099,12 @@ def corona_shift_moonfree(ref, mov, sat_ref, sat_mov, mref, mmov, R,
     sm = sat_mov if (sat_mov is not None and sat_mov.shape == a.shape) else np.zeros(a.shape, bool)
     ga = (oa & (ra > 1.1 * R) & ~ndimage.binary_dilation(sr, iterations=4)).astype(np.float32)
     gb = (ob & (rb > 1.1 * R) & ~ndimage.binary_dilation(sm, iterations=4)).astype(np.float32)
-    a = (a - ndimage.gaussian_filter(a * ga, hp) / np.maximum(ndimage.gaussian_filter(ga, hp), 1e-3)) * ga
-    b = (b - ndimage.gaussian_filter(b * gb, hp) / np.maximum(ndimage.gaussian_filter(gb, hp), 1e-3)) * gb
+    a = (a - _pgauss(a * ga, hp) / np.maximum(_pgauss(ga, hp), 1e-3)) * ga
+    b = (b - _pgauss(b * gb, hp) / np.maximum(_pgauss(gb, hp), 1e-3)) * gb
     common = (ga * gb) * ((ra > rin * R) & (rb > rin * R))
     if float(common.mean()) < 0.02:
         return None
-    w = ndimage.gaussian_filter(common.astype(np.float32), 3)
+    w = _pgauss(common.astype(np.float32), 3)
     w *= np.hanning(H)[:, None] * np.hanning(W)[None, :]
     sh, err, _ = phase_cross_correlation(a * w, b * w, upsample_factor=upsample,
                                          normalization=None)
@@ -1190,7 +1191,7 @@ def _pfm_rate_prepass(paths, epoch, sz=1200):
     R = float(np.median([fr[q][3][2] for q in ps]))
     if rms > max(1.0, 0.005 * R):
         return None, f"Moon positions scatter {rms:.1f} px about the line"
-    return (float(ly[0]), float(lx[0])), {"rms": rms, "n": len(t_), "span_s": float(np.ptp(t_))}
+    return (float(ly[0]), float(lx[0])), {"rms": rms, "n": len(t_), "span_s": float(np.ptp(t_)), "R": R}
 
 
 def _frame_moon_track(fits, use, best, shifts, epoch, strict=True):
@@ -1418,7 +1419,7 @@ def _moon_mask_helps(stacks_half, sat_half, secs, cal, abs_shift,
             g = (~sat_half[s]).astype(np.float32)
             a = ndimage.shift(a, (ady, adx), order=1, mode="nearest")
             g = ndimage.shift(g, (ady, adx), order=1, mode="nearest", cval=0)
-            w = np.float32(s) * ndimage.gaussian_filter(g, 10)
+            w = np.float32(s) * _pgauss(g, 10)
             if mask and s in track:
                 cyt, cxt, Rt = (v / 2.0 for v in track[s])
                 dt = np.hypot(yv[:, None] - cyt, xv[None, :] - cxt)
@@ -1647,7 +1648,7 @@ def _pick_weight_alpha(stacks_half, sat_half, secs, cal, abs_shift, track,
             g = (~sat_half[s]).astype(np.float32)
             a = ndimage.shift(a, (ady, adx), order=1, mode="nearest")
             g = ndimage.shift(g, (ady, adx), order=1, mode="nearest", cval=0)
-            w = np.float32(s ** alpha) * ndimage.gaussian_filter(g, 10)
+            w = np.float32(s ** alpha) * _pgauss(g, 10)
             if s in track:
                 cyt, cxt, Rt = (v / 2.0 for v in track[s])
                 dt = np.hypot(yv[:, None] - cyt, xv[None, :] - cxt)
@@ -3700,11 +3701,11 @@ def _feather_weight(w, valid, sigma, mode=None):
     _mode = (mode or os.environ.get("ECLIPSEFORGE_FEATHER",
                                     _FEATHER_DEFAULT)).lower()
     if _mode == "plain":                       # <= 0.22.15, leaks into the clip
-        return ndimage.gaussian_filter(np.asarray(w, np.float32),
+        return _pgauss(np.asarray(w, np.float32),
                                        sigma).astype(np.float32)
     v = np.asarray(valid, np.float32)
-    den = ndimage.gaussian_filter(v, sigma)
-    num = ndimage.gaussian_filter(np.asarray(w, np.float32) * v, sigma)
+    den = _pgauss(v, sigma)
+    num = _pgauss(np.asarray(w, np.float32) * v, sigma)
     out = np.where(den > 1e-3, num / np.maximum(den, 1e-3), 0.0)
     if _mode == "masked":                      # 0.22.16, steps at the clip edge
         return (out * v).astype(np.float32)
@@ -5031,6 +5032,34 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     _pfm_ep = {p_: _epoch(meta[p_]["ts"]) for s_ in secs for p_ in tiers[s_]}
     _pfm_t = [v for v in _pfm_ep.values() if v is not None]
     _pfm_tref = 0.5 * (min(_pfm_t) + max(_pfm_t)) if _pfm_t else None
+    # WHERE THE SHOOT SITS IN TOTALITY (lab 0.28.1): with the site known, C2,
+    # mid-totality and C3 relative to the first frame (contacts.py), for the
+    # report and the timeline; and the Moon's instant becomes mid-totality
+    # when the shoot spans it (the symmetric choice, see contacts.py)
+    _ct = None
+    try:
+        from . import observer as _obs_c, contacts as _ctm
+        _st_c = _obs_c.load(folder)
+        _ct = _ctm.shoot_contacts(_st_c, [meta[p_]["ts"] for s_ in secs for p_ in tiers[s_]],
+                                  contacts=_ctm.contact_stamps(folder, wd))
+    except Exception:
+        _ct = None
+    if _ct:
+        stats["contacts"] = dict(_ct)
+        _t0c = min(_pfm_t) if _pfm_t else 0.0
+        _mid_ep = _t0c + float(_ct["mid_s"])
+        _ct_line = (f"totality at the site: C2 {_ct['c2_s']:+.0f} s, mid {_ct['mid_s']:+.0f} s, "
+                    f"C3 {_ct['c3_s']:+.0f} s from the first frame ({_ct['duration_s']:.0f} s; "
+                    f"{_ctm.offset_text(_ct)})")
+        if _pfm_t and min(_pfm_t) <= _mid_ep <= max(_pfm_t):
+            _pfm_tref = _mid_ep
+            stats["contacts"]["moon_instant"] = "mid-totality"
+        else:
+            stats["contacts"]["moon_instant"] = "middle of the shoot"
+        progress.log(_ct_line, None)
+        if float(_ct.get("outside_s") or 0) > 10.0:
+            progress.log(f"[warn] frames up to {_ct['outside_s']:.0f} s outside the predicted totality: "
+                         f"the camera clock or the site's time is off by about that much", None)
     if _pfm_tref is None:
         _pfm_on = False
     _pfm_tiers = {}
@@ -5038,7 +5067,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     _pfm_vinfo = {}
     if _pfm_on:
         progress.log(f"Moon placed per frame: every tier stacked with the Moon of "
-                     f"{_pfm_tref - min(_pfm_t):.0f} s into the {np.ptp(_pfm_t):.0f} s shoot", None)
+                     f"{_pfm_tref - min(_pfm_t):.0f} s into the {np.ptp(_pfm_t):.0f} s shoot"
+                     + (" (mid-totality)" if (stats.get("contacts") or {}).get("moon_instant") == "mid-totality"
+                        else ""), None)
         try:
             # up to three middle tiers, combined by the median: one tier's
             # error is ~0.01-0.02 px/s, which over six minutes is 4-7 px
@@ -5061,8 +5092,23 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                           float(np.median([g[1][1] for g in _got])))
                 _pfm_vinfo = {"tiers": [float(g[0]) for g in _got],
                               "each": [[round(2 * g[1][0], 4), round(2 * g[1][1], 4)] for g in _got]}
+                # the rate the eclipse elements give at the site, for comparison
+                # (synthetic 6-min test 2026-10-18: the measured rate came out
+                # 12 % under the injected one; said, not corrected)
+                _vel = ""
+                try:
+                    from . import observer as _obs_v, eclipses as _ecl_v
+                    _st_v = _obs_v.load(folder)
+                    if _st_v and "lat" in _st_v and _st_v.get("date"):
+                        _rr = _ecl_v.moon_rate(_st_v["date"], _st_v["lat"], _st_v["lon"], _st_v.get("height_m") or 0.0)
+                        _Rh = float(np.median([g[2].get("R", 0) for g in _got]))
+                        if _rr and _Rh > 0:
+                            _vel = f"; the eclipse elements at the site give {2 * _rr * _Rh:.3f} px/s"
+                            _pfm_vinfo["elements_px_s"] = round(2 * _rr * _Rh, 4)
+                except Exception:
+                    _vel = ""
                 progress.log(f"Moon against the corona: {2 * np.hypot(*_pfm_v):.3f} px/s "
-                             f"(median of {len(_got)} tier(s)); every tier placed with it", None)
+                             f"(median of {len(_got)} tier(s)); every tier placed with it{_vel}", None)
             else:
                 progress.log("Moon velocity not measured: each tier fits its own", None)
         except Exception as _e:
@@ -5173,8 +5219,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         lums, sats, bayers = {}, {}, {}
         raw_bayers = []
         _clipfull = {}
-        for p in files:
-            rf = open_frame(p)
+        # the frames of this tier are decoded in parallel (LibRaw releases
+        # the GIL); the loop below then runs over the decoded frames in order
+        from .parallel import tmap as _tmap
+        _rfs = _tmap(open_frame, files)
+        for p, rf in zip(files, _rfs):
             if color_info is None:
                 from .raw import pick_wb
                 _wb, _wbname = pick_wb(rf, wb_source)
@@ -5288,6 +5337,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                 stats["sat_source"] = "observed (" + os.path.basename(p) + ")"
             raw_bayers.append((p, rf.bayer, rf.sat_level))
             del rf
+        del _rfs
         # A flat from another body, another crop mode or another orientation is
         # not a flat for these frames. Checked against the frames of THIS tier,
         # so a bracket that changes size partway disables the flat with a
@@ -5459,17 +5509,20 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         # beyond 3.8 R.
         if _iso_on and raw_bayers:
             try:
-                _im, _strong = [], []
-                for _, bay, sat_level in raw_bayers:
+                def _iso_one(_rb):
                     _inf = {}
-                    _im.append(isolated_hot(bay, float(sat_level),
-                                            read_noise=_calib_read_noise, info=_inf))
-                    _st = np.zeros(_im[-1].shape, bool)
+                    _m = isolated_hot(_rb[1], float(_rb[2]),
+                                      read_noise=_calib_read_noise, info=_inf)
+                    _st = np.zeros(_m.shape, bool)
                     if _inf.get("cand"):
                         _k = _inf["keep"] & (_inf["z"] >= _ISO_STRONG)
                         _st[_inf["yx"][_k, 0], _inf["yx"][_k, 1]] = True
+                    return _m, _st
+                from .parallel import tmap as _tmap2
+                _im, _strong = [], []
+                for _m, _st in _tmap2(_iso_one, raw_bayers):   # one frame per thread
+                    _im.append(_m)
                     _strong.append(_st)
-                    del _inf
                 _shp = _im[0].shape
                 if all(m.shape == _shp for m in _im):
                     _cnt = np.zeros(_shp, np.uint8)
@@ -5767,7 +5820,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     _dy, _dx = _shifts[p][0], _shifts[p][1]
                     _sh = ndimage.shift(lums[p], (_dy, _dx), order=3, mode="nearest")
                     _shifted[p] = _sh            # reused by the stacking loop below
-                    _m = ndimage.gaussian_filter(0.5 * (_sh + _ref_l), 3.0)
+                    _m = _pgauss(0.5 * (_sh + _ref_l), 3.0)
                     _thr = max(float(np.percentile(_m[_ref_ok], 60)), 5.0 * _sig)
                     _ok = (_ref_ok & (_m > _thr)
                            & ~(ndimage.shift(sats[p].astype(np.float32), (_dy, _dx), order=0,
@@ -6280,13 +6333,13 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             xa, ga = prep_corona(np.ascontiguousarray(a), np.ascontiguousarray(sa))
             xb, gb = prep_corona(np.ascontiguousarray(b), np.ascontiguousarray(sb))
             if xa is not None and xb is not None and (ga & gb).mean() > INTRA_LOCK_MIN_WEIGHT:
-                wgt = ndimage.gaussian_filter((ga & gb).astype(np.float32), 5)
+                wgt = _pgauss((ga & gb).astype(np.float32), 5)
                 return [xa * wgt * _win[0], xb * wgt * _win[1]]
             return None
         sat2 = ndimage.binary_dilation(sat_half[s2][p2y:p2y + S, p2x:p2x + S], iterations=4)
         med = np.median(a); sig = 1.4826 * np.median(np.abs(a - med))
-        good = (~sat2) & (ndimage.gaussian_filter(a, 3) > med + 5 * sig)
-        wgt = ndimage.gaussian_filter(good.astype(np.float32), 5)
+        good = (~sat2) & (_pgauss(a, 3) > med + 5 * sig)
+        wgt = _pgauss(good.astype(np.float32), 5)
         # HOW HARD TO HIGH-PASS BEFORE CORRELATING ACROSS EXPOSURES.
         #
         # This was a flat 25 px, which is aggressive: at the reference set's
@@ -6339,7 +6392,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             if _tangential:
                 x = x - _arc_blur(x, _hp, (p1y, p1x) if _k == 0 else (p2y, p2x))
             else:
-                x -= ndimage.gaussian_filter(x, _hp)
+                x -= _pgauss(x, _hp)
             out.append(x * wgt * _win[_k])
         return out
 
@@ -7639,6 +7692,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                 rate_r=_rate_r)
             _mtrack_line = tinfo.pop("_line", None)
             stats["moon_track"] = tinfo
+            # per-tier Moon centres as measured (before the line fit), kept so an
+            # exposure-dependent offset can be checked against the track (2026-10-17)
+            try:
+                stats["moon_track"]["tiers"] = {
+                    f"{_s:g}": {"t": round(float(tier_time[_s]), 3),
+                               "cy": round(float(tier_moon[_s][0]), 2),
+                               "cx": round(float(tier_moon[_s][1]), 2),
+                               "R": round(float(tier_moon[_s][2]), 2)}
+                    for _s in sorted(tier_moon)}
+            except Exception:
+                pass
             if not tinfo.get("same_instant"):
                 try:
                     _one_moon = _one_moon_target(track, tinfo, _mtrack_line, tier_time,
@@ -7886,13 +7950,21 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     # merge as exact zeros -- black. See the fill below the loop.
     _fill_idx = None
     _fill_rgb = None
+
+    # colour-plane move AND tier shift in one cubic pass per channel (see
+    # _cp_shift); the shift used to sit below the camera matrix. The next
+    # tier(s) are demosaiced and shifted in the background while this one is
+    # merged (parallel.Prefetch): that pair is the bulk of the time per tier
+    def _prep_tier(s_):
+        ady_, adx_ = abs_shift[s_]
+        return _cp_shift(_demosaic(stacks_bayer[s_], demosaic_method), _cp,
+                         2 * ady_, 2 * adx_, unsq=_unsq)
+    from .parallel import Prefetch as _Prefetch
+    _pf = _Prefetch(_prep_tier, secs)
     for k, s in enumerate(secs):
-        # colour-plane move AND tier shift in one cubic pass per channel (see
-        # _cp_shift); the shift used to sit below the camera matrix
         ady, adx = abs_shift[s]
         ady, adx = 2 * ady, 2 * adx
-        rgb = _cp_shift(_demosaic(stacks_bayer[s], demosaic_method), _cp,
-                        ady, adx, unsq=_unsq)
+        rgb = _pf.get(s)
         # cmax is the CLIPPING test, so it has to be measured in raw units,
         # before white balance. WB runs at G=1, so the red gain (~2.1x) used to
         # push a red pixel past 0.97*sat_level while its photosite sat at only
@@ -8221,6 +8293,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         del _lt
         del rgb, w, wsat, cmax, _valid
         progress.log(f"merged tier {s:g}s", 0.55 + 0.3 * (k + 1) / n)
+    _pf.close()
     # WHERE NO TIER HAS ANY WEIGHT, THE MERGE USED TO PRODUCE BLACK.
     #
     # `hdr = acc / max(wsum, 1e-9)` is 0/0 at every pixel that is clipped in all
@@ -9198,7 +9271,7 @@ def fit_limb_rays(lum, cy0, cx0, R0, n_ang=720, iters=5, decim=2):
     dragging the centre toward the bright side. A per-ray half-level crossing is
     normalized by that ray's own contrast, so azimuthal brightness cannot move
     it."""
-    sm = ndimage.gaussian_filter(lum[::decim, ::decim], 2)
+    sm = _pgauss(lum[::decim, ::decim], 2)
     H, W = sm.shape
     cy, cx, R = cy0 / decim, cx0 / decim, R0 / decim
     ang = np.linspace(0, 2 * np.pi, n_ang, endpoint=False)
@@ -9293,7 +9366,7 @@ def fit_limb(lum, cy0, cx0, n_ang=720, R0=None):
     The band now comes from the measured disc instead, so nothing here depends
     on how big the Moon happens to be in the frame.
     """
-    sm = ndimage.gaussian_filter(lum[::2, ::2], 2)
+    sm = _pgauss(lum[::2, ::2], 2)
     cy, cx = cy0 / 2, cx0 / 2
     if R0 is None:
         d = find_disc(lum)
@@ -9471,7 +9544,7 @@ def prepare_contact(folder, raw_path, progress):
 
 def fit_limb_band(lum, cy0, cx0, R0, band=36, n_ang=720):
     """Refine a limb fit within +/-band px of a known solution (full-res units)."""
-    sm = ndimage.gaussian_filter(lum[::2, ::2], 2)
+    sm = _pgauss(lum[::2, ::2], 2)
     cy, cx, R = cy0 / 2, cx0 / 2, R0 / 2
     b = band / 2
     for _ in range(3):

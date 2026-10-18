@@ -307,11 +307,22 @@ def build(stats):
                      if _r.get("moon_from_target_px") is not None else ""))
         elif _bhz.get("why"):
             A(f"bracket HDRs : not used ({_bhz['why']})")
+        _ctz = stats.get("contacts") or {}
+        if _ctz.get("c2_s") is not None:
+            try:
+                from .contacts import offset_text as _ott
+                _clk = _ott(_ctz)
+            except Exception:
+                _clk = f"camera clock UTC{_ctz['offset_h']:+g}"
+            A(f"totality     : C2 {_ctz['c2_s']:+.0f} s, mid {_ctz['mid_s']:+.0f} s, C3 {_ctz['c3_s']:+.0f} s "
+              f"from the first bracket frame ({_ctz['duration_s']:.0f} s at the site; shoot {_ctz.get('shoot_s', 0):.0f} s;"
+              f" {_clk})")
         _pfz = stats.get("perframe_moon") or {}
         if _pfz.get("tiers"):
             _v = _pfz.get("v_px_s")
             A(f"Moon placed  : per frame on {len(_pfz['tiers'])} tier(s), every tier stacked with the Moon of "
               f"{_pfz.get('t_ref_s', 0):.0f} s into the shoot"
+              + (" (mid-totality)" if _ctz.get("moon_instant") == "mid-totality" else "")
               + (f"; Moon against the corona {math.hypot(*_v):.3f} px/s" if _v else ""))
             A("             : (corona aligned clear of every Moon, frames placed on the lunar track,")
             A("             : limb zone averaged from the frames that saw it as the target instant)")
