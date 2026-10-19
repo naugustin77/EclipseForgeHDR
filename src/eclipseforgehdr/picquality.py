@@ -4,10 +4,10 @@ Everything here is measured on the display-encoded composite as it is written,
 scale-free (radii in R), so the same thresholds hold for any set and size. Each
 check returns a value, a grade (ok / check / bad) and one line saying what it
 means and what to reach for. Thresholds were set by running the same code on
-published renders (Druckmüller 2026, other published renders, Project Helion) and on
+published renders and on
 our own renders with known faults.
 
-The list follows what Project Helion's grading names (ring_break, inner_halo,
+The list follows common grading names (ring_break, inner_halo,
 grain_level, corona_acutance, limb_width, colour_step, corona_neutrality,
 limb_blue, clipped_black/white, posterization, flat_blocks), each re-derived
 here from first principles rather than copied.
@@ -275,14 +275,13 @@ def grade(rgb, cy, cx, R, Rmask=None):
 # checks are now read as five things a viewer sees -- detail, noise,
 # artefacts, colour, tones -- each graded by its worst check on seven steps
 # (excellent to 0.5x the reference, very good 0.75x, good 1x, fair 1.5x,
-# weak 2.5x, poor 4x, then very poor; the scale Project Helion's grading
-# uses). The picture's grade is their average, at most two steps above the
+# weak 2.5x, poor 4x, then very poor; a common grading scale). The picture's grade is their average, at most two steps above the
 # weakest. Tones count only when they fail. Each category says whether what
 # limits it is the FRAMES (detail, noise: light, focal length, seeing) or the
 # PROCESSING (artefacts, colour, tones: settings or a fault), and the
 # headline gives one sentence and one thing to try for the weakest.
 # References: detail 0.05 is the low end of the published renders
-# (Druckmueller and others: 0.05-0.07) -- "good" means that, not "passes".
+# (0.05-0.07) -- "good" means that, not "passes".
 REF = {"rings": 0.8, "limb_dark_rim": 6.0, "limb_width": 30.0, "corona_neutral": 6.0,
        "colour_step": 2.0, "limb_blue": 4.0, "grain": 2.5, "grain_gap": 2.5,
        "detail": 0.05, "flat_blocks": 1.0, "clipped_white": 0.5, "clipped_black": 0.5,

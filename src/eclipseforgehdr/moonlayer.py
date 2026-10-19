@@ -4,7 +4,7 @@ Built from the long frames of the bracket, after the stack, in about a minute,
 and cached as MOON_FILE on the merge grid (0.5 = neutral, the format the old
 earth.npy had, so render.py's Earthshine control drives it unchanged).
 
-Recipe (after Project Helion's log on the same frames, re-derived and measured
+Recipe (derived and measured
 on the reference test set, Oct 2026):
   1. every long frame read from the raw file, calibrated with the cached master
      bias / dark / flat when they fit, superpixel green;

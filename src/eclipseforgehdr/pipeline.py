@@ -953,7 +953,7 @@ def _moon_track(tier_moon, tier_time, progress, same_instant=False, rate_r=None)
     # expectation only judges it. With the site and the eclipse known it is
     # this eclipse at this place, from NASA's elements (eclipses.moon_rate),
     # times the measured lunar radius in px: 0.38 px/s for the reference test set,
-    # which measured 0.42-0.44 (Helion: 0.45). Without a site it falls back to
+    # which measured 0.42-0.44. Without a site it falls back to
     # 0.5 arcsec/s against a 1920 arcsec Moon, and only the gross checks run.
     _Rr = float(np.polyval(cr, float(np.median(t)))) if len(cr) else 0.0
     if _Rr > 0 and not same_instant:
@@ -4321,8 +4321,8 @@ def shift_bayer_subpixel(a, dy, dx, keep=None):
     put. That threw away up to 1 px per axis of each frame's measured
     position, and the intra-tier stack paid for it in resolution: with four
     frames, structure 4 px across kept about 73 % of its contrast and 3 px
-    about 56 % (2026-10-10, against Helion's full-resolution run of the same
-    frames).
+    about 56 % (2026-10-10, against a full-resolution reference render of the
+    same frames).
 
     The even part is still moved by slicing. What is left (at most 1 px, i.e.
     half a photosite of one colour) moves each of the four CFA planes by the
@@ -4662,7 +4662,7 @@ def _cp_shift(rgb, cp, dy=0.0, dx=0.0, unsq=None):
 # differential refraction, dR/dh, 1.4-1.6 % at 7 degrees of altitude. The
 # Moon is round, so the limb profile shows it directly as a cos(2 theta) term
 # (reference test set, 2026-10-10: axis ratio 1.53 %, residual 0.34 px rms;
-# Helion corrects 1.41 % on the same frames). Every ring statistic in the
+# a reference render corrects 1.41 % on the same frames). Every ring statistic in the
 # detail layers assumes a round Sun, and at 3 R the oval is +-14 px.
 #
 # The stretch is folded into the ONE cubic resample every tier already goes
@@ -6314,7 +6314,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             # weight below ramps 0 -> 1 exactly across the limb and nothing
             # removed the limb step before the correlation, so the cross-tier
             # links were part Moon: on the reference set the Moon crossed the stack at
-            # 0.23 px/s where Helion measured 0.45 px/s on the same frames
+            # 0.23 px/s where a reference render measured 0.45 px/s on the same frames
             # (and the code's own expectation was 0.32 px/s half-res). Tiers
             # were registered about half-way to the Moon, ~0.6 px off on the
             # corona between neighbours and ~4 px between the fast and the
@@ -6446,7 +6446,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         # THE MOON-FREE LINK (lab, 2026-10-15). On the reference test set -- one
         # pass, twelve tiers over 62 s -- the network followed the Moon: the
         # lunar track came out at 0.11 px/s where the corona says 0.42-0.44
-        # (and Helion measured 0.45 on the same frames), and matched directly
+        # (and a reference render measured 0.45 on the same frames), and matched directly
         # on the band-passed corona, the 1/60 s and 1.6 s tiers were placed
         # 8.5 half-res px off. The opt-in corona link above uses prep_corona,
         # whose disc fill and per-radius mean about each tier's own Moon still

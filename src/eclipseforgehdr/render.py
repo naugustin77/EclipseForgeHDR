@@ -156,6 +156,9 @@ DEFAULTS = {
     # not this change.
     "temp": 1.0, "tint": 1.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.0, "hlDesat": 0.0,
     "outGamma": 1.0, "bgBlack": 0.02,
+    # Sky pedestal (lab 2026-10-19): the share of the measured sky light that
+    # is taken off before the envelope curve -- see Layers.sky_p3. 0 = off.
+    "skySub": 0.0,
     # Final sharpening (lab, Oct 2026): a published Photoshop finish with a
     # noise gate. All off by default -- it is a finish, not a default look.
     "finalMid": 0.0, "finalDark": 0.0, "finalLight": 0.0, "finalNoise": 3.0,
@@ -431,6 +434,23 @@ class Layers:
         self.lum_span = float(hi - lo)
         xn = np.clip((lum - lo) / (hi - lo), 0, 1)
         Bg = xn ** (1 / 3.0)
+        # THE SKY PEDESTAL (lab 2026-10-19). A sunset (or bright) sky adds a
+        # smooth light level under the whole frame, and the black point above
+        # deliberately keeps it (it sits 5 sigma under the sky). Radial flatten
+        # then multiplies that pedestal along with the corona, so the sky
+        # turns into a bright plateau while the corona still falls. Measured
+        # here once, in xn units: the 2nd percentile of the outer frame
+        # (beyond 80 % of the largest radius and beyond 3 R). The Sky pedestal
+        # control takes that share of it off in linear light before the
+        # envelope curve -- a constant, with no radial shape, so it can not
+        # draw a circle (a radius-shaped gain that falls does: tested
+        # 2026-10-19 and dropped).
+        _rmax = float(r.max())
+        _fm = (r > 0.8 * _rmax) & (r > 3.0 * max(float(self.R), 1.0))
+        if _fm.sum() < 2000:
+            _fm = r > 3.0 * max(float(self.R), 1.0)
+        self.sky_p3 = float(np.percentile(xn[_fm], 2)) if _fm.sum() > 100 else 0.0
+        del _fm
         # Sized from the image, not capped at a literal 6000 px: on a larger
         # sensor, or with the disc off-centre, every radius past the cap
         # collapsed into one bin and the radial-flatten control quietly stopped
@@ -457,6 +477,7 @@ class Layers:
             idx = np.flatnonzero(ok)
             prof[~ok] = np.interp(np.flatnonzero(~ok), idx, prof[idx])
         prof = ndimage.gaussian_filter1d(prof, 25)
+        self.prof_max = float(max(prof.max(), 1e-6))   # for the Sky pedestal
         prof /= max(prof.max(), 1e-6)
         # INTERPOLATE, do not round the radius. `prof[rid]` with
         # rid = r.astype(int) makes the divisor piecewise-constant inside each
@@ -1294,14 +1315,14 @@ def apply_tone(rgb, pts, ceiling, moon_pts=None, eg=None, pin=None):
 
 # THE LOOK CONTROLS (lab 0.24). Four controls that act on the finished picture
 # and set what a viewer reads as the "look" of a published eclipse, measured off
-# Druckmüller, other published and Project Helion renders (looks/refs.json):
+# published renders (looks/refs.json):
 #   coronaLevel  the median display brightness of the inner corona, 1.05-1.15 R.
-#                Helion and the others sit at 0.53-0.69, i.e. the corona is NOT
+#                The published renders sit at 0.53-0.69, i.e. the corona is NOT
 #                white there; ours was 0.9+. 0 = off (picture left as it is).
 #   skyLevel     a screen lift of everything outside the Moon towards the sky
 #                colour: the sky becomes ~skyLevel, the white corona is untouched.
-#   skyColour    the lift's hue on one axis: 0 neutral grey, 1 Helion's sky blue
-#                (R/G 0.766, B/G 1.323), 2 Druckmüller's deeper blue.
+#   skyColour    the lift's hue on one axis: 0 neutral grey, 1 a light sky blue
+#                (R/G 0.766, B/G 1.323), 2 a deeper blue.
 #   moonColour   the Moon disc's hue on the same axis (0 = neutral grey).
 # All four off by default, so every render before them is unchanged.
 LOOK_BLUE = np.array([0.766, 1.0, 1.323])
@@ -1727,9 +1748,23 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
                 / np.log1p(_K)).astype(np.float32)
     else:
         _env = src["bg"]
+    # SKY PEDESTAL -- see Layers.sky_p3. The radial profile radial flatten
+    # divides by is the same median with the same pedestal taken off, so the
+    # far field is not over-lifted. 0 = off: exactly the picture before.
+    _rp = src["rprof"]
+    _ss = float(P.get("skySub", 0.0) or 0.0)
+    _p3 = _ss * float(getattr(layers, "sky_p3", 0.0) or 0.0)
+    if _p3 > 0:
+        _env = np.cbrt(np.maximum(np.clip(_env, 0, None).astype(np.float32) ** 3
+                                  - np.float32(_p3), 0)).astype(np.float32)
+        _pm = float(getattr(layers, "prof_max", 1.0) or 1.0)
+        _q = np.cbrt(np.maximum((layers.rprof_1d.astype(np.float64) * _pm) ** 3 - _p3, 0)) / _pm
+        _rp = np.maximum(np.interp(r * decim, np.arange(_q.size, dtype=np.float32), _q),
+                         0.12).astype(np.float32)
+        del _q
     B = (_env ** P["envGamma"]) * (1 - P["innerDim"] * wG)
     del _env
-    B = B / (src["rprof"] ** P["radialFlatten"])
+    B = B / (_rp ** P["radialFlatten"])
     B *= (1 - P["radialFlatten"] * 0.5)       # keep overall level roughly stable
     det = (1 - P["fnMix"] * wf) * mg + P["fnMix"] * wf * fn
     det = det + P["pelGain"] * (src["pel"] - 0.5)

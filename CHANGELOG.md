@@ -5,6 +5,37 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.29.1
+
+**Caches from 0.28.0 and 0.29.0 stay valid**; nothing in the stack changes.
+
+**Rendering**
+- **Sky pedestal** (`skySub`, 0–1, default 0 = off): the light level of a
+  bright sky is measured once when the layers load, as the 2nd percentile of
+  the outer frame (beyond 80 % of the largest radius and beyond 3 R). The
+  slider takes that share of it off in linear light before the envelope curve.
+  Radial flatten divides by the radial profile with the same level taken off,
+  so the far field is not over-lifted. A constant has no radial shape, so it
+  cannot print a circle. Preview, export and 1:1 crop use the same measured
+  value. At 0 the render is bit-identical to 0.29.0.
+- **Black point** slider range 0–0.12 → 0–0.2.
+
+**Looks**
+- **Sunflower** (new): golden sunset look in Mono + tints. Corona colour
+  1 / 0.61 / 0.30, near-neutral brown sky colour, Sky pedestal 0.5, Radial
+  flatten 0.49, inner corona level 0.76, highlight compression 0.75. Detail:
+  FNRGF share 0.22 / strength 0.61, partial convolution blend 0.25 with 2–32 px
+  weights 0 / 1.32 / 1.38 / 0.76 / 0.21, filament detail 1.7, grain smoothing
+  0.40, Structure 0.2, final sharpening 0.60 / 0.39. Fitted per radial band in
+  CIELAB, with the inner fine detail kept above Clean Steel M4 and no added
+  white or colour clipping, then set by eye on a full-resolution test set.
+- Internal look keys renamed (`brightStreamers`, `calmBlue`); the names on the
+  page are unchanged.
+
+**Code comments**
+- Comments no longer name other software or individual renders; citations of
+  published papers stay.
+
 ## 0.29.0
 
 **Caches from 0.28.0 stay valid**; the stars are checked again on the next

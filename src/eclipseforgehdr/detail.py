@@ -280,7 +280,7 @@ NAFE_INPUT = "flatten"      # "flatten" = 0.23.8's input (recipe 4); "lf" = reci
 PROM_FEATHER_PX = 4.0       # 0.23.11 lab: soft edge on MGN's prominence holes, see _prom_feather
 ALONG_SIGMA_R = 0.0         # along-filament smoothing OFF (build 29, 2026-10-12): its coherence gate left a patchwork of radially smeared streaks and raw-noise patches in MGN (gate vs MGN fine-scale std r = -0.96, one test set); grain goes at the end with NXT. Was 0.010 R (builds 13-28)
 MGN_LIMB_M0 = (20.0, 40.0)  # build 29: the ring-average residual of the flattened log luminance is removed within 20 px of the limb mask, fading out by 40 px (see build_layers); None = off
-LAYER_BUILD = 35            # 35 = a filled prominence core rises over its whole depth, evenly in ratio (FITS test set, softer edge, plateau kept; 2026-10-16). 34 = the filament layer's radial profile smoothed past the rim (4 px), so its own band no longer prints fine rings round the Moon (FITS test set: coherent rings at 1.04-1.6 R gone or cut to a third, 2026-10-16). 33 = the filled prominence core is a membrane (Laplace) fill from the measured pixels around it, lifted to its level inward, and replaces the core's unreliable pixels outright (no seams, arcs or plateau; one test set, 2026-10-16). 32 = a filled prominence core is a soft dome from its measured edge to its level, not a flat plateau with a step at the edge (one test set, 2026-10-16). 31 = prominence core fill finds the core above the limb band and also fills a core the short frames do not cover at all when its rim reads > 1 sigma (one test set came out hollow, 2026-10-16). 30 = MGN normalisation span wide enough for the darkest corona (no flat 0.45 hole where the residual fell below -6 sd; reference set at 8 o'clock, 2026-10-16). 29 = MGN audit 2026-10-12: no along-filament smoothing; MGN scale ladder evenly spaced from the resolution floor (no near-duplicate scale); MGN global term centred on the layer's neutral 0.5; ring-average limb residual removed before MGN (no bright/dark ring 1-12 px out). 28 = the large prominence core in the clean corona filled with a floor, a texture limit and a ceiling (no 1e9 blue pixels, the blue blob beside one test set's big prominence, 2026-10-11); inner and filament detail start at the rim peak. 27 = audit batch 3 (2026-10-10): ring statistics of MGN, FNRGF, the inner corona and the debands follow the limb (the oval, A5); FNRGF fitted from every pixel of each ring (D4); hill_sigma from the merged noise floor (A7); lifted stars tapered by significance, no zero clip (A8); prominence gate in measured sigma of the smoothed map (A11); inner-detail noise measured against the merge noise (D2); detail sigmas floored at 1.2 px (D3). 26 = filament detail: bands >= 6 px weighted by radial structure past 1.5-2.2 R, target falling as (r/2)^-0.75 (no blotches in the faint corona, 2026-10-10). 25 = filament detail layer (band_detail.npy: per-scale contrast, noise-limited, after Helion's ACHF, 2026-10-10). 24 = stars lifted with the stars.py build-6 list (a catalogue-confirmed faint star is lifted and laid back too, 2026-10-10). 23 = inner detail ring statistics follow the limb (no dark ring 8-20 px outside it, 2026-10-10). 22 = inner detail layer (loops near the limb, inner_detail.npy, 2026-10-10). 21 = sensor artefacts (hot green photosites) no longer lifted as stars (stars.py build 5, 2026-10-10). 20 = catalogue-confirmed stars lifted too (starcat.py, 2026-10-09). 19 = stars lifted out of the corona before every layer (stars.remove, 2026-10-09). 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
+LAYER_BUILD = 35            # 35 = a filled prominence core rises over its whole depth, evenly in ratio (FITS test set, softer edge, plateau kept; 2026-10-16). 34 = the filament layer's radial profile smoothed past the rim (4 px), so its own band no longer prints fine rings round the Moon (FITS test set: coherent rings at 1.04-1.6 R gone or cut to a third, 2026-10-16). 33 = the filled prominence core is a membrane (Laplace) fill from the measured pixels around it, lifted to its level inward, and replaces the core's unreliable pixels outright (no seams, arcs or plateau; one test set, 2026-10-16). 32 = a filled prominence core is a soft dome from its measured edge to its level, not a flat plateau with a step at the edge (one test set, 2026-10-16). 31 = prominence core fill finds the core above the limb band and also fills a core the short frames do not cover at all when its rim reads > 1 sigma (one test set came out hollow, 2026-10-16). 30 = MGN normalisation span wide enough for the darkest corona (no flat 0.45 hole where the residual fell below -6 sd; reference set at 8 o'clock, 2026-10-16). 29 = MGN audit 2026-10-12: no along-filament smoothing; MGN scale ladder evenly spaced from the resolution floor (no near-duplicate scale); MGN global term centred on the layer's neutral 0.5; ring-average limb residual removed before MGN (no bright/dark ring 1-12 px out). 28 = the large prominence core in the clean corona filled with a floor, a texture limit and a ceiling (no 1e9 blue pixels, the blue blob beside one test set's big prominence, 2026-10-11); inner and filament detail start at the rim peak. 27 = audit batch 3 (2026-10-10): ring statistics of MGN, FNRGF, the inner corona and the debands follow the limb (the oval, A5); FNRGF fitted from every pixel of each ring (D4); hill_sigma from the merged noise floor (A7); lifted stars tapered by significance, no zero clip (A8); prominence gate in measured sigma of the smoothed map (A11); inner-detail noise measured against the merge noise (D2); detail sigmas floored at 1.2 px (D3). 26 = filament detail: bands >= 6 px weighted by radial structure past 1.5-2.2 R, target falling as (r/2)^-0.75 (no blotches in the faint corona, 2026-10-10). 25 = filament detail layer (band_detail.npy: per-scale contrast, noise-limited, per-band adaptive gain, 2026-10-10). 24 = stars lifted with the stars.py build-6 list (a catalogue-confirmed faint star is lifted and laid back too, 2026-10-10). 23 = inner detail ring statistics follow the limb (no dark ring 8-20 px outside it, 2026-10-10). 22 = inner detail layer (loops near the limb, inner_detail.npy, 2026-10-10). 21 = sensor artefacts (hot green photosites) no longer lifted as stars (stars.py build 5, 2026-10-10). 20 = catalogue-confirmed stars lifted too (starcat.py, 2026-10-09). 19 = stars lifted out of the corona before every layer (stars.remove, 2026-10-09). 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
                             # them from a cached stack when a run's number is older
 
 
@@ -1217,7 +1217,7 @@ def polar_partial_blur(f, w, cy, cx, sigmas, band=384, progress=None,
 # ACHF's shape only separates from isotropic at sigma of several hundred pixels,
 # which is large-scale structure, not the fine detail this was reached for.
 #
-# What this does NOT reject: ACHF as Druckmuller ships it, which has 38 tuned
+# What this does NOT reject: ACHF as its authors ship it, which has 38 tuned
 # parameters and a "nonlinearity in the use of filtered images" (thesis p.68)
 # that no source specifies. It rejects the kernel SHAPE as a drop-in for ours,
 # at our scales, which is what the reading of the literature suggested trying.
@@ -1394,8 +1394,8 @@ def fnrgf_robust(lum, r, cy, cx, r0, order=6, na=1440, rmax=None,
         ridge[2 * m - 1] = ridge[2 * m] = 1e-3 * m * m
     # PER-HARMONIC ATTENUATION, applied when the polynomial is EVALUATED, with
     # SEPARATE series for the mean and the standard deviation. That is how
-    # Druckmuller's own program does it (FNRGFsoftware/ImgProc.pas,
-    # PointAttenFourier) and the thesis says why a hard cutoff will not do:
+    # the method's published reference implementation does it (per-harmonic
+    # attenuation of the Fourier terms) and the thesis says why a hard cutoff will not do:
     # "The necessity to treat information on different spatial frequencies in
     # a different manner was inevitable." It also gives the constraint -- the
     # deviation series must not out-run the mean series -- and the failure mode
@@ -1516,7 +1516,7 @@ def fnrgf_robust(lum, r, cy, cx, r0, order=6, na=1440, rmax=None,
         # structure back out. Lowering it is not the answer either: a relative
         # floor can collapse toward zero where the fit happens to be very good,
         # and then the division blows up (measured: flat grey with blown
-        # blobs). Druckmuller's program does neither. It ADDS an absolute noise
+        # blobs). The published reference implementation does neither. It ADDS an absolute noise
         # variance, estimated once from the outermost rings
         # (EstimateAdditiveNoiseRing), which cannot rise with the signal and
         # cannot collapse to zero.
@@ -3449,7 +3449,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
 
 # THE INNER DETAIL LAYER (2026-10-10: the innermost corona is "mostly
 # white and overprocessed" next to the references). Measured on the reference
-# stack against Druckmueller's and another published render of the same eclipse: the
+# stack against two published renders of the same eclipse: the
 # small structure close to the limb is 2-3x weaker, the coarse mottle as strong
 # or stronger -- while the stack carries that structure well above its noise.
 #   * band: a difference of Gaussians of the log corona (stars and prominences
@@ -3957,14 +3957,14 @@ def denoise_loglum(L, noise_map, ks=(1.5, 1.0, 0.0, 0.0), levels=4):
 
 # THE FILAMENT DETAIL LAYER (lab 0.25.1, 2026-10-10)
 #
-# Measured against a Helion full-resolution run of the reference frames (status note
-# 2026-10-10-filament-crispness-diagnosis): from 2 R out its filaments
+# Measured against a full-resolution reference render of the reference frames
+# (2026-10-10): from 2 R out its filaments
 # (structures 12-50 px wide) carry 2-2.5x our contrast while our grain (3-12 px)
 # is up to 2x theirs. Our layers boost every fine scale about equally at every
 # radius; the partial-convolution masks are unsharp masks, high-pass, so each
 # of them carries the grain too, and FNRGF (order 30) is ten times too coarse
-# for filaments. Helion's ACHF gives each band the gain that brings it to a
-# target contrast, capped by that band's own noise.
+# for filaments. An adaptive per-band gain gives each band the gain that brings
+# it to a target contrast, capped by that band's own noise.
 #
 # This layer does the same on the log luminance of the clean corona (stars
 # lifted, prominences taken out): difference-of-Gaussian bands at
@@ -3975,8 +3975,8 @@ def denoise_loglum(L, noise_map, ks=(1.5, 1.0, 0.0, 0.0), levels=4):
 # within BAND_BUDGET; nothing where the band is below the noise (gate on
 # signal/noise 0.5..2; the finest band by the next band's); smoothed over 2 sigma. The two coarse bands ramp in
 # from 1.3 to 1.9 R so they do not lift blotches next to the limb.
-# Result on the reference set: filaments 0.8-1.4x Helion's contrast at 1.8-3 R, grain
-# at or below theirs (with partial convolution at 0.15).
+# Result on the reference set: filaments 0.8-1.4x the reference render's contrast at
+# 1.8-3 R, grain at or below its (with partial convolution at 0.15).
 # Rendered as rgb x exp(bandDetail x layer), composite view, like Inner detail.
 BAND_DETAIL_FILE = "band_detail.npy"
 BAND_SIGMAS = (1.5, 3.0, 6.0, 12.0, 24.0)        # px at R = 617
@@ -4008,7 +4008,7 @@ BAND_NOISE_TILE = 64
 # lets through. Filaments there are radial, the blotches are not: past
 # BAND_FAR_R the gain of the bands >= 6 px is weighted by how radial the
 # band's own structure is (structure tensor: tangential over radial gradient
-# energy), and their target falls as (r/2)^-BAND_FAR_FALL like Helion's.
+# energy), and their target falls as (r/2)^-BAND_FAR_FALL as in the reference render.
 BAND_FAR_R = (1.5, 2.2)          # the radial weighting eases in over this
 BAND_ANISO = (0.15, 0.6)         # radial-ness: no gain below, full above
 BAND_FAR_FALL = 0.75

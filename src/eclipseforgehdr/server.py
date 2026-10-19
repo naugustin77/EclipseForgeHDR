@@ -1236,6 +1236,10 @@ def get_geometry():
                     "limbMargin": ly.limb_margin / ly.prev_decim,
                     "bgChroma": [float(x) for x in ly.bg_chroma],
                     "rprofile": [round(float(x), 5) for x in ly.rprof_1d],
+                    # the Sky pedestal (lab 2026-10-19): the sky light measured
+                    # in xn units, and the profile's scale -- see render.Layers
+                    "skyP3": float(getattr(ly, "sky_p3", 0.0) or 0.0),
+                    "profMax": float(getattr(ly, "prof_max", 1.0) or 1.0),
                     "coronaGain": [float(x) for x in ly.corona_gain],
                     "coronaRoverGB": ly.corona_r_over_gb,
                     "hasHill": bool(getattr(ly, "has_hill", False)),
