@@ -1,4 +1,4 @@
-__version__ = "0.29.1"
+__version__ = "0.29.2"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -351,8 +351,8 @@ CACHE_FAMILIES = (
     # Its own family: one re-stack per folder.
     # 0.29.0 stacks on several threads with bit-identical results and changes
     # nothing else the stack writes: 0.28.0 caches stay valid. 0.29.1 changes
-    # only the rendering (Sky pedestal, Sunflower look).
-    frozenset({"0.28.0", "0.29.0", "0.29.1"}),
+    # only the rendering (Sky pedestal, Sunflower look); 0.29.2 only adds looks.
+    frozenset({"0.28.0", "0.29.0", "0.29.1", "0.29.2"}),
 
 )
 

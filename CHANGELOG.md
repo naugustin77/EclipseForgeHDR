@@ -5,6 +5,29 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.29.2
+
+**Caches from 0.28.0 to 0.29.1 stay valid**; nothing in the stack or the
+renderer changes.
+
+**Looks**
+- **Soft versions** of the looks, each listed under its parent: Bright
+  desaturated streamers soft, Calm blue soft, Deep sunset soft, Clean Steel
+  soft (from M4; soft versions of M5 and M6 came out nearly identical), Silver
+  rays soft, Night navy soft, Midnight silver soft, Golden hour soft,
+  Sunflower soft. Each is its parent look with a brighter, smoother inner
+  corona, using existing controls only:
+  - detail: short-exposure detail 0, detail denoise 0.8, filament detail
+    about ×0.65, grain smoothing +0.13 (at least 0.4), Structure ×0.6, final
+    sharpening midtones ×0.72 and shadows ×0.65;
+  - tone, set per look: inner corona level up, radial flatten down, and for
+    Calm blue the envelope gamma, highlight compression where needed.
+  - Measured against the parent on a half-resolution test stack: +2 to +8 L*
+    at 1.1–1.4 R (less where the parent is already bright or clips), within
+    1.5 L* beyond 2.5 R (Sunflower soft up to 3), fine contrast at 1.0–1.2 R
+    about 50–80 % of the parent and 90–100 % from about 2 R out, white clipping
+    at most a few hundredths of a percent above the parent.
+
 ## 0.29.1
 
 **Caches from 0.28.0 and 0.29.0 stay valid**; nothing in the stack changes.

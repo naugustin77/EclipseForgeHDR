@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.29.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.29.2
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -33,6 +33,16 @@ preview between the composite and each individual layer; every slider on the
 right re-renders live, with no re-processing.*
 
 ---
+
+## New in 0.29.2
+
+- **Soft versions of the looks.** Every colour look now has a soft version
+  listed right under it (Clean Steel has one, for M4 / M5 / M6). It keeps the
+  look's colours and outer field but gives a brighter, smoother inner corona:
+  the region out to about 1.5 Moon radii is lifted, and the fine detail and
+  sharpening near the limb are eased. The streamers further out keep their
+  detail and the sky is not brightened.
+- Caches from 0.28.0 to 0.29.1 stay valid.
 
 ## New in 0.29.1
 
@@ -396,7 +406,8 @@ stopping on a line.
   inner detail, filament detail, prominences
 - Look presets that set detail, colour and tone together: EFHDR as loaded,
   Bright desaturated streamers, Calm blue, Deep sunset, Clean Steel M4 / M5 / M6,
-  Silver rays, Night navy, Midnight silver, Golden hour, Sunflower
+  Silver rays, Night navy, Midnight silver, Golden hour, Sunflower, each
+  also in a soft version with a brighter, smoother inner corona
 - Star layer, with an optional catalogue check and a sky map of the field
 - Optional observing site and time, with a place picker for the 2026 and 2027
   eclipses
