@@ -1353,7 +1353,7 @@ def overlay(rgb, maps, P):
     y = np.clip(maps["L"], 0, None) ** np.float32(gam)
     y = np.where(y < 0.9, y, 0.9 + 0.1 * np.tanh((y - 0.9) / 0.1)).astype(np.float32)
     alpha = np.clip(y * (maps["W1"] + rim * maps["W2"]) * np.float32(1.5 * s), 0, 1)
-    # SOFT HIGHLIGHTS (lab 0.25.1, 2026-10-10; the step from the darker
+    # SOFT HIGHLIGHTS (0.25.1, 2026-10-10; the step from the darker
     # core to the brighter rim is too abrupt). Two hard edges made it: the
     # opacity reached 1 and stopped, and where the colour left the gamut every
     # channel was divided by the largest, so the core sat at one flat colour
@@ -1373,7 +1373,7 @@ def overlay(rgb, maps, P):
     else:
         C = maps["C"]
     ch = np.clip(1 + (C - 1) * np.float32(sat), 0, None)
-    # PROMINENCE LIGHT (lab, 2026-10-15; "should the core not be brighter
+    # PROMINENCE LIGHT (2026-10-15; "should the core not be brighter
     # than the rim? Now the core has the darker pink and the rim the brighter
     # pink"). Laid OVER the corona, an opaque core became the plain prominence
     # colour -- a saturated pink, darker than the light inner corona under it

@@ -2573,7 +2573,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
                     os.remove(os.path.join(wd, _f))
                 except OSError:
                     pass
-    # THE STAR LAYER (stars.py, lab 0.25.1): the stars found in the merge are
+    # THE STAR LAYER (stars.py, 0.25.1): the stars found in the merge are
     # lifted out of the same corona, so no detail filter sharpens them into
     # rings; the render lays them back over the finished picture.
     if _plm.layer_mode() and os.path.exists(os.path.join(wd, _plm.CORONA_LUM)):
@@ -3955,7 +3955,7 @@ def denoise_loglum(L, noise_map, ks=(1.5, 1.0, 0.0, 0.0), levels=4):
     return rec
 
 
-# THE FILAMENT DETAIL LAYER (lab 0.25.1, 2026-10-10)
+# THE FILAMENT DETAIL LAYER (0.25.1, 2026-10-10)
 #
 # Measured against a full-resolution reference render of the reference frames
 # (2026-10-10): from 2 R out its filaments

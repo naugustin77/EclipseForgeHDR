@@ -53,7 +53,7 @@ MAG_SCORE = 8.5                           # ... and that score a hypothesis
 # eclipses that reach past mag 8.5 are what this is for.
 MAG_CONFIRM = 10.0
 LINE_TOL_R = 0.25                         # Sun to the ecliptic line through the Moon, lunar radii
-# Two stars are enough when the place and time are given (lab 0.25.1,
+# Two stars are enough when the place and time are given (0.25.1,
 # 2026-10-10): the pair fixes scale, rotation and offset exactly, and is
 # accepted only if it puts the Sun within this many lunar radii of the Moon's
 # centre, and the scale on a Moon of 14.6-17 arcmin. At totality the Sun sits

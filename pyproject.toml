@@ -29,6 +29,11 @@ dependencies = [
   "rawpy>=0.19",
   "exifread>=3.0",
   "flask>=3.0",
+  # CA certificates for the map tiles (server.py, map_tile): a frozen or
+  # python.org Python on macOS may have none of its own
+  "certifi>=2023.7",
+  # an ffmpeg for the clips of the Extras tab (film.py) when the system has none
+  "imageio-ffmpeg>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -57,4 +62,4 @@ version = {attr = "eclipseforgehdr.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-eclipseforgehdr = ["gui.html", "star_catalogue.npz", "eclipse_cities.json"]
+eclipseforgehdr = ["gui.html", "star_catalogue.npz", "eclipse_cities.json", "app_icon.png", "fonts/*.otf", "fonts/*.ttf", "fonts/OFL*.txt"]

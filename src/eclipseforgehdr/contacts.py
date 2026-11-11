@@ -36,7 +36,17 @@ CONTACT_DIR_WORDS = ("diamond", "ring", "bead", "contact")
 
 
 def find_contact_dir(folder):
-    """A subfolder of contact frames (diamond ring, Baily's beads), or None."""
+    """A subfolder of contact frames (diamond ring, Baily's beads), or None.
+    A folder chosen by hand in tab 1 comes first; "off" means none."""
+    try:
+        from .frameselect import dir_override
+        _st, _p = dir_override(folder, "contact")
+        if _st == "off":
+            return None
+        if _st == "path":
+            return _p
+    except Exception:
+        pass
     try:
         for name in sorted(os.listdir(folder)):
             p = os.path.join(folder, name)

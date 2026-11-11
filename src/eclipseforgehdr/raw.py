@@ -6,8 +6,12 @@ import numpy as np
 RAW_EXTS = {".rw2", ".raf", ".nef", ".cr2", ".cr3", ".arw", ".orf", ".dng", ".pef"}
 
 
-def list_raws(folder):
+def list_raws(folder, selected=True):
     """The frames of a bracket, in name order.
+
+    SWITCHED-OFF FRAMES ARE LEFT OUT (0.30.0): a frame the user turned off
+    in the Frames panel is not listed (frameselect.py). `selected=False`
+    lists everything, for the panel and the timeline.
 
     TIFFs COUNT ONLY WHEN THERE IS NOTHING ELSE (0.22.78). A folder holding a
     bracket may also hold a finished HDR -- the server offers exactly such a
@@ -30,7 +34,11 @@ def list_raws(folder):
             raws.append(p)
         elif ext in {".tif", ".tiff"}:
             tiffs.append(p)
-    return raws if raws else tiffs
+    out = raws if raws else tiffs
+    if selected:
+        from .frameselect import drop_off
+        out = drop_off(out, folder)
+    return out
 
 
 def _exif_via_tifffile(path):

@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>EclipseForgeHDR — High-Dynamic-Range Solar Eclipse Image Processing</title>
+<link rel="icon" type="image/png" href="/app_icon.png">
+<link rel="apple-touch-icon" href="/app_icon.png">
 <style>
 :root{
   --bg:#0b0d10; --panel:#14171c; --panel2:#191d23; --line:#262b33;
@@ -176,6 +178,174 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
   border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace}
 .hint{color:var(--muted);font-size:12px}
 .brw{padding:7px 9px;font-size:12px}
+
+/* ---- workflow tabs (2026-11-08) ---- */
+.tabbar{display:flex;align-items:center;gap:12px;padding:6px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex:none;min-width:0}
+.tabbar h1{font-size:16px;font-weight:600;margin:0 6px 0 0;color:var(--gold);white-space:nowrap;display:flex;align-items:center;gap:8px}
+.brandico{width:22px;height:22px;border-radius:5px;flex:none}
+.tabs{display:flex;gap:4px;flex:none}
+.tabbtn{background:transparent;border:1px solid transparent;color:var(--muted);padding:6px 14px;border-radius:6px;font-size:13px;white-space:nowrap}
+.tabbtn:hover{color:var(--text)}
+.tabbtn.on{background:var(--panel2);color:var(--text);border-color:var(--line)}
+.tabbtn .tn{color:var(--gold);margin-right:7px;font:12px ui-monospace,monospace}
+.tabstatus{flex:1;min-width:0;display:flex;align-items:center;gap:8px;margin-left:8px}
+.tabstatus .status{flex:1;min-width:0;color:var(--muted);font:12px ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page{flex:1;min-height:0;overflow-y:auto;padding:4px 20px 24px;display:none}
+.page.on{display:block}
+.psec{border-bottom:1px solid var(--line);padding:12px 0}
+.psec:last-child{border-bottom:0}
+.ptitle{margin:0 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--gold)}
+#page1 .srcrow{padding:0 0 8px}
+.p1opts{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.p1opts .optflat{grid-column:auto}
+/* tab 1: checklist and the shooting timeline side by side; tab 2: the run and
+   its log on the left, the site and the recipe on the right (stacked when
+   the window is narrow) */
+.p1split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 28px;align-items:start}
+.p1split .cklist{grid-template-columns:1fr}
+.p1split .tline{margin-top:0}
+.p1split .tline svg{height:120px}
+.p2split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 28px;align-items:start}
+.p2side>details{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.p2side .optgrid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.p2side .rail-like .group{max-width:none}
+.p2side #siteBox .inrow button{white-space:nowrap}
+.p2side #siteBox #siteMsg{flex:1;min-width:0}
+.p2side .export{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center}
+.p2side .export .hint{grid-column:1/-1}
+.p2side .export button{width:auto;margin:0;padding:6px 14px;white-space:nowrap}
+.p2split #page2 .log, #page2 .p2run .log{height:max(var(--logh), 440px)}
+@media (max-width:1100px){ .p1split,.p2split{grid-template-columns:minmax(0,1fr)} }
+#page2 .optpanel{border-top:0;padding:0;background:transparent}
+#page2 .optpanel.closed{display:block}
+.runrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.runrow .runbtns{margin-left:0}
+.p2opts{display:none}
+#page2 .log{height:max(var(--logh), 320px)}
+.rail-like .group{border-bottom:0;max-width:760px}
+.fpinline .fphead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+.fpinline .fphead h3{margin:0;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--gold)}
+.fpinline .fphead .fpsum{flex:1;font:12px ui-monospace,monospace;color:var(--muted)}
+.fpinline .fpbody{overflow:visible;padding:0}
+body.t1 .app, body.t2 .app, body.t4 .app, body.t5 .app{display:none}
+/* ---- tab 4: export cards (2026-11-08) ---- */
+.xbar{position:sticky;top:0;z-index:5;background:var(--bg)}
+.xbarrow{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:flex-end}
+.xf{display:flex;flex-direction:column;gap:4px}
+.xf .optname{font-size:12px;color:var(--muted)}
+.xname input{width:260px;background:#0e1013;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace}
+.xseg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.xseg label{cursor:pointer}
+.xseg input{display:none}
+.xseg span{display:block;padding:6px 11px;font-size:12px;color:var(--muted)}
+.xseg label+label span{border-left:1px solid var(--line)}
+.xseg input:checked+span{background:var(--panel2);color:var(--text)}
+.xgo{margin-left:auto}
+.xgo button{padding:9px 22px;font-size:14px}
+.xline{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}
+.xline #xprog{color:var(--text)}
+.xgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch}
+.xcard{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
+.xcard:has(.xinc:checked){border-color:#6b5420;box-shadow:0 0 0 1px #6b5420 inset}
+.xcard.working{border-color:var(--gold)}
+.xcard.failed{border-color:#a05a52}
+.xthumb{position:relative;aspect-ratio:4/3;background:#05060a;display:flex;align-items:center;justify-content:center;border-bottom:1px solid var(--line)}
+.xthumb.xwide{aspect-ratio:auto;min-height:150px;padding:8px}
+.xthumb img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.xthumb .xtnote{position:absolute;left:8px;bottom:6px;font:11px ui-monospace,monospace;color:#c9ced8;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:3px}
+.xthumb .xtnote:empty{display:none}
+.xthumb.loading::after,.xvt.loading::after{content:"\2026";position:absolute;right:8px;top:4px;color:var(--muted)}
+.xbody{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.xhead{display:flex;align-items:center;gap:8px}
+.xhead label{flex:1;cursor:pointer;font-size:13.5px}
+.xhead b{color:var(--text)}
+.xtag{font:11px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.xdesc{margin:0;font-size:12.5px;color:var(--muted);line-height:1.45}
+.xdesc b{color:var(--text);font-weight:600}
+.xopt{font-size:12.5px;color:var(--text)}
+.xopts{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--text);align-items:center}
+.xfoot{margin-top:auto;display:flex;align-items:center;gap:8px;padding-top:6px}
+.xfoot .xstat{flex:1;font:11.5px ui-monospace,monospace;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xcard.done .xstat{color:#8fcf9f}
+.xcard.failed .xstat{color:#e0a29a;white-space:normal}
+.xviews{grid-column:span 2}
+.xvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;padding:8px;background:#05060a;border-bottom:1px solid var(--line)}
+.xvt{position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;font-size:12px;color:var(--text)}
+.xvt img{width:100%;aspect-ratio:4/3;object-fit:contain;background:#000;border-radius:3px}
+.xvt span{display:flex;align-items:center;gap:5px}
+@media (max-width:760px){ .xviews{grid-column:auto} }
+body.t1 .railgrip, body.t2 .railgrip{display:none}
+body.t3 .rail .group[data-tab="4"]{display:none}
+body.t4 .rail .group[data-tab="3"]{display:none}
+
+/* ---- tab 1 checklist, tab 3 stale note (2026-11-08) ---- */
+.cklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:4px 18px}
+.ckrow{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.45;padding:3px 4px;border-radius:4px}
+.ckrow.act{cursor:pointer}
+.ckrow.act:hover{background:var(--panel2)}
+.ckrow .ckic{flex:none;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font:700 11px ui-monospace,monospace;margin-top:1px}
+.ckrow.ok .ckic{background:#2f7d4f;color:#fff}
+.ckrow.warn .ckic{background:var(--gold);color:#111}
+.ckrow.missing .ckic{background:#c0504d;color:#fff}
+.ckrow.info .ckic{background:#3a4250;color:#cfd5de}
+.ckrow b{color:var(--text);font-weight:600;margin-right:4px}
+.ckrow span{color:var(--muted)}
+/* the recipe check (tab 2): critical in a soft red, notes in a soft yellow */
+#rclist .ckrow.warn{background:rgba(214,128,118,.13)}
+#rclist .ckrow.warn .ckic{background:#d99088;color:#2a1513}
+#rclist .ckrow.warn b{color:#efc1bb}
+#rclist .ckrow.info{background:rgba(222,198,124,.09)}
+#rclist .ckrow.info .ckic{background:#d8c48a;color:#2a2411}
+#rclist .ckrow.info b{color:#eadcae}
+.tabbtn[data-tab="2"] .tbadge{background:#d99088}
+.tabbtn .tbadge{display:inline-block;min-width:16px;padding:0 4px;margin-left:6px;border-radius:8px;background:var(--gold);color:#111;font:700 10px/16px ui-monospace,monospace}
+.stalebar{flex:none;display:flex;align-items:center;gap:10px;padding:6px 16px;background:#3a2f15;border-bottom:1px solid #6b5420;color:#f1d8a0;font-size:12.5px}
+.stalebar #staletext{flex:1}
+body.srcimport .rawonly{display:none !important}
+/* ---- Frames panel (2026-11-08) ---- */
+.fpanel{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;z-index:60}
+.fpanel.on{display:flex}
+.fpbox{margin:3vh auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  width:min(1400px,96vw);height:94vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.fphead{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.fphead h3{margin:0;font-size:13px;color:var(--gold);font-weight:600}
+.fphead .fpsum{flex:1;font:12px ui-monospace,monospace;color:var(--muted)}
+.fpbody{flex:1;overflow-y:auto;padding:4px 16px 16px}
+.fpgroup h4{margin:14px 0 6px;font-size:12px;font-weight:600;color:var(--text);display:flex;gap:10px;align-items:baseline}
+.fpgroup h4 .fpdir{font:11px ui-monospace,monospace;color:var(--muted);font-weight:400}
+.fpgroup h4 button{margin-left:auto}
+.fpgroup h4{cursor:pointer;user-select:none}
+.fpgroup h4 .fpchev{display:inline-block;width:12px;color:var(--muted);transition:transform .15s}
+.fpgroup.shut h4 .fpchev{transform:rotate(-90deg)}
+.fpgroup.shut .fpgrid{display:none}
+.fpgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px}
+.fpcard{background:var(--panel2);border:2px solid transparent;border-radius:6px;padding:5px;position:relative;
+  font:11px ui-monospace,monospace;color:var(--muted)}
+.fpcard img{width:100%;aspect-ratio:3/2;object-fit:cover;background:#000;border-radius:3px;display:block;cursor:zoom-in}
+.fpcard .fpname{color:var(--text);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fpcard .fpmeta{min-height:15px}
+.fpcard .fpst{display:inline-block;padding:0 4px;border-radius:3px;margin-top:2px}
+.fpcard.off img{opacity:.28;filter:grayscale(1)}
+.fpcard.off .fpname{text-decoration:line-through;color:var(--muted)}
+.fpcard.off{border-color:#5d6673}
+.fpcard.force{border-color:var(--gold)}
+.fpcard .fpflag{position:absolute;top:8px;right:9px;display:none;background:var(--gold);color:#111;
+  border-radius:3px;padding:0 5px;font-weight:700}
+.fpcard.force .fpflag{display:block}
+.fpcard .fpoffx{position:absolute;top:8px;right:9px;display:none;background:#5d6673;color:#fff;
+  border-radius:3px;padding:0 5px;font-weight:700}
+.fpcard.off .fpoffx{display:block}
+.fpseg{display:flex;margin-top:4px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.fpseg button{flex:1;border:0;border-radius:0;background:transparent;color:var(--muted);padding:2px 0;font-size:11px}
+.fpseg button+button{border-left:1px solid var(--line)}
+.fpseg button.on{background:#2b313b;color:var(--text)}
+.fpseg button.on[data-v=off]{background:#4a515c;color:#fff}
+.fpseg button.on[data-v=force]{background:var(--gold);color:#111}
+.fpview{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;z-index:70;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.fpview.on{display:flex}
+.fpview img{max-width:94vw;max-height:80vh;border-radius:4px;background:#000}
+.fpview .fpvbar{display:flex;gap:10px;align-items:center;font:12px ui-monospace,monospace;color:var(--muted)}
+.fpview .fpvbar .fpseg{width:210px;margin:0}
 .pick{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;
   align-items:center;justify-content:center;z-index:50}
 .pick.on{display:flex}
@@ -200,7 +370,7 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
 .pickfoot{padding:10px 16px;border-top:1px solid var(--line);display:flex;
   gap:8px;justify-content:flex-end;align-items:center}
 .pickfoot .sp{flex:1;color:var(--muted);font-size:12px}
-/* the 1:1 crop panel (lab 0.25.1): export pixels of a window, floating over the preview */
+/* the 1:1 crop panel (0.25.1): export pixels of a window, floating over the preview */
 #croppanel{position:absolute;right:12px;bottom:12px;z-index:30;background:#0e1013;border:1px solid var(--line);
   border-radius:8px;padding:6px;box-shadow:0 6px 24px rgba(0,0,0,.6);display:none;max-width:calc(100% - 24px);max-height:calc(100% - 24px);overflow:auto}
 #croppanel.on{display:block}
@@ -208,10 +378,230 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
 #croppanel .cropbar{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:0 0 4px 0}
 #croppanel .cropbar b{color:var(--text);font-weight:600}
 #croppanel .cropbar button{margin:0}
+.mapbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  width:min(1100px,94vw);height:min(760px,88vh);display:flex;flex-direction:column;
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.maphead{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.maphead h3{margin:0;font-size:13px;color:var(--gold);font-weight:600}
+.mapwrap{position:relative;flex:1;min-height:200px;overflow:hidden;background:#0e1116}
+#mapCv{position:absolute;inset:0;width:100%;height:100%;cursor:grab;touch-action:none}
+#mapCv.drag{cursor:grabbing}
+.mapzoom{position:absolute;left:10px;top:10px;display:flex;flex-direction:column;gap:4px;z-index:2}
+.mapzoom button{width:28px;height:28px;padding:0;font-size:16px;line-height:1}
+.mapattr{position:absolute;right:0;bottom:0;background:rgba(0,0,0,.6);color:#bbb;font:10px system-ui,sans-serif;padding:2px 6px;z-index:2}
+.mapattr a{color:#ddd}
+.mapcur{position:absolute;left:0;bottom:0;background:rgba(0,0,0,.6);color:#bbb;font:11px ui-monospace,monospace;padding:2px 6px;z-index:2}
+.maperr{position:absolute;left:50px;right:50px;top:10px;z-index:2;background:rgba(58,47,21,.92);border:1px solid #6b5420;color:#f1d8a0;font-size:12.5px;padding:6px 10px;border-radius:4px}
+.mapfoot{padding:10px 14px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center}
+.mapfoot .sp{flex:1;font:12px ui-monospace,monospace;color:var(--text);line-height:1.5}
+.mapfoot .sp .no{color:#e07a6a}
 #cropmark{position:absolute;pointer-events:none;border:1px solid #ffcc55;box-shadow:0 0 0 1px rgba(0,0,0,.6);display:none;z-index:25}
+/* ================= THE POLISH (2026-11-08) =================
+   One layer over the rules above: cards for the sections, a stepper for the
+   tabs, page headers with a Next step, icons on the section titles, soft
+   colour to guide the eye. Nothing here changes what a control does. */
+:root{--gold2:#f2c27a;--blue:#8fb8e8;--green:#7cc494;--red:#d99088;--yellow:#d8c48a;
+  --card:#12151a;--card2:#161a20;--line2:#2e343e}
+input[type=checkbox],input[type=radio]{accent-color:var(--gold)}
+.sico{display:inline-flex;width:15px;height:15px;margin-right:8px;vertical-align:-2px;color:var(--gold);flex:none}
+.sico svg,.ticon svg,.phico svg,.p1steps svg,.p1go svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.sico svg .f,.ticon svg .f,.phico svg .f,.p1steps svg .f{fill:var(--card)}
+/* inputs and buttons */
+input[type=text]:focus,select:focus,.sel:focus{outline:none;border-color:#7a5a24 !important;box-shadow:0 0 0 3px rgba(232,163,61,.14)}
+button{transition:background .12s,border-color .12s,filter .12s,transform .12s}
+button:not(.primary):not(:disabled):not(.tabbtn):hover{border-color:var(--line2);background:#1f242c}
+button.primary{background:linear-gradient(180deg,#f2b24e,#e0992f);border-color:#e0992f;box-shadow:0 2px 12px rgba(232,163,61,.22)}
+button.primary:hover:not(:disabled){filter:brightness(1.07)}
+button.primary:active:not(:disabled){transform:translateY(1px)}
+/* the tab bar as a stepper */
+.tabbar{background:linear-gradient(180deg,#181c22,#121519);padding:7px 18px;box-shadow:0 1px 0 #05060a;border-bottom-color:#20252d}
+.tabbar h1{font-size:16.5px;letter-spacing:.01em}
+.brandico{width:24px;height:24px;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.06),0 2px 8px rgba(0,0,0,.5)}
+.tabs{gap:4px;margin-left:12px;align-items:center}
+.tabbtn{display:flex;align-items:center;gap:9px;padding:5px 14px 5px 7px;border-radius:10px;text-align:left;position:relative}
+.tabbtn+.tabbtn{margin-left:14px}
+.tabbtn+.tabbtn::before{content:"";position:absolute;left:-15px;top:50%;width:12px;height:1px;background:#353b46}
+.tabbtn .tn{margin:0;width:22px;height:22px;border-radius:50%;border:1px solid #3a414c;display:inline-flex;align-items:center;justify-content:center;font:600 11px ui-monospace,monospace;color:var(--muted);flex:none;transition:all .2s}
+.tabbtn .tn i{font-style:normal}
+.tabbtn .ticon{display:none;width:15px;height:15px;color:var(--muted);flex:none}
+.tabbtn .tl{display:flex;flex-direction:column;line-height:1.15}
+.tabbtn .tl b{font-weight:600;font-size:13px;color:inherit}
+.tabbtn .tl small{font-size:10.5px;color:#6f7784;font-weight:400;min-height:12px;white-space:nowrap}
+.tabbtn:hover{background:rgba(255,255,255,.03)}
+.tabbtn.on{background:#1d2128;border-color:#3b3322;box-shadow:inset 0 -2px 0 var(--gold),0 4px 14px rgba(0,0,0,.35)}
+.tabbtn.on .tn{border-color:var(--gold);color:var(--gold);background:rgba(232,163,61,.12)}
+.tabbtn.on .ticon{color:var(--gold)}
+.tabbtn.on .tl small{color:var(--muted)}
+.tabbtn.done .tn{background:#2c6e47;border-color:#3a8a5b;color:#e9fff1}
+.tabbtn.done .tn i{display:none}
+.tabbtn.done .tn::after{content:"\2713";font-size:12px;font-family:system-ui}
+.tabbtn.done.on .tn{box-shadow:0 0 0 2px rgba(232,163,61,.55)}
+@media (min-width:1380px){ .tabbtn .ticon{display:inline-flex} }
+.tabstatus .status{color:#7f8794}
+/* pages: a soft glow behind, sections as cards */
+.page{background:radial-gradient(1100px 380px at 72% -12%,rgba(232,163,61,.055),transparent 62%),var(--bg);padding:0 22px 30px}
+.page .psec{background:var(--card);border:1px solid #20252d;border-radius:12px;padding:14px 16px;margin:12px 0;box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+.page .psec:last-child{border-bottom:1px solid #20252d}
+.ptitle{display:flex;align-items:center;gap:0;margin-bottom:10px;font-size:11px;letter-spacing:.13em}
+.ptitle .hint{text-transform:none;letter-spacing:0;font-weight:400;margin-left:6px}
+/* page header */
+.phead{display:flex;align-items:center;gap:14px;padding:18px 2px 4px}
+.phico{width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,rgba(232,163,61,.24),rgba(232,163,61,.04));border:1px solid #4a3c22;color:var(--gold);display:flex;align-items:center;justify-content:center;flex:none;box-shadow:0 4px 16px rgba(232,163,61,.08)}
+.phico svg{width:21px;height:21px}
+.phtx{flex:1;min-width:0}
+.phtx h2{margin:0;font-size:20px;font-weight:600;letter-spacing:.005em;color:#e8ecf1}
+.phtx p{margin:2px 0 0;color:var(--muted);font-size:12.5px}
+.nextbtn{background:rgba(232,163,61,.06);border:1px solid #5a4724;color:var(--gold2);border-radius:9px;padding:8px 15px;font-size:13px;white-space:nowrap}
+.nextbtn:hover:not(:disabled){background:rgba(232,163,61,.14) !important;border-color:#7a5a24 !important}
+.nextbtn:disabled{color:var(--muted);border-color:var(--line);background:transparent}
+.nextbtn .arr{display:inline-block;transition:transform .15s}
+.nextbtn:hover:not(:disabled) .arr{transform:translateX(3px)}
+/* tab 1 */
+#page1 .psec.p1src .srcrow{padding:0 0 10px}
+.page .psec.p1split,.page .psec.p2split{background:transparent;border:0;padding:0;box-shadow:none}
+.p1split>div{background:var(--card);border:1px solid #20252d;border-radius:12px;padding:14px 16px;min-height:100%}
+.p1split>.p1tl:not(:has(#tline:not([style*="none"]))){display:none}
+.p1tl .tline{background:transparent;border:0;padding:0;margin:0}
+.p1tl .tlhead{display:none}
+.fpinline .fphead{padding:0 0 8px;border-bottom:1px solid #20252d;margin-bottom:10px}
+.fpinline .fphead h3{display:flex;align-items:center}
+.ckrow{border-radius:6px}
+.ckrow.warn{background:rgba(232,163,61,.07)}
+.ckrow.missing{background:rgba(214,128,118,.10)}
+/* tab 1: the welcome when no folder is loaded */
+.p1empty{display:none}
+body.nofolder .p1empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:26px 20px 6px}
+body.nofolder #page1 .p1split,body.nofolder #page1 .psec.rawonly:not(.p1src){display:none}
+body.nofolder #next1{display:none}
+/* the app icon itself; its PNG carries transparent margins, so the glow is a
+   drop-shadow that follows the icon's shape, not a box around it */
+.eclart{width:150px;height:150px;margin:4px 0 16px;display:block;animation:eclpulse 6s ease-in-out infinite}
+@keyframes eclpulse{0%,100%{filter:drop-shadow(0 0 22px rgba(232,163,61,.18))}50%{filter:drop-shadow(0 0 40px rgba(232,163,61,.34))}}
+.p1empty h3{font-size:23px;margin:0 0 6px;font-weight:600;color:#eef1f5}
+.p1empty p{max-width:660px;color:var(--muted);margin:0 0 18px;line-height:1.55}
+.p1go{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap}
+.p1go .primary{padding:11px 22px;font-size:14px;display:inline-flex;gap:9px;align-items:center;border-radius:9px}
+.p1go svg{width:16px;height:16px}
+#p1import{background:transparent;border-color:transparent;color:var(--muted)}
+#p1import:hover{color:var(--text);background:transparent !important;border-color:transparent !important;text-decoration:underline}
+.p1steps{display:grid;grid-template-columns:repeat(4,minmax(140px,200px));gap:12px;margin-top:30px}
+.p1steps>div{background:var(--card);border:1px solid #20252d;border-radius:12px;padding:16px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative}
+.p1steps svg{width:22px;height:22px;color:var(--gold);margin:2px 0 6px}
+.p1steps .sn{position:absolute;top:8px;left:11px;font:11px ui-monospace,monospace;color:#5d6571}
+.p1steps b{font-size:13.5px}
+.p1steps small{color:var(--muted);font-size:11.5px;line-height:1.35}
+@media (max-width:820px){ .p1steps{grid-template-columns:repeat(2,minmax(0,1fr))} }
+/* tab 2 */
+.p2run,.p2side{display:flex;flex-direction:column;gap:12px}
+.p2run>#rcsec,.p2runbox,.p2side>details,.p2side>.rail-like{background:var(--card);border:1px solid #20252d;border-radius:12px;padding:14px 16px;margin:0 !important}
+.p2side>details{border-bottom:1px solid #20252d}
+.p2side>details>summary{list-style:none;display:flex;align-items:center}
+.p2side>details>summary::-webkit-details-marker{display:none}
+.p2side .rail-like .group{padding:0}
+.p2side .rail-like .grouphead h2{display:flex;align-items:center}
+.ogroups{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.ogrp{background:var(--card2);border:1px solid #1f242c;border-radius:10px;padding:10px 12px 12px}
+.ogh{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.ogh .sico{align-self:center;margin-right:0}
+.ogh b{font-size:13px;font-weight:600;color:#e3e7ec}
+.ogh small{color:#6f7784;font-size:11.5px}
+.ogrp .optgrid{grid-template-columns:repeat(auto-fill,minmax(148px,1fr))}
+label.opt.nondef .optname{color:var(--gold2)}
+label.opt.nondef .optname::before,label.optchk.nondef::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);margin-right:6px;vertical-align:1px;box-shadow:0 0 6px rgba(232,163,61,.6)}
+label.optchk.nondef{color:var(--gold2)}
+.log{background:#090b0e;border-color:#1f242c;border-radius:8px}
+#page2 .bar{border-radius:3px}
+/* tab 3 */
+.canvaswrap{background:radial-gradient(circle at 50% 46%,#0d1015,#05060a 72%)}
+.viewbar{background:#101318}
+.viewbar .vbtn.primary{box-shadow:0 0 0 1px rgba(232,163,61,.35)}
+.rail{background:linear-gradient(180deg,#14171c,#121519)}
+/* tab 4 */
+.page .psec.xbar{position:sticky;top:8px;z-index:6;background:rgba(18,21,26,.94);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.xgrid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.xcard{background:var(--card);border-color:#20252d;border-radius:12px;transition:border-color .15s,box-shadow .15s,transform .15s}
+.xcard:hover{border-color:#2e343e;box-shadow:0 6px 22px rgba(0,0,0,.35)}
+.xcard[data-card=picture]{grid-column:span 2;flex-direction:row}
+.xcard[data-card=picture] .xthumb{flex:1.6;aspect-ratio:auto;border-bottom:0;border-right:1px solid var(--line);min-height:260px}
+.xcard[data-card=picture] .xbody{flex:1}
+.xcard[data-card=polar],.xcard[data-card=polarlayers]{grid-column:span 2}
+.xcard[data-card=polar] .xthumb,.xcard[data-card=polarlayers] .xthumb{min-height:170px}
+.xcard.xviews{grid-column:span 4}
+.xvgrid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.xthumb{background:radial-gradient(circle at 50% 50%,#0b0d12,#030405 75%)}
+.xhead b{font-size:14px}
+@media (max-width:1250px){ .xgrid{grid-template-columns:repeat(2,minmax(0,1fr))} .xcard.xviews{grid-column:span 2} }
+@media (max-width:760px){ .xgrid{grid-template-columns:minmax(0,1fr)} .xcard[data-card=picture],.xcard[data-card=polar],.xcard[data-card=polarlayers],.xcard.xviews{grid-column:auto} .xcard[data-card=picture]{flex-direction:column} .xcard[data-card=picture] .xthumb{border-right:0;border-bottom:1px solid var(--line)} }
+
+/* tab 5: extras (0.30.0) */
+.egrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:stretch}
+@media (max-width:1250px){ .egrid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:760px){ .egrid{grid-template-columns:minmax(0,1fr)} }
+.egrid .xthumb{aspect-ratio:3/2;cursor:zoom-in;padding:6px}
+.egrid .xthumb img{border-radius:3px;width:100%;height:100%;object-fit:contain}
+.egrid .xthumb .xtlook{position:absolute;right:8px;bottom:6px;font:11px ui-monospace,monospace;color:#c9ced8;background:rgba(0,0,0,.55);padding:1px 6px;border-radius:3px;opacity:0;transition:opacity .15s}
+.egrid .xthumb:hover .xtlook{opacity:1}
+.egrid .xcard.coming{opacity:.55;border-style:dashed}
+.egrid .xcard.coming .xthumb{cursor:default;background:repeating-linear-gradient(135deg,#0b0d12 0 10px,#0e1117 10px 20px)}
+.egrid .xcard.coming .xthumb span.soon{font:600 11px/1 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#6f7784;border:1px solid #2a303a;border-radius:4px;padding:5px 9px}
+.egrid .xcard.notready .xthumb{cursor:default}
+.egrid .xcard.notready .xthumb span.soon{font:12px system-ui;color:#8b93a1;padding:6px 10px;text-align:center;line-height:1.4}
+.eopts{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:5px 10px;font-size:12px;color:var(--text)}
+.eopts label{display:flex;flex-direction:column;gap:2px;min-width:0}
+.eopts label.chk{flex-direction:row;align-items:center;gap:6px;align-self:end;padding:4px 0}
+.eopts label span.on{font-size:10.5px;color:#7a828f;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eopts select,.eopts input[type=text]{background:#0e1013;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:3px 6px;font-size:12px;min-width:0;width:100%}
+.emore{margin-top:2px}
+.emore>summary{cursor:pointer;font-size:11.5px;color:#8b93a1;list-style:none;display:inline-flex;align-items:center;gap:6px;user-select:none}
+.emore>summary::-webkit-details-marker{display:none}
+.emore>summary::before{content:"\25B8";font-size:10px;transition:transform .15s}
+.emore[open]>summary::before{transform:rotate(90deg)}
+.emore>summary span{color:#5f6672}
+.emore>summary:hover{color:var(--text)}
+.emore[open]>.eopts{margin-top:6px;padding-top:6px;border-top:1px dashed #262c35}
+.ewhy{font-size:11.5px;color:#a9a06a;display:flex;gap:6px;align-items:flex-start}
+.ewhy:empty{display:none}
+.ewhy::before{content:"i";display:inline-flex;flex:none;width:14px;height:14px;border-radius:50%;border:1px solid #6b5f2a;align-items:center;justify-content:center;font:600 10px ui-monospace,monospace;margin-top:1px}
+.egroup{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin:6px 0 -6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.13em;color:var(--gold)}
+.egroup::after{content:"";flex:1;height:1px;background:#242a33}
+.egroup small{text-transform:none;letter-spacing:0;font-weight:400;color:var(--muted);font-size:11.5px}
+.elbox{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;z-index:70;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:zoom-out}
+.elbox.on{display:flex}
+.elbox img{height:88vh;width:auto;max-width:96vw;object-fit:contain;border-radius:4px;background:#000;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.elbox span{font:12px ui-monospace,monospace;color:#c9ced8}
+/* tab 3: the view switch as one segmented control */
+.viewbar #views{gap:0 !important;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#0d1014}
+.viewbar #views .vbtn{border:0;border-radius:0;background:transparent;color:var(--muted);padding:6px 12px}
+.viewbar #views .vbtn+.vbtn{border-left:1px solid var(--line)}
+.viewbar #views .vbtn:hover{color:var(--text);background:#1a1e25 !important}
+.viewbar #views .vbtn.primary{background:rgba(232,163,61,.14);color:var(--gold2);box-shadow:inset 0 -2px 0 var(--gold);filter:none}
+/* narrow windows */
+.viewbar #views{max-width:100%;overflow-x:auto;scrollbar-width:none;flex:0 1 auto;min-width:0}
+.viewbar #views::-webkit-scrollbar{display:none}
+@media (max-width:1300px){ .viewbar .credit{display:none} }
+.xcard:not([data-card=picture]) .xthumb:not(.xwide){max-height:300px;aspect-ratio:auto;height:clamp(200px,22vw,300px)}
+.xmeta{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+.xmeta:empty{display:none}
+.xmeta span{font:11px ui-monospace,monospace;color:#9aa3b0;background:#0d1014;border:1px solid #20252d;border-radius:5px;padding:2px 7px}
+.tabstatus{background:#0e1115;border:1px solid #20252d;border-radius:999px;padding:4px 12px 4px 10px;max-width:520px;margin-left:auto}
 </style>
 </head>
 <body>
+<div class="pick" id="mapPick">
+  <div class="mapbox">
+    <div class="maphead"><h3>Pick the site on the map</h3>
+      <select id="mapEcl" class="sel" style="width:auto"></select>
+      <span class="hint">Gold band: the path of totality at sea level, gold line: its centre. Drag to move, wheel or +/&minus; to zoom, click to pick a place.</span></div>
+    <div class="mapwrap" id="mapWrap"><canvas id="mapCv"></canvas>
+      <div class="mapzoom"><button id="mapIn" title="Zoom in">+</button><button id="mapOut" title="Zoom out">&minus;</button><button id="mapFit" title="Show the whole path" style="font-size:11px">fit</button></div>
+      <div class="mapcur" id="mapCur"></div>
+      <div class="maperr" id="mapErr" style="display:none"></div>
+      <div class="mapattr" id="mapAttr">&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div></div>
+    <div class="mapfoot"><span class="sp" id="mapInfo">Click a place on the map.</span>
+      <button id="mapCancel">Cancel</button>
+      <button id="mapUse" class="primary" disabled>Use this place</button></div>
+  </div>
+</div>
 <div class="pick" id="pick">
   <div class="pickbox">
     <div class="pickhead"><h3 id="pickTitle">Choose a folder</h3>
@@ -224,11 +614,48 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
     </div>
   </div>
 </div>
-<div class="app">
-  <div class="stage">
-    <div class="top">
+<div class="fpview" id="fpview">
+  <img id="fpvimg" alt="">
+  <div class="fpvbar"><button class="mini" id="fpvprev" title="Previous frame (&larr;)">&larr;</button>
+    <span id="fpvname"></span>
+    <button class="mini" id="fpvcrop" title="Switch between the whole frame and a 1:1 window on the bright inner corona.">1:1 limb</button>
+    <span class="fpseg" id="fpvseg"></span>
+    <button class="mini" id="fpvnext" title="Next frame (&rarr;)">&rarr;</button>
+    <button class="mini" id="fpvclose" title="Close (Esc)">&#10005;</button></div>
+</div>
+<div class="tabbar" id="tabbar">
+<h1 title="High-Dynamic-Range Solar Eclipse Image Processing"><img src="/app_icon.png" alt="" class="brandico">EclipseForgeHDR</h1>
+  <nav class="tabs">
+    <button class="tabbtn on" data-tab="1" title="Load the folder and check the frames"><span class="tn"><i>1</i></span><span class="ticon"><svg viewBox="0 0 16 16"><rect x="2" y="4.5" width="9" height="9" rx="1.5"/><path d="M5 2.5h7.5a1 1 0 0 1 1 1V11"/><circle cx="6.5" cy="9" r="2"/></svg></span><span class="tl"><b>Images</b><small id="tsub1"></small></span></button>
+    <button class="tabbtn" data-tab="2" title="Stacking options, observing site, Start and the log"><span class="tn"><i>2</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></span><span class="tl"><b>Processing</b><small id="tsub2"></small></span></button>
+    <button class="tabbtn" data-tab="3" title="The result: preview, look and adjustments"><span class="tn"><i>3</i></span><span class="ticon"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></svg></span><span class="tl"><b>Result</b><small id="tsub3"></small></span></button>
+    <button class="tabbtn" data-tab="4" title="Export the picture and the extra products"><span class="tn"><i>4</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg></span><span class="tl"><b>Export</b><small id="tsub4"></small></span></button>
+    <button class="tabbtn" data-tab="5" title="Extras: posters, overlays, panoramas and more, made from the result"><span class="tn"><i>5</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg></span><span class="tl"><b>Extras</b><small id="tsub5"></small></span></button>
+  </nav>
+  <div class="tabstatus">
+        <span class="sdot" id="sdot" title="Grey: no folder. Green: Start loads the cache. Amber: an option changed, Start re-stacks. Gold: running. Red: failed."></span>
+      <span class="status" id="status">choose a folder containing the bracketed raw files · scroll = zoom · drag = pan · double-click = reset</span>
+  </div>
+</div>
+<div class="page" id="page1">
+  <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><rect x="2" y="4.5" width="9" height="9" rx="1.5"/><path d="M5 2.5h7.5a1 1 0 0 1 1 1V11"/><circle cx="6.5" cy="9" r="2"/></svg></div><div class="phtx"><h2>Images</h2><p>The folder with the bracket, its calibration frames, and a check of what was found.</p></div><button class="nextbtn" data-goto="2" id="next1">Next: Processing <span class="arr">&rarr;</span></button></div>
+  <div id="p1empty" class="p1empty">
+    <img class="eclart" src="/app_icon.png" alt="" width="150" height="150">
+    <h3>Start with a folder of eclipse frames</h3>
+    <p>One folder with every exposure of the bracket: raw files (RW2, CR3, NEF, ARW, RAF, ORF, DNG), TIFF or FITS.
+       Flats, darks, bias, short exposures and contact frames in subfolders are found by themselves.</p>
+    <div class="p1go"><button class="primary" id="p1browse"><svg viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg> Choose the folder&hellip;</button>
+      <button id="p1import">or run the layers on a finished HDR image</button></div>
+    <div class="p1steps">
+      <div><span class="sn">1</span><svg viewBox="0 0 16 16"><rect x="2" y="4.5" width="9" height="9" rx="1.5"/><path d="M5 2.5h7.5a1 1 0 0 1 1 1V11"/><circle cx="6.5" cy="9" r="2"/></svg><b>Images</b><small>load the folder, check frames and calibration</small></div>
+      <div><span class="sn">2</span><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg><b>Processing</b><small>options, observing site, Start</small></div>
+      <div><span class="sn">3</span><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></svg><b>Result</b><small>shape the look on the live preview</small></div>
+      <div><span class="sn">4</span><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg><b>Export</b><small>the picture and the extra products</small></div>
+    </div>
+  </div>
+  <section class="psec p1src">
+      <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg></span>Source</h3>
       <div class="srcrow">
-      <h1 title="High-Dynamic-Range Solar Eclipse Image Processing">EclipseForgeHDR</h1>
         <div class="seg" id="srcmode" title="Source: a folder of bracketed raw frames to stack, or one finished HDR image to run the detail layers on.">
           <button class="segbtn on" data-mode="raw">Raw bracket</button>
           <button class="segbtn" data-mode="import">Import HDR</button>
@@ -245,8 +672,7 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
       <button id="brwImport" class="brw" title="Pick one finished HDR image">Browse…</button>
         </div>
       </div>
-      <div class="optpanel" id="optpanel">
-        <div class="optgrid">
+    <div class="optgrid p1opts">
           <div class="opt optflat"><span class="optname">Flats folder</span>
             <div class="inrow">
       <input type="text" id="flatDir" spellcheck="false"
@@ -254,6 +680,66 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
         title="Folder of flat frames. Empty: a flats/ subfolder of the raw folder is used if present. 'off': no flat correction. The raw folder itself is refused.">
       <button id="brwFlat" class="brw" title="Pick the folder of flat frames">Browse…</button>
             </div></div>
+          <div class="opt optflat"><span class="optname">Darks folder</span>
+            <div class="inrow">
+      <input type="text" id="dir_darks" class="dirpick" data-role="darks" spellcheck="false" placeholder="auto" title="Folder of dark frames. Empty: a darks/ subfolder is used if found. 'off': no darks.">
+      <button class="brw" data-dirrole="darks" title="Pick the folder">Browse…</button>
+            </div></div>
+          <div class="opt optflat"><span class="optname">Bias folder</span>
+            <div class="inrow">
+      <input type="text" id="dir_bias" class="dirpick" data-role="bias" spellcheck="false" placeholder="auto" title="Folder of bias frames. Empty: a bias/ subfolder is used if found. 'off': no bias.">
+      <button class="brw" data-dirrole="bias" title="Pick the folder">Browse…</button>
+            </div></div>
+          <div class="opt optflat"><span class="optname">Short exposures folder</span>
+            <div class="inrow">
+      <input type="text" id="dir_short" class="dirpick" data-role="short" spellcheck="false" placeholder="auto" title="Short exposures for the prominence layer only. Empty: a subfolder with 'short' or 'prom' in its name is used if found. 'off': none.">
+      <button class="brw" data-dirrole="short" title="Pick the folder">Browse…</button>
+            </div></div>
+          <div class="opt optflat"><span class="optname">Contact frames folder</span>
+            <div class="inrow">
+      <input type="text" id="dir_contact" class="dirpick" data-role="contact" spellcheck="false" placeholder="auto" title="Diamond ring / Baily's beads frames for the camera clock. Empty: a subfolder with 'diamond', 'ring', 'bead' or 'contact' in its name is used if found. 'off': none.">
+      <button class="brw" data-dirrole="contact" title="Pick the folder">Browse…</button>
+            </div></div>
+          <div class="opt optflat"><span class="optname">Partial phases folder</span>
+            <div class="inrow">
+      <input type="text" id="dir_phases" class="dirpick" data-role="phases" spellcheck="false" placeholder="auto" title="Frames of the partial phases; they take no part in the stack and are listed in the Frames panel. Empty: a subfolder with 'phase', 'partial' or 'sequence' in its name is used if found. 'off': none.">
+      <button class="brw" data-dirrole="phases" title="Pick the folder">Browse…</button>
+            </div></div>
+    </div>
+  </section>
+  <section class="psec rawonly p1split">
+    <div id="cksec" style="display:none">
+    <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M2.5 4.5l1.2 1.2L6 3.4M2.5 8.5l1.2 1.2L6 7.4M2.5 12.5l1.2 1.2L6 11.4M8.5 4.8h5M8.5 8.8h5M8.5 12.8h5"/></svg></span>Checklist <span class="hint" id="cknote"></span></h3>
+    <div id="checklist" class="cklist"></div>
+    </div>
+    <div class="p1tl"><h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M2 13.5h12"/><path d="M4 11.5V9M7 11.5V6M10 11.5V8M13 11.5V3.5"/></svg></span>Shooting timeline</h3>
+      <div class="tline" id="tline" style="display:none" title="One bar per frame along the shooting time; bar height is the exposure time (log scale). Hover a bar for the file.">
+        <div class="tlhead" id="tlhead">SHOOTING TIMELINE</div>
+        <svg id="tlsvg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="tlsum" id="tlsum"></div>
+      </div>
+    </div>
+  </section>
+  <section class="psec rawonly">
+<div class="fpinline" id="fpanel">
+  <div>
+    <div class="fphead"><h3><span class="sico"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg></span>Frames</h3><span class="fpsum" id="fpsum"></span>
+      <label class="hint" title="How the previews are drawn. Strong: everything stretched so faint corona shows. Gentle: a milder stretch. As exposed: no stretch, the frame against the sensor's full scale (short exposures and darks look dark, as shot). Previews only; the stack is not affected.">Previews
+        <select id="fpstretch" class="sel" style="width:auto;display:inline-block;margin-left:4px;padding:2px 6px">
+          <option value="strong">strong stretch</option><option value="gentle">gentle stretch</option><option value="exposed">as exposed</option></select></label>
+      <button class="mini" id="fpallauto" title="Set every frame back to Auto: the app decides again.">All auto</button>
+      <button class="mini" id="fpclose" style="display:none">&#10005;</button><button class="mini" id="fprefresh" title="Read the folder again">&#8635; refresh</button></div>
+    <div class="fpbody" id="fpbody"></div>
+  </div>
+</div>
+  </section>
+</div>
+<div class="page" id="page2">
+  <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></div><div class="phtx"><h2>Processing</h2><p>How the stack is made, where it was shot, and the run itself. A gold dot marks a setting you changed from its default.</p></div><button class="nextbtn" data-goto="3" id="next2">Next: Result <span class="arr">&rarr;</span></button></div>
+  <section class="psec p2optsec">
+    <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></span>Stacking options <span class="hint" id="optnote"></span></h3>
+      <div class="optpanel" id="optpanel">
+        <div class="optgrid">
       <label class="optchk"
         title="Fallback merge: align, average each exposure group, merge on measured ratios; no ladder, LDIC or feathering. Use it when the normal stack fails. Widely spaced brackets can show rings.">
         <input type="checkbox" id="simpleStack"> Simple stack
@@ -384,7 +870,40 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
         <input type="checkbox" id="tierLinear"> &nbsp;&#8627; scene-linear</label>
 
         </div>
-      <details id="siteBox" style="margin-top:10px"><summary class="hint" style="cursor:pointer">Observing site and time (optional, for the star catalogue)</summary>
+      </div>
+  </section>
+  <section class="psec p2split">
+   <div class="p2run">
+    <div id="rcsec" style="display:none;margin-bottom:12px">
+      <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M8 1.8l5 2v4c0 3-2.2 5.2-5 6.4C5.2 13 3 10.8 3 7.8v-4z"/><path d="M5.8 8l1.6 1.6 3-3"/></svg></span>Recipe check <span class="hint" id="rcnote"></span></h3>
+      <div id="rclist" class="cklist"></div>
+    </div>
+    <div class="p2runbox">
+    <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M4.5 2.8v10.4L13 8z"/></svg></span>Run</h3>
+    <div class="runrow">
+        <div class="runbtns">
+      <button class="primary" id="start" disabled>Start</button>
+      <button id="cancelrun" style="display:none"
+        title="Stops the running job at its next step. A cancelled stack leaves no cache; the next Start runs it again.">Cancel</button>
+      <button id="clearcache" disabled
+        title="Deletes this folder's cache so the next Start reprocesses from the raw files. Raws, flats and exports are not touched.">Clear cache</button>
+      <button id="framesbtn" disabled style="display:none"
+        title="Every frame found in the folder: brackets, short exposures, contact frames, flats, darks, bias. Switch single frames off, or force a bracket frame in past the automatic checks.">Frames</button>
+        </div>
+      <span class="p2opts"><button id="optsToggle" class="ghost" title="Show or hide the processing options used by the next Start."><span class="chev">&#9662;</span> Show/hide processing options</button>
+        <span id="hiddennote"></span> <button class="mini" id="logbig" title="Show the log large over the picture (Esc closes it).">&#x2922; log</button></span>
+    </div>
+      <div class="bar" id="pbarwrap"><div id="pbar"></div></div>
+      <div class="runline" id="runline" style="display:none">
+        <span class="spin" id="spin">&#9696;</span>
+        <span class="clock" id="clock">0:00</span>
+        <span id="stepnote"></span>
+      </div>
+      <div class="log" id="log" title="Green: done. Orange: warning, the run goes on. Red: failure. Pink: unusual, check it. Blue: stage start.">idle</div>
+    </div>
+   </div>
+   <div class="p2side">
+      <details id="siteBox" open><summary class="ptitle" style="cursor:pointer"><span class="sico"><svg viewBox="0 0 16 16"><path d="M8 14.2s4.5-4.3 4.5-7.6a4.5 4.5 0 0 0-9 0c0 3.3 4.5 7.6 4.5 7.6z"/><circle cx="8" cy="6.6" r="1.6"/></svg></span>Observing site and time <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">optional, for the star catalogue</span></summary>
         <span class="hint" style="display:block;margin:4px 0 6px">Where and when totality was shot. It puts the star catalogue at its exact place and corrects for atmospheric refraction, so stars are confirmed tighter and fainter. It does not change the stack. Saved beside the frames; used by the next Start (on a stacked set: stars re-checked and detail layers rebuilt, no re-stack).</span>
         <div class="optgrid">
           <label class="opt" title="Total eclipses with a built-in list of places in the path of totality (NASA eclipse elements, GeoNames places)."><span class="optname">Eclipse</span><div class="inrow"><select id="siteEcl" class="sel"><option value="">(type the site below)</option></select></div></label>
@@ -396,23 +915,125 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
           <label class="opt"><span class="optname">Local time (mid-totality)</span><div class="inrow"><input type="text" id="siteTime" placeholder="20:29:30" spellcheck="false"></div></label>
           <label class="opt"><span class="optname">UTC offset (h)</span><div class="inrow"><input type="text" id="siteTz" placeholder="+2" spellcheck="false"></div></label>
         </div>
-        <div class="inrow" style="margin-top:6px"><button id="siteSave" class="mini">Save</button><button id="siteClear" class="mini">Clear</button><span class="hint" id="siteMsg"></span></div>
+        <div class="inrow" style="margin-top:6px"><button id="siteMap" class="mini" title="A map with the path of totality: click the place you shot from to fill in position, date, local time and UTC offset. The map needs an internet connection.">Pick on map&hellip;</button><button id="siteSave" class="mini">Save</button><button id="siteClear" class="mini">Clear</button><span class="hint" id="siteMsg"></span></div>
       </details>
+    <div class="rail-like"><div class="group"><div class="grouphead"><span class="gico"></span><h2>Processing recipe</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+      <div class="export">
+        <span class="hint" style="margin-bottom:6px">The settings that decide how the data is
+        STACKED &mdash; correlation, align filter, tier combine, FNRGF, photometric solve, tiers,
+        merge weight, white balance, photometry, frames, denoise. Kept apart from the look on
+        purpose: a look can be dropped on any bracket and seen at once, while these only mean
+        anything at the next Start. Saved from what the run actually used, not from where the
+        controls happen to be sitting.</span>
+        <input type="text" id="procname" value="my_recipe" spellcheck="false"
+          title="Saved as this name plus .efprocess.json in eclipseforge_output/.">
+        <button id="procsave">Save recipe</button>
+        <input type="text" id="processingPath" spellcheck="false" style="display:none">
+        <button id="procload">Load recipe&hellip;</button>
+        <span class="hint" id="prochint"></span>
       </div>
-      <div class="statusrow">
-        <span class="sdot" id="sdot" title="Grey: no folder. Green: Start loads the cache. Amber: an option changed, Start re-stacks. Gold: running. Red: failed."></span>
-        <button id="optsToggle" class="ghost" title="Show or hide the processing options used by the next Start."><span class="chev">&#9662;</span> Show/hide processing options</button>
-        <span id="hiddennote"></span>
-      <span class="status" id="status">choose a folder containing the bracketed raw files · scroll = zoom · drag = pan · double-click = reset</span>
-        <div class="runbtns">
-      <button class="primary" id="start" disabled>Start</button>
-      <button id="cancelrun" style="display:none"
-        title="Stops the running job at its next step. A cancelled stack leaves no cache; the next Start runs it again.">Cancel</button>
-      <button id="clearcache" disabled
-        title="Deletes this folder's cache so the next Start reprocesses from the raw files. Raws, flats and exports are not touched.">Clear cache</button>
+    </div></div>
+   </div>
+  </section>
+</div>
+<div class="page" id="page4">
+  <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg></div><div class="phtx"><h2>Export</h2><p>Pick the products, then export. Every file lands in eclipseforge_output/ inside the raw folder, with its settings beside it.</p></div></div>
+  <section class="psec xbar">
+    <div class="xbarrow">
+      <label class="xf xname"><span class="optname">File name</span><input type="text" id="expname" value="eclipseforge_render" spellcheck="false" title="The start of every file name; each product adds its own ending, and a number when the name is taken."></label>
+      <div class="xf"><span class="optname">Format</span><div class="xseg" id="xfmt">
+        <label title="Recommended: 16 bits per channel, lossless, with the sRGB profile."><input type="radio" name="fmt" value="tif16" checked><span>TIFF 16-bit</span></label><label><input type="radio" name="fmt" value="tif8"><span>TIFF 8-bit</span></label><label><input type="radio" name="fmt" value="png"><span>PNG 16-bit</span></label><label title="Lossy, small, for sharing."><input type="radio" name="fmt" value="jpg"><span>JPG</span></label></div></div>
+      <div class="xf"><span class="optname">Size</span><div class="xseg">
+        <label><input type="radio" name="xsize" value="full" checked><span>Full</span></label><label title="2x2 binned: half the width and height, about twice the signal-to-noise."><input type="radio" name="xsize" value="half"><span>50 %</span></label></div></div>
+      <label class="xf" title="Rotates or flips the finished picture in the view and every export. No re-run. FITS has no orientation keyword, so portrait FITS sets need this."><span class="optname">Orientation</span>
+        <select id="orient" class="sel" style="width:auto">
+          <option value="">as captured</option><option value="flipv">flip vertical</option><option value="fliph">flip horizontal</option>
+          <option value="180">rotate 180&deg;</option><option value="cw">rotate 90&deg; CW</option><option value="ccw">rotate 90&deg; CCW</option></select></label>
+      <div class="xgo"><button class="primary" id="export" disabled>Export selected</button></div>
+    </div>
+    <div class="xline"><span class="hint" id="xsum">Tick the products to export, or use the Export button on one card.</span><span class="hint" id="xprog"></span></div>
+  </section>
+  <section class="psec">
+    <div class="xgrid" id="xgrid">
+      <div class="xcard" data-card="picture">
+        <div class="xthumb"><img alt=""><span class="xtnote"></span></div>
+        <div class="xbody">
+          <div class="xhead"><label><input type="checkbox" class="xinc" checked> <b>Picture</b></label><span class="xtag" data-fmt="1"></span></div>
+          <p class="xdesc">The finished picture with the look from tab 3, in the format and size chosen above.</p>
+          <div class="xmeta" data-meta="rgb"></div>
+          <label class="xopt" title="Also writes the prominences as a 16-bit RGBA TIFF (name_prominences_16bit.tif) and the corona without them (name_corona_16bit.tif), for layering in Photoshop."><input type="checkbox" id="expprom"> + prominence layer pair (RGBA TIFF)</label>
+          <label class="xopt" title="Also writes the Moon disc as a 16-bit RGBA TIFF (name_moon_16bit.tif) on the same grid, its soft edge as transparency."><input type="checkbox" id="expmoon"> + Moon layer (RGBA TIFF)</label>
+          <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
+        </div>
+      </div>
+      <div class="xcard" data-card="plain">
+        <div class="xthumb"><img alt=""><span class="xtnote"></span></div>
+        <div class="xbody">
+          <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Plain HDR stack</b></label><span class="xtag" data-fmt="1"></span></div>
+          <p class="xdesc">The stack itself with one neutral stretch: no detail layers, no look, no sharpening, whatever tab 3 shows. A clean start for your own finishing, and a check of what the data holds.</p>
+          <div class="xmeta" data-meta="rgb"></div>
+          <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
+        </div>
+      </div>
+      <div class="xcard" data-card="hdr32">
+        <div class="xthumb"><img alt=""><span class="xtnote">as the linear file opens, no stretch</span></div>
+        <div class="xbody">
+          <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Linear HDR merge</b></label><span class="xtag">TIFF 32-bit float</span></div>
+          <p class="xdesc">The merge before any look: scene-linear, 32-bit float, sRGB primaries, linear ICC profile. 1.0 is the bright inner corona; prominence cores go above it. For HDR finishing in other software. Size and orientation apply.</p>
+          <div class="xmeta" data-meta="f32"></div>
+          <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
+        </div>
+      </div>
+      <div class="xcard" data-card="polar">
+        <div class="xthumb xwide"><img alt=""><span class="xtnote"></span></div>
+        <div class="xbody">
+          <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Polar map</b></label><span class="xtag" data-fmt="1"></span></div>
+          <p class="xdesc">The picture unwrapped around the Sun: position angle across, distance up. TIFF is the clean map; JPG and PNG carry axes, N/E/S/W and guide lines. North from the star match.</p>
+          <div id="polaropts">
+            <div class="eopts"><label title="Where the angle starts. Solar north uses the Sun's rotation axis for the date; celestial north is the sky's."><span class="on">Angle from</span><select id="polarnorth"><option value="solar" selected>solar north</option><option value="celestial">celestial north</option></select></label><label title="Linear: radius in even steps; small things look taller the further out they are. Shape-true: radius on a log scale, so stars and prominences keep their shape at every distance."><span class="on">Radius</span><select id="polarradial"><option value="linear" selected>linear</option><option value="log">shape-true (log)</option></select></label><label title="Which direction sits in the middle of the map. The angle runs the same way either way."><span class="on">Middle</span><select id="polarcentre"><option value="S" selected>south</option><option value="N">north</option><option value="E">east</option><option value="W">west</option></select></label><label title="Solar north entered by hand, in degrees clockwise from the top of the picture. Used instead of the star match, or when no stars were matched. Leave empty to use the stars."><span class="on">North by hand (&deg;)</span><input type="text" id="polarmanual" placeholder="auto" spellcheck="false"></label></div>
+            <details class="emore"><summary>More options <span>(7)</span></summary><div class="eopts"><label title="Full circle: up to the largest radius the frame covers all round. Whole frame: out to the frame's corners, grey where the frame does not reach."><span class="on">Out to</span><select id="polarouter"><option value="circle" selected>full circle</option><option value="frame">whole frame</option></select></label><label class="chk" title="Off: the map reads like the sky at the limb. On: the angle rises to the right, the classic layout, which is a mirror image of the sky."><input type="checkbox" id="polarmirror"> Mirrored</label><label title="A small turn added to the angle used, positive clockwise, to fine-tune where the map starts."><span class="on">Adjust (&deg;)</span><input type="text" id="polaroffset" placeholder="0" spellcheck="false"></label><label class="chk" title="Faint guide lines every 30 degrees and every half radius (JPG/PNG and the overlay layer)."><input type="checkbox" id="polargrid" checked> Grid</label><label class="chk" title="A dot the size of the Earth on the radial scale (needs the star match)."><input type="checkbox" id="polarearth" checked> Earth for scale</label><label title="Also cut the map into this many tiles for a carousel: side by side they are one seamless strip of the full 360 degrees, and the last tile joins the first. JPG, beside the map."><span class="on">Carousel</span><select id="polartiles"><option value="0" selected>off</option><option value="3">3 tiles</option><option value="4">4 tiles</option><option value="5">5 tiles</option><option value="6">6 tiles</option><option value="8">8 tiles</option><option value="10">10 tiles</option></select></label><label title="The size of each tile: posts 3:4 (1080 × 1440) or 4:5 (1080 × 1350), square (1080 × 1080), or a story (1080 × 1920)."><span class="on">Tile</span><select id="polartilefmt"><option value="3:4" selected>3:4 post</option><option value="4:5">4:5 post</option><option value="1:1">1:1 square</option><option value="9:16">9:16 story</option></select></label></div></details>
+          </div>
+          <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
+        </div>
+      </div>
+      <div class="xcard" data-card="polarlayers">
+        <div class="xthumb xwide"><img alt=""><span class="xtnote">base + overlay, shown together</span></div>
+        <div class="xbody">
+          <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Polar map in layers</b></label><span class="xtag">2 &times; TIFF 16-bit</span></div>
+          <p class="xdesc">The labelled polar map as two files on the same canvas: the <b>base</b> (the map at its own resolution, no labels) and a transparent <b>overlay</b> (axes, numbers, N/E/S/W, grid, Earth). Denoise or retouch the base, lay the overlay on top (Normal) &mdash; in Photoshop, Affinity or GIMP. Uses the options of the Polar map card.</p>
+          <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
+        </div>
+      </div>
+      <div class="xcard xviews" data-card="views">
+        <div class="xvgrid" id="xvgrid"></div>
+        <div class="xbody">
+          <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Detail views</b></label><span class="xtag" data-fmt="1"></span></div>
+          <p class="xdesc">The layers behind the look, one file each, in grayscale (the Moon view in colour). Tick the views above.</p>
+          <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
         </div>
       </div>
     </div>
+  </section>
+</div>
+<div class="page" id="page5">
+  <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg></div><div class="phtx"><h2>Extras</h2><p>Products made from the result: overlays, posters and panoramas, all drawn from the picture, its geometry and the star match. Nothing is added that is not in the data. Files land in eclipseforge_output/extras/.</p></div></div>
+  <section class="psec xbar">
+    <div class="xbarrow">
+      <label class="xf xname"><span class="optname">File name</span><input type="text" id="exname" value="eclipseforge_render" spellcheck="false" title="The start of every file name; each product adds its own ending, and a number when the name is taken."></label>
+      <span class="hint" id="exnote">The picture as tab 3 shows it, in the stack's own frame. North and the angle origin follow the Polar map card in Export.</span>
+      <div class="xgo"><button class="primary" id="exgen" disabled>Generate selected</button></div>
+    </div>
+    <div class="xline"><span class="hint" id="exsum">Tick the products to make, or use the Generate button on one card. Click a preview to see it large.</span><span class="hint" id="exprog"></span></div>
+  </section>
+  <section class="psec">
+    <div class="egrid" id="egrid"></div>
+  </section>
+</div>
+<div class="elbox" id="elbox"><img id="elboximg" alt=""><span id="elboxcap"></span></div>
+<div class="app">
+  <div class="stage">
+    <div class="stalebar" id="stalebar" style="display:none"><span id="staletext"></span>
+      <button class="mini" id="stalego">Go to 2 Processing</button></div>
     <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas>
       <div id="cropmark"></div>
       <div id="croppanel"><div class="cropbar"><b>1:1 crop</b><span id="cropinfo"></span>
@@ -443,22 +1064,8 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
   </div>
   <div class="railgrip" id="railgrip" title="Drag to resize the panel"></div>
   <aside class="rail"><div class="railinner">
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Pipeline</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><button class="mini" id="logbig" title="Show the log large over the picture (Esc closes it).">&#x2922; log</button><span class="tog">&#9662;</span></div>
-      <div class="bar" id="pbarwrap"><div id="pbar"></div></div>
-      <div class="runline" id="runline" style="display:none">
-        <span class="spin" id="spin">&#9696;</span>
-        <span class="clock" id="clock">0:00</span>
-        <span id="stepnote"></span>
-      </div>
-      <div class="log" id="log" title="Green: done. Orange: warning, the run goes on. Red: failure. Pink: unusual, check it. Blue: stage start.">idle</div>
-      <div class="tline" id="tline" style="display:none" title="One bar per frame along the shooting time; bar height is the exposure time (log scale). Hover a bar for the file.">
-        <div class="tlhead" id="tlhead">SHOOTING TIMELINE</div>
-        <svg id="tlsvg" xmlns="http://www.w3.org/2000/svg"></svg>
-        <div class="tlsum" id="tlsum"></div>
-      </div>
-    </div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Structure</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-structure"></div></div>
-    <div class="group" id="grp-hill"><div class="grouphead"><span class="gico"></span><h2>Partial convolution</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Structure</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-structure"></div></div>
+    <div class="group" id="grp-hill" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Partial convolution</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">Unsharp masks of the log-stretched image at
         2&ndash;32 px, added back with their own weights. Each blur runs in polar coordinates, along
         a streamer rather than across it, and leaves the Moon and the prominences out. Additive,
@@ -468,11 +1075,11 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
         build them (adds a few minutes to the stack).</div>
       <div class="hint" id="hillScales"></div>
       <div id="g-hill"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Inner corona</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-inner"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Prominences</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-prom"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Stars</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><span class="hint" id="starNote"></span><div id="g-stars"></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Inner corona</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-inner"></div></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Prominences</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-prom"></div></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Stars</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><span class="hint" id="starNote"></span><div id="g-stars"></div>
 </div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Color</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Color</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <button id="pickwb" style="margin:2px 0 8px 0"
         title="Press, then drag a box on the preview (or click a point): its median colour is made neutral by setting Warmth and Tint. Esc cancels.">Pick white point…</button>
       <label class="opt" style="margin:0 0 8px 0"
@@ -510,18 +1117,18 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
           <option value="2">Mono + tints</option>
         </select></label>
       <div id="g-color"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Tone</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-tone"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Moon</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Tone</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-tone"></div></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Moon</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">The lunar disc on its own: its level, the earthshine (maria) contrast, its colour and its own tone curve. The Tone group's curve no longer reaches the disc.</div>
       <div id="g-moon"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Final sharpening</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Final sharpening</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">Last step, on the finished picture. High passes
         at 1.5&ndash;24 px (scaled with the solar radius), combined across the scales as median,
         minimum and maximum, each blended in soft light at its own strength. The noise gate holds
         each band back where it is no stronger than the picture&rsquo;s own grain; 0 = off.
         The preview follows a moment after the slider.</div>
       <div id="g-final"></div></div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Diamond ring</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Diamond ring</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <input type="text" id="ringpath" placeholder="/path/to/contact_frame.RW2" spellcheck="false"
         style="width:100%;background:#0e1013;color:var(--text);border:1px solid var(--line);
         border-radius:4px;padding:6px 8px;font:12px ui-monospace,monospace">
@@ -529,39 +1136,12 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
       <button id="ringload" style="margin-top:6px" disabled>Load contact frame</button>
       <div id="g-ring"></div>
     </div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Export</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
-      <div class="export">
-        <label class="radio"><input type="radio" name="fmt" value="tif16" checked> TIFF · 16-bit (recommended)</label>
-        <label class="radio"><input type="radio" name="fmt" value="tif8"> TIFF · 8-bit</label>
-        <label class="radio"><input type="radio" name="fmt" value="png"> PNG · 16-bit</label>
-        <label class="radio"><input type="radio" name="fmt" value="jpg"> JPG (lossy)</label>
-        <label class="radio"><input type="checkbox" id="exphalf"> Export at 50 % size (2×2 binned, cleaner)</label>
-        <label class="radio" title="Also writes the prominences as a 16-bit RGBA TIFF (name_prominences_16bit.tif) and the corona without them (name_corona_16bit.tif), for layering in Photoshop. Composite view only."><input type="checkbox" id="expprom"> Also export prominence layer (RGBA TIFF)</label>
-        <label class="radio" title="Also writes the Moon disc as a 16-bit RGBA TIFF (name_moon_16bit.tif) on the same grid, its soft edge as transparency. Composite view only."><input type="checkbox" id="expmoon"> Also export Moon layer (RGBA TIFF)</label>
-        <label class="radio" title="Rotates or flips the finished picture in the view and the export. No re-run. FITS has no orientation keyword, so portrait FITS sets need this.">
-          Orientation
-          <select id="orient" style="background:#0e1013;color:var(--text);border:1px solid var(--line);
-            border-radius:5px;padding:3px 6px;font-size:13px;margin-left:6px">
-            <option value="">as captured</option>
-            <option value="flipv">flip vertical</option>
-            <option value="fliph">flip horizontal</option>
-            <option value="180">rotate 180&deg;</option>
-            <option value="cw">rotate 90&deg; CW</option>
-            <option value="ccw">rotate 90&deg; CCW</option>
-          </select></label>
-        <input type="text" id="expname" value="eclipseforge_render" spellcheck="false">
-        <button class="primary" id="export" disabled>Export full resolution</button>
-        <span class="hint">Exports the current view (composite, or the selected detail layer as grayscale).
-        Saved into <code>eclipseforge_output/</code> inside the raw folder, with a .params.json sidecar.</span>
-      </div>
-    </div>
-
-    <div class="group" id="grp-versions"><div class="grouphead"><span class="gico"></span><h2>Versions</h2><button class="mini" id="versrefresh" title="Re-read the output folder">&#8635;</button><span class="tog">&#9662;</span></div>
+    <div class="group" id="grp-versions" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Versions</h2><button class="mini" id="versrefresh" title="Re-read the output folder">&#8635;</button><span class="tog">&#9662;</span></div>
       <span class="hint" style="margin-bottom:6px">The exports in <code>eclipseforge_output/</code>, newest first. A note
         stays with the file; Load puts that export&rsquo;s settings back on the sliders.</span>
       <div id="versions" class="versions"><span class="hint">no folder loaded</span></div>
     </div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Settings</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
+    <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Settings</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="export">
         <span class="hint" style="margin-bottom:6px">Carry a look to another bracket, or send one to
         somebody else. Settings that describe THIS image rather than the look &mdash; the disc radius and
@@ -573,22 +1153,6 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
         <input type="text" id="settingsPath" spellcheck="false" style="display:none">
         <button id="setload">Load settings&hellip;</button>
         <span class="hint" id="sethint"></span>
-      </div>
-    </div>
-    <div class="group"><div class="grouphead"><span class="gico"></span><h2>Processing recipe</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
-      <div class="export">
-        <span class="hint" style="margin-bottom:6px">The settings that decide how the data is
-        STACKED &mdash; correlation, align filter, tier combine, FNRGF, photometric solve, tiers,
-        merge weight, white balance, photometry, frames, denoise. Kept apart from the look on
-        purpose: a look can be dropped on any bracket and seen at once, while these only mean
-        anything at the next Start. Saved from what the run actually used, not from where the
-        controls happen to be sitting.</span>
-        <input type="text" id="procname" value="my_recipe" spellcheck="false"
-          title="Saved as this name plus .efprocess.json in eclipseforge_output/.">
-        <button id="procsave">Save recipe</button>
-        <input type="text" id="processingPath" spellcheck="false" style="display:none">
-        <button id="procload">Load recipe&hellip;</button>
-        <span class="hint" id="prochint"></span>
       </div>
     </div>
   </div></aside>
@@ -627,6 +1191,8 @@ const DEFS = [
  ["bandCoarse","Filament detail: coarse part",0,1,0.01,"inner"],
  ["bandFaint","Filament detail: spare the faint parts",0,0.8,0.01,"inner"],
  ["detailStart","Inner & filament detail: start (px outside the Moon)",0,40,0.5,"inner"],
+ ["limbSoft","Inner softening (0 = off)",0,1,0.01,"inner"],
+ ["limbSoftR","Inner softening: full detail from (R)",1.1,2.0,0.01,"inner"],
  ["promGain","Prominence contrast",0,2,0.01,"prom"],
  ["promDetail","Prominence detail",0,1,0.01,"prom"],
  ["promChroma","Prominence colour detail",-1.5,1.5,0.01,"prom"],
@@ -770,6 +1336,8 @@ function buildSliders(defaults){
     if (k === "clarity") div.style.display = "none";
     if (k === "promLight") div.title = "How far the prominences brighten the corona under them, so the brightest core is also the brightest part (pale pink where it outshines a light corona). 0 = laid over the corona as an opaque colour, as before. Double-click to reset.";
   if (k === "promSoft") div.title = "Smooths the step from the prominence cores to their rims: the brightest parts keep their structure instead of becoming one flat colour. 0 = off. Double-click to reset.";
+  if (k === "limbSoft") div.title = "Eases the fine detail and sharpening next to the Moon, so the bright inner corona stays smooth; the streamers further out keep their full detail. 0 = off. Double-click to reset.";
+  if (k === "limbSoftR") div.title = "The distance from the Moon's centre, in lunar radii, from which the detail is back in full. Double-click to reset.";
   if (k === "detailStart") div.title = "How close to the Moon the inner and filament detail begin, in full-resolution pixels outside the disc edge; full strength at twice that. Lower brings texture up to the limb, higher hides a dashed line along it. Check with the 1:1 crop. Double-click to reset.";
   if (k === "skySub") div.title = "Takes the even light of a bright (sunset) sky off before the stretch, so Radial flatten lifts the corona without lifting the sky with it. 1 = all of the sky light measured in the outer frame. Higher gives a darker sky and a stronger fall-off towards the corners; near 1 it can print a dark ring where the faint glow meets the sky. 0 = off. Double-click to reset.";
   if (k === "bandFaint") div.title = "Fades the filament detail out in the darker parts of the picture: 0 = everywhere, higher = only where the corona is brighter than this. Double-click to reset.";
@@ -833,7 +1401,7 @@ async function loadTimeline(){
 }
 function drawTimeline(){
   const j = TL, svg = $("tlsvg"); if (!j || !svg) return;
-  const W = Math.max(120, svg.clientWidth || 300), H = 70;
+  const W = Math.max(120, svg.clientWidth || 300), H = Math.max(70, svg.clientHeight || 70);
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   const NS = "http://www.w3.org/2000/svg";
   const el = (n, a, txt) => { const e = document.createElementNS(NS, n);
@@ -852,7 +1420,7 @@ function drawTimeline(){
   const hOf = s => 5 + (smax > smin ? Math.log(s / smin) / lr : 0.6) * (H - top - bot - 5);
   const bw = Math.max(1.2, Math.min(6, (W - padL - padR) / (F.length * 1.7)));
   const COL = ["#5aa0f0", "#3a76c8"];
-  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d", short: "#3fb8a6"};
+  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d", short: "#3fb8a6", off: "#2e333b"};
   const MOONC = "#e6e9ee";
   // brackets: alternate shading behind each, number on top
   if (j.repeated){
@@ -873,10 +1441,11 @@ function drawTimeline(){
   const why = {short: "short exposure: prominence layer only",
                excluded: "not stacked (not a totality frame / unreadable)",
                brightness: "left out: brightness more than 15 % off the tier median",
-               dropped: "left out by the sharpness cut"};
+               dropped: "left out by the sharpness cut",
+               off: "switched off by you (Frames)"};
   const tip1 = f => `${f.name} · ${tlExp(f.sec)} · ${f.t >= 0 ? "+" : ""}${f.t.toFixed(1)} s` +
       (j.repeated && f.bracket >= 0 ? ` · bracket ${f.bracket + 1}` : "") +
-      (f.status ? ` · ${why[f.status] || f.status}` : "") +
+      (f.status ? ` · ${why[f.status] || f.status}` : "") + (f.forced ? " · forced in by you" : "") +
       (f.gain != null ? (f.status === "brightness"
           ? ` (${Math.round(Math.abs(f.gain - 1) * 100)} % ${f.gain < 1 ? "darker" : "brighter"} than the tier median; cause not known)`
           : ` · brightness ${f.gain.toFixed(3)} of the tier median`) : "");
@@ -887,7 +1456,7 @@ function drawTimeline(){
       g.push(f);
     else groups.push([f]);
   }
-  const ORDER = ["stacked", "short", "brightness", "dropped", "excluded", null];
+  const ORDER = ["stacked", "short", "brightness", "dropped", "excluded", "off", null];
   for (const g of groups){
     const f0 = g[0], h = hOf(f0.sec);
     const xa = X(f0.t) - bw / 2, xb = X(g[g.length - 1].t) + bw / 2;
@@ -898,12 +1467,23 @@ function drawTimeline(){
       const k = g.filter(f => (f.status || null) === st).length; if (!k) continue;
       const hh = Math.max(h * k / g.length, st && st !== "stacked" ? 2.5 : 0);   // a left-out frame stays visible on a short bar
       const r = el("rect", {x: xa, y: yb - hh, width: w, height: hh,
-        fill: (st && SC[st]) || base, rx: 0.5, opacity: st === "excluded" ? 0.8 : 1});
+        fill: (st && SC[st]) || base, rx: 0.5, opacity: st === "excluded" ? 0.8 : 1,
+        stroke: st === "off" ? "#6b7380" : "none", "stroke-width": st === "off" ? 0.6 : 0,
+        style: "cursor:pointer"});
+      // a click opens the Frames panel on that frame
+      const fk = (g.find(f => (f.status || null) === st) || f0).key;
+      r.addEventListener("click", () => openFrames(fk));
       r.appendChild(el("title", {}, g.length === 1 ? tip1(f0)
         : `${g.length} frames at ${tlExp(f0.sec)}, +${f0.t.toFixed(1)}–${g[g.length - 1].t.toFixed(1)} s:\n` +
           g.map(tip1).join("\n")));
       svg.appendChild(r);
       yb -= hh;
+    }
+    // FORCED IN: a gold flag above the bar
+    if (g.some(f => f.forced)){
+      const ft = el("path", {d: `M${xa + w / 2 - 3},${H - bot - h - 7} L${xa + w / 2 + 3},${H - bot - h - 7} L${xa + w / 2},${H - bot - h - 2} Z`, fill: "#e8a33d"});
+      ft.appendChild(el("title", {}, g.filter(f => f.forced).map(f => f.name).join(", ") + ": forced in by you"));
+      svg.appendChild(ft);
     }
     if (g.length > 1)
       svg.appendChild(el("text", {x: xa + w / 2, y: Math.max(9, H - bot - h - 2), fill: "#8b93a0",
@@ -952,11 +1532,13 @@ function drawTimeline(){
   if (j.unread) s += ` · ${j.unread} without an exposure time`;
   let leg = "";
   if (j.n_short) leg += `<i style="background:${SC.short}"></i>short exposures ${j.n_short}`;
+  if (cnt("off")) leg += `<i style="background:${SC.off};outline:1px solid #6b7380"></i>off ${cnt("off")}`;
   if (j.ran){
     leg += `<i style="background:${COL[0]}"></i>stacked ${cnt("stacked")}`;
     if (cnt("brightness")) leg += `<i style="background:${SC.brightness}"></i>brightness off ${cnt("brightness")}`;
     if (cnt("dropped")) leg += `<i style="background:${SC.dropped}"></i>sharpness cut ${cnt("dropped")}`;
     if (cnt("excluded")) leg += `<i style="background:${SC.excluded}"></i>not stacked ${cnt("excluded")}`;
+    if (F.some(f => f.forced)) leg += `<i style="background:#e8a33d;clip-path:polygon(0 0,100% 0,50% 100%)"></i>forced in ${F.filter(f => f.forced).length}`;
     if (j.t_ref != null) leg += `<i style="background:${MOONC};width:2px"></i>Moon placed at +${j.t_ref.toFixed(0)} s` +
       (j.moon_v ? ` (${Math.hypot(j.moon_v[0], j.moon_v[1]).toFixed(3)} px/s)` : "");
   }
@@ -966,6 +1548,279 @@ function drawTimeline(){
 }
 window.addEventListener("resize", () => { if (TL) drawTimeline(); });
 
+/* ---- Frames panel (2026-11-08) ------------------------------
+   Every frame found for the folder, by role, with the camera's own preview.
+   Per frame: Auto (the app decides), Off (never used) or Force (bracket frames
+   only: used even where an automatic check would leave it out; flagged in
+   gold here, in the timeline and in the log). Saved at once in
+   eclipseforge_frames.json in the image folder; the next Start re-stacks. */
+let FP = null, FPV = null;
+const FP_ST = {stacked: ["stacked", "#3a76c8"], brightness: ["brightness off", "#e8a33d"],
+               dropped: ["sharpness cut", "#5d6673"], excluded: ["not stacked", "#c0504d"],
+               prom: ["prominences", "#3fb8a6"], promunused: ["not used", "#c0504d"],
+               clock: ["clock", "#e8a33d"]};
+function fpQuery(){
+  const q = new URLSearchParams();
+  const fd = ($("flatDir").value || "").trim(); if (fd) q.set("flat", fd);
+  return q.toString();
+}
+function fpMode(){ return ($("fpstretch") && $("fpstretch").value) || "strong"; }
+function fpUrl(k, s){ const q = new URLSearchParams(fpQuery()); q.set("k", k); q.set("s", s); q.set("m", fpMode()); return "/api/framepreview?" + q; }
+async function openFrames(focusKey){
+  if (focusKey) setTab(1);
+  $("fpbody").innerHTML = '<p class="hint">reading the folder…</p>';
+  try {
+    const j = await (await fetch("/api/frames?" + fpQuery())).json();
+    if (!j.ok){ $("fpbody").innerHTML = `<p class="hint">${j.error}</p>`; return; }
+    FP = j; drawFrames();
+    if (focusKey){
+      const c = document.querySelector(`.fpcard[data-k="${CSS.escape(focusKey)}"]`);
+      if (c && c.closest(".fpgroup").classList.contains("shut")) c.closest(".fpgroup").classList.remove("shut");
+    if (c){ c.scrollIntoView({block: "center"}); c.animate([{outline: "2px solid #fff"}, {outline: "2px solid transparent"}], {duration: 1600}); }
+    }
+  } catch (e){ $("fpbody").innerHTML = `<p class="hint">could not read the frames: ${e}</p>`; }
+}
+// OPEN OR CLOSED per group, remembered in this browser; the brackets start
+// open, the other groups closed
+function fpShut(role){
+  try { const v = localStorage.getItem("efh.fpshut." + role); if (v != null) return v === "1"; } catch (e) {}
+  return role !== "lights";
+}
+function fpAll(){ return FP ? FP.groups.flatMap(g => g.frames.map(f => [g, f])) : []; }
+function fpSegHtml(g, f){
+  const b = (v, lab, tip) => `<button data-v="${v}" class="${f.state === v ? "on" : ""}" title="${tip}">${lab}</button>`;
+  return b("auto", "Auto", "The app decides (automatic checks apply)") +
+         b("off", "Off", "Never used") +
+         (g.forceable ? b("force", "Force", "Always used, even where an automatic check would leave it out") : "");
+}
+function drawFrames(){
+  const nOff = fpAll().filter(([g, f]) => f.state === "off").length;
+  const nF = fpAll().filter(([g, f]) => f.state === "force").length;
+  $("fpsum").textContent = `${fpAll().length} frames · ${nOff} off · ${nF} forced in` +
+    (nOff || nF ? " · changes apply at the next Start (re-stack)" : "") + ` · saved in ${FP.file}`;
+  let h = "";
+  for (const g of FP.groups){
+    const shut = fpShut(g.role);
+    const nOffG = g.frames.filter(f => f.state === "off").length, nFG = g.frames.filter(f => f.state === "force").length;
+    h += `<div class="fpgroup${shut ? " shut" : ""}" data-role="${g.role}"><h4 title="Click to open or close this group"><span class="fpchev">&#9662;</span>${g.title} <span class="fpdir">${g.frames.length} · ${g.dir === "." ? "image folder" : g.dir + "/"}` +
+         (nOffG ? ` · ${nOffG} off` : "") + (nFG ? ` · ${nFG} forced` : "") + `</span>` +
+         `<button class="mini" data-gauto="${g.role}" title="Set this group back to Auto">all auto</button></h4><div class="fpgrid">`;
+    for (const f of g.frames){
+      const st = f.status && FP_ST[f.status];
+      let meta = (f.sec ? tlExp(f.sec) : "") + (f.ts ? " · " + String(f.ts).split(/[ T]/)[1] : "");
+      let line2 = "";
+      if (st) line2 += `<span class="fpst" style="background:${st[1]};color:#111" title="${f.note || ""}">${f.status === "clock" && f.note ? f.note : st[0]}</span> ` +
+                       (f.status === "promunused" && f.note ? `<span>${f.note}</span>` : "");
+      if (f.gain != null && f.status !== "stacked") line2 += `${f.gain < 1 ? "" : "+"}${Math.round((f.gain - 1) * 100)} % `;
+      if (f.sharp != null) line2 += `<span title="Sharpness of the last run, relative to the tier's sharpest frame">sharp ${Math.round(f.sharp * 100)} %</span>`;
+      h += `<div class="fpcard ${f.state === "auto" ? "" : f.state}" data-k="${f.key}" data-r="${g.role}">` +
+           `<img loading="lazy" src="${fpUrl(f.key, "thumb")}" alt="" title="Open larger">` +
+           `<span class="fpflag" title="Forced in by you">&#9873; forced</span><span class="fpoffx" title="Switched off by you">off</span>` +
+           `<div class="fpname" title="${f.key}">${f.name}</div><div class="fpmeta">${meta}</div><div class="fpmeta">${line2}</div>` +
+           `<div class="fpseg">${fpSegHtml(g, f)}</div></div>`;
+    }
+    h += "</div></div>";
+  }
+  $("fpbody").innerHTML = h || '<p class="hint">no frames found</p>';
+}
+async function fpSet(changes){
+  try {
+    const body = Object.assign({set: changes}, Object.fromEntries(new URLSearchParams(fpQuery())));
+    const j = await (await fetch("/api/frames", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                  body: JSON.stringify(body)})).json();
+    if (!j.ok){ $("fpsum").textContent = j.error; return false; }
+    for (const [g, f] of fpAll()) if (f.key in changes) f.state = (changes[f.key] === "force" && !g.forceable) ? "auto" : changes[f.key];
+    drawFrames(); if (FPV) fpViewDraw();
+    refreshCache(); loadTimeline(); loadChecklist();
+    return true;
+  } catch (e){ $("fpsum").textContent = "could not save: " + e; return false; }
+}
+$("fpbody").addEventListener("click", e => {
+  const card = e.target.closest(".fpcard");
+  const ga = e.target.closest("[data-gauto]");
+  const hd = e.target.closest(".fpgroup h4");
+  if (hd && !ga){
+    const grp = hd.parentElement, shut = !grp.classList.contains("shut");
+    grp.classList.toggle("shut", shut);
+    try { localStorage.setItem("efh.fpshut." + grp.dataset.role, shut ? "1" : "0"); } catch (e2) {}
+    return;
+  }
+  if (ga){
+    const g = FP.groups.find(x => x.role === ga.dataset.gauto);
+    const ch = {}; for (const f of g.frames) if (f.state !== "auto") ch[f.key] = "auto";
+    if (Object.keys(ch).length) fpSet(ch);
+    return;
+  }
+  if (!card) return;
+  const btn = e.target.closest(".fpseg button");
+  if (btn){ fpSet({[card.dataset.k]: btn.dataset.v}); return; }
+  if (e.target.tagName === "IMG") fpView(card.dataset.k);
+});
+$("fpallauto").addEventListener("click", () => {
+  const ch = {}; for (const [g, f] of fpAll()) if (f.state !== "auto") ch[f.key] = "auto";
+  if (Object.keys(ch).length) fpSet(ch);
+});
+$("fpclose").addEventListener("click", () => $("fpanel").classList.remove("on"));
+function fpView(k){ FPV = {k, crop: false}; $("fpview").classList.add("on"); fpViewDraw(); }
+function fpViewDraw(){
+  const all = fpAll(), i = all.findIndex(([g, f]) => f.key === FPV.k); if (i < 0) return;
+  const [g, f] = all[i];
+  $("fpvimg").src = fpUrl(f.key, FPV.crop ? "crop" : "big");
+  $("fpvname").textContent = `${g.title} · ${f.name}` + (f.sec ? " · " + tlExp(f.sec) : "") +
+    (f.status && FP_ST[f.status] ? " · last run: " + (f.note || FP_ST[f.status][0]) : "") + `  (${i + 1}/${all.length})`;
+  $("fpvseg").innerHTML = fpSegHtml(g, f);
+  $("fpvcrop").textContent = FPV.crop ? "whole frame" : "1:1 limb";
+}
+function fpStep(d){
+  const all = fpAll(), i = all.findIndex(([g, f]) => f.key === FPV.k);
+  const n = all[Math.min(all.length - 1, Math.max(0, i + d))]; if (n){ FPV.k = n[1].key; fpViewDraw(); }
+}
+$("fpvprev").addEventListener("click", () => fpStep(-1));
+$("fpvnext").addEventListener("click", () => fpStep(1));
+$("fpvcrop").addEventListener("click", () => { FPV.crop = !FPV.crop; fpViewDraw(); });
+$("fpvclose").addEventListener("click", () => { FPV = null; $("fpview").classList.remove("on"); });
+$("fpvseg").addEventListener("click", e => { const b = e.target.closest("button"); if (b && FPV) fpSet({[FPV.k]: b.dataset.v}); });
+document.addEventListener("keydown", e => {
+  if (FPV){
+    if (e.key === "Escape"){ FPV = null; $("fpview").classList.remove("on"); }
+    else if (e.key === "ArrowLeft") fpStep(-1);
+    else if (e.key === "ArrowRight") fpStep(1);
+    return;
+  }
+  if (e.key === "Escape" && $("fpanel").classList.contains("on")) $("fpanel").classList.remove("on");
+});
+$("framesbtn").addEventListener("click", () => { setTab(1); openFrames(); });
+
+/* ---- workflow tabs (2026-11-08): 1 Images, 2 Processing, 3 Result,
+   4 Export. Tabs 3 and 4 share the preview; the rail shows the look in 3 and
+   the export in 4. The tab is remembered in this browser. */
+let TAB = 1;
+function setTab(n){
+  n = Math.max(1, Math.min(5, +n || 1));
+  TAB = n;
+  document.body.classList.remove("t1", "t2", "t3", "t4", "t5");
+  document.body.classList.add("t" + n);
+  document.querySelectorAll(".tabbtn").forEach(b => b.classList.toggle("on", +b.dataset.tab === n));
+  $("page1").classList.toggle("on", n === 1);
+  $("page2").classList.toggle("on", n === 2);
+  $("page4").classList.toggle("on", n === 4);
+  $("page5").classList.toggle("on", n === 5);
+  if (n === 4){ try { xSyncTags(); xRefreshThumbs(); } catch (e) {} }
+  if (n === 5){ try { eLoad(); } catch (e) {} }
+  try { localStorage.setItem("efh.tab", String(n)); } catch (e) {}
+  if (n >= 3) requestAnimationFrame(() => { window.dispatchEvent(new Event("resize")); try { updateZoom(); } catch (e) {} });
+  if (n === 2){ const lg = $("log"); if (lg) lg.scrollTop = lg.scrollHeight; }
+}
+document.querySelectorAll(".tabbtn").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+setTab(1);                      // a fresh page starts at the folder
+$("optpanel").classList.remove("closed");
+$("fprefresh").addEventListener("click", () => openFrames());
+/* ---- tab 1 checklist (2026-11-08): what the folder holds and what is
+   missing; a row that names a field or a tab takes you there ---- */
+const CK_IC = {ok: "\u2713", warn: "!", missing: "\u2715", info: "i"};
+async function loadChecklist(){
+  const box = $("checklist"); if (!box) return;
+  if (!$("folder").value.trim()){ $("cksec").style.display = "none"; return; }
+  try {
+    const q = new URLSearchParams(); const fd = ($("flatDir").value || "").trim(); if (fd) q.set("flat", fd);
+    const j = await (await fetch("/api/checklist?" + q)).json();
+    if (!j.items){ $("cksec").style.display = "none"; return; }
+    $("cksec").style.display = "";
+    box.innerHTML = j.items.map((it, i) =>
+      `<div class="ckrow ${it.level}${it.act ? " act" : ""}" data-i="${i}" title="${it.act ? (it.act.tab ? "Go to tab " + it.act.tab : "Go to the field") : ""}">` +
+      `<span class="ckic">${CK_IC[it.level] || "i"}</span><div><b>${it.title}</b><span>${it.text}</span></div></div>`).join("");
+    box._items = j.items;
+    const n = j.items.filter(it => it.level === "warn" || it.level === "missing").length;
+    const tb = document.querySelector('.tabbtn[data-tab="1"]');
+    let bd = tb.querySelector(".tbadge"); if (!bd){ bd = document.createElement("span"); bd.className = "tbadge"; tb.appendChild(bd); }
+    bd.textContent = n; bd.style.display = n ? "" : "none";
+    bd.title = n ? `${n} item(s) to check in the checklist` : "";
+    $("cknote").textContent = n ? `· ${n} to check` : "· all needed frames found";
+  } catch (e){ $("cksec").style.display = "none"; }
+  loadRecipeCheck();
+}
+// THE RECIPE CHECK (tab 2, above Start): the options as set here against what
+// the folder holds (server: /api/recipecheck). Findings only advise; "use"
+// sets the suggested value, Start is never blocked.
+let RECIPE = null, RC_T = null;
+function recipeCheckSoon(){ clearTimeout(RC_T); RC_T = setTimeout(loadRecipeCheck, 300); }
+async function loadRecipeCheck(){
+  const box = $("rclist"); if (!box) return;
+  const sec = $("rcsec"), tb = document.querySelector('.tabbtn[data-tab="2"]');
+  const badge = n => { if (!tb) return; let bd = tb.querySelector(".tbadge");
+    if (!bd){ bd = document.createElement("span"); bd.className = "tbadge"; tb.appendChild(bd); }
+    bd.textContent = n; bd.style.display = n ? "" : "none"; bd.title = n ? `${n} setting(s) to check in the recipe check` : ""; };
+  if (!$("folder").value.trim() || document.body.classList.contains("srcimport")){ sec.style.display = "none"; badge(0); return; }
+  try {
+    const proc = Object.assign(currentProcessing(), {despeckle: $("despeckle") && $("despeckle").checked ? "True" : "False"});
+    const j = await (await fetch("/api/recipecheck", {method: "POST", headers: {"Content-Type": "application/json"},
+                                 body: JSON.stringify({processing: proc, recipe: RECIPE})})).json();
+    if (!j.ok || !j.items){ sec.style.display = "none"; badge(0); return; }
+    sec.style.display = "";
+    const flag = j.items.filter(it => it.level !== "ok").sort((a, b) => (a.level === "warn" ? 0 : 1) - (b.level === "warn" ? 0 : 1)), ok = j.items.filter(it => it.level === "ok");
+    let h = flag.map((it, i) =>
+      `<div class="ckrow ${it.level}"><span class="ckic">${CK_IC[it.level] || "i"}</span><div><b>${it.title}</b><span>${it.text}</span>`
+      + (it.fix ? ` <button class="mini rcfix" data-i="${i}">${it.fix.label}</button>` : "") + `</div></div>`).join("");
+    if (ok.length) h += `<div class="ckrow ok"><span class="ckic">${CK_IC.ok}</span><div><b>Fine for this data</b><span>${ok.map(it => it.title.toLowerCase()).join(", ")}</span></div></div>`;
+    box.innerHTML = h; box._items = flag;
+    const n = j.warn || 0;
+    $("rcnote").textContent = n ? `· ${n} to check` : (flag.length ? "· notes only" : "· nothing to change");
+    badge(n);
+  } catch (e){ sec.style.display = "none"; }
+}
+$("rclist").addEventListener("click", e => {
+  const b = e.target.closest(".rcfix"); if (!b) return;
+  const it = ($("rclist")._items || [])[+b.dataset.i]; if (!it || !it.fix) return;
+  const el = $(it.fix.id); if (!el) return;
+  if (el.type === "checkbox") el.checked = it.fix.value === "True"; else el.value = it.fix.value;
+  el.dispatchEvent(new Event("change", {bubbles: true}));
+  recipeCheckSoon();
+});
+$("optpanel").addEventListener("change", recipeCheckSoon);
+$("checklist").addEventListener("click", e => {
+  const row = e.target.closest(".ckrow.act"); if (!row) return;
+  const it = $("checklist")._items[+row.dataset.i]; if (!it || !it.act) return;
+  if (it.act.tab){ setTab(it.act.tab); if (it.act.tab === 2 && $("siteBox")) $("siteBox").scrollIntoView({block: "start"}); return; }
+  const el = $(it.act.field); if (el){ setTab(1); el.scrollIntoView({block: "center"}); el.focus(); }
+});
+/* ---- tab 3/4: say when the picture no longer matches tab 2 ---- */
+function syncStale(){
+  const bar = $("stalebar"); if (!bar) return;
+  const stale = !!(typeof ready !== "undefined" && ready && RUN_KIND === "stack" && !RUN_BASE);
+  bar.style.display = stale ? "" : "none";
+  if (stale) $("staletext").textContent = "This picture is from the last run. Frames or stacking options have changed since then: the next Start in 2 Processing re-stacks.";
+}
+$("stalego").addEventListener("click", () => setTab(2));
+for (const id of ["siteSave", "siteClear"]) $(id).addEventListener("click", () => setTimeout(loadChecklist, 900));
+$("flatDir").addEventListener("change", () => setTimeout(loadChecklist, 300));
+
+// FRAME FOLDERS CHOSEN BY HAND (2026-11-08): darks, bias, short exposures,
+// contact frames. Saved in the image folder (eclipseforge_frames.json); the
+// folder is read again so counts, frames and timeline follow.
+async function saveDir(role, value){
+  if (!$("folder").value.trim()) return;
+  try {
+    const j = await (await fetch("/api/framedirs", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({role, value})})).json();
+    if (!j.ok){ $("status").textContent = j.error; return; }
+    await loadFolder();
+  } catch (e){ $("status").textContent = "could not save the folder: " + e; }
+}
+document.querySelectorAll("input.dirpick").forEach(el => {
+  el.addEventListener("keydown", e => { if (e.key === "Enter") saveDir(el.dataset.role, el.value); });
+  el.addEventListener("change", () => saveDir(el.dataset.role, el.value));
+});
+document.querySelectorAll("button[data-dirrole]").forEach(b => b.addEventListener("click", () =>
+  pickOpen("dir", "dir_" + b.dataset.dirrole, "Choose the " + b.closest(".opt").querySelector(".optname").textContent.toLowerCase())));
+
+// the preview stretch, remembered in this browser
+try { const v = localStorage.getItem("efh.fpstretch"); if (v) $("fpstretch").value = v; } catch (e) {}
+$("fpstretch").addEventListener("change", () => {
+  try { localStorage.setItem("efh.fpstretch", $("fpstretch").value); } catch (e) {}
+  if (FP) drawFrames();
+  if (FPV) fpViewDraw();
+});
+
 async function loadFolder(){
   const r = await fetch("/api/folder", {method:"POST",
     headers:{"Content-Type":"application/json"},
@@ -974,6 +1829,16 @@ async function loadFolder(){
   if(!j.ok){ $("status").textContent = j.error; return; }
   $("flatDir").placeholder = j.flat_dir
     ? `flats: auto (${j.flat_count})` : "flats: none found";
+  // the other frame folders: what was chosen by hand, else what was found
+  for (const [role, dk, ck] of [["darks", "dark_dir", "dark_count"], ["bias", "bias_dir", "bias_count"],
+                                ["short", "short_dir", "short_count"], ["contact", "contact_dir", "contact_count"],
+                                ["phases", "phases_dir", "phases_count"]]){
+    const el = $("dir_" + role); if (!el) continue;
+    const set = (j.dirs_set || {})[role] || "";
+    el.value = set;
+    el.placeholder = j[dk] ? `auto: ${j[dk].split("/").pop()}/ (${j[ck]})` : "auto: none found";
+    if (set && set !== "off" && j[dk]) el.title = `${j[ck]} frames in ${j[dk]}`;
+  }
   if (j.tiffs && j.tiffs.length && !$("importPath").value)
     $("importPath").placeholder = `or import: ${j.tiffs[0]}`;
   $("status").textContent = `${j.folder} — ${j.raw_count} raw files` +
@@ -989,14 +1854,18 @@ async function loadFolder(){
     // the short-exposure subfolder feeds the prominence layer only
     (j.short_dir ? ` · ${j.short_count} short exposures in ${j.short_dir.split("/").pop()}/ (prominences only)`
                  : "") +
+    (j.frames_off || j.frames_forced ? ` · Frames: ${j.frames_off} off, ${j.frames_forced} forced in` : "") +
     (j.cached ? " · cached pipeline products found (Start reuses them)" : "");
   $("start").disabled = false;
   $("clearcache").disabled = false;
+  $("framesbtn").disabled = false;
   ready = false; $("export").disabled = true; $("cropbtn").disabled = true;
   refreshCache();
   loadSite();
   loadVersions();
   loadTimeline();
+  openFrames();
+  loadChecklist();
 }
 
 /* ---- clear cache -----------------------------------------------------
@@ -1050,13 +1919,13 @@ const SIMPLE_IGNORES = ["importPath", "brwImport", "feather", "wb", "photometry"
   "stackCombine", "bracketMode", "despeckle", "exportTiers", "tierLinear", "frames"];
 const SIMPLE_NOTE = "Not used by the simple stack. Untick Simple stack to use it.";
 function syncSimple(){
-  const on = $("simpleStack").checked;
+  const simple = $("simpleStack").checked;
   for (const id of SIMPLE_IGNORES){
     const el = $(id); if (!el) continue;
-    el.disabled = on;
+    el.disabled = simple;
     const box = el.closest("label") || el;
-    box.style.opacity = on ? ".4" : "";
-    if (on){
+    box.style.opacity = simple ? ".4" : "";
+    if (simple){
       if (box.dataset.ownTitle === undefined) box.dataset.ownTitle = box.title || "";
       box.title = SIMPLE_NOTE;
     } else if (box.dataset.ownTitle !== undefined){
@@ -1293,7 +2162,11 @@ function pollAgain(fn, ms, err){
 // line (ok / warn / fail / odd / step / info, see pipeline.split_level).
 function setLog(lines, levels){
   const el = $("log"); if (!el) return;
+  // FOLLOWS THE END ONLY WHILE YOU ARE AT THE END (2026-11-08): scrolled up
+  // to read, the log stays where it is while the run adds lines; scroll back
+  // to the bottom and it follows again
   const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  const keep = el.scrollTop;
   const f = document.createDocumentFragment();
   // counter lines ("... radial band 7/15") show as one line that counts up
   const CNT = /\s\d+\/\d+\s*$/;
@@ -1306,12 +2179,13 @@ function setLog(lines, levels){
   });
   if (!lines || !lines.length) f.appendChild(document.createTextNode("\u2026"));
   el.replaceChildren(f);
-  if (atEnd || RUN_BASE) el.scrollTop = 1e9;
+  el.scrollTop = atEnd ? 1e9 : keep;
 }
 function appendLog(msg, lv){
   const el = $("log"); if (!el) return;
   const sp = document.createElement("span"); sp.className = "lv-" + (lv || "fail"); sp.textContent = "\n" + msg;
-  el.appendChild(sp); el.scrollTop = 1e9;
+  const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+  el.appendChild(sp); if (atEnd) el.scrollTop = 1e9;
 }
 async function pollProgress(){
   let j;
@@ -1350,7 +2224,10 @@ function applyBrand(j){
   document.title = BRAND.app + " \u2014 TEST BUILD";
   const h = document.querySelector("h1");
   if (h){
+    // the name only: the icon in front of it stays (h.textContent would drop it)
+    const ic = h.querySelector(".brandico");
     h.textContent = BRAND.app;
+    if (ic) h.prepend(ic);
     h.style.color = "#ffb454";
   }
   const bar = document.createElement("div");
@@ -1518,10 +2395,12 @@ async function loadLayers(){
     L.wf[i] = _ss((r - 1.02*GEO.R)/(0.55*GEO.R));
   }
   ready = true; $("export").disabled = false; $("cropbtn").disabled = false;
+  if (TAB === 4){ try { xRefreshThumbs(); } catch (e) {} }
   _poolInit(); $("credit").title = "Preview render: " + POOL.why;
   $("setsave").disabled = false;
   $("views").style.display = "inline-flex";
   $("status").textContent = "ready — adjust and export";
+  setTab(3);
   renderNow(); markDefaults();
 }
 
@@ -1749,7 +2628,14 @@ function _erf(x){ // x >= 0 here; table over 0..4, 1 beyond
 // averages, the mean per 1 px ring taken out (no limb ring), midtone-weighted,
 // applied as a brightness ratio so the colour is kept.
 const STRUCT_R = [0.01, 0.08], STRUCT_K = 1.5, STRUCT_LIMB = [1.01, 1.04];
-function structureBoost(d, W, H, cy, cx, Rgrid, s){
+// INNER SOFTENING -- render.py limb_soft_weight: 1 - s at the limb, smoothstep up
+// to 1 at rr solar radii, 1 beyond; s = 0 is exactly 1 everywhere.
+function _lsw(q, s, rr){
+  rr = Math.max(rr, 1.05);
+  let t = (q - 1)/(rr - 1); t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return 1 - s*(1 - t*t*(3 - 2*t));
+}
+function structureBoost(d, W, H, cy, cx, Rgrid, s, ls, lsr){
   if (!(s > 0)) return;
   const N = W*H, Y = new Float32Array(N), lm = new Float32Array(N), m = new Float32Array(N), rp = new Float32Array(N);
   for (let y=0,i=0;y<H;y++) for (let x=0;x<W;x++,i++){
@@ -1767,12 +2653,13 @@ function structureBoost(d, W, H, cy, cx, Rgrid, s){
   const kk = s*STRUCT_K, dl = STRUCT_LIMB[1]-STRUCT_LIMB[0];
   for (let i=0;i<N;i++){
     const yv=Y[i]; let w=Math.min(1,Math.max(0,4*yv*(1-yv)))*Math.min(1,Math.max(0,(rp[i]/Rgrid-STRUCT_LIMB[0])/dl));
+    if (ls > 0) w *= _lsw(rp[i]/Rgrid, ls, lsr);
     if (w<=0) continue;
     const g=Math.exp(kk*(band[i]-sum[rp[i]|0])*w), j=4*i;
     d[j]=Math.min(255,d[j]*g); d[j+1]=Math.min(255,d[j+1]*g); d[j+2]=Math.min(255,d[j+2]*g);
   }
 }
-function finalSharpen(d, W, H, Rgrid, mid, dark, light, k){
+function finalSharpen(d, W, H, Rgrid, mid, dark, light, k, cy, cx, ls, lsr){
   if (!(mid>0||dark>0||light>0)) return;
   // d: the preview's RGBA bytes, edited in place. Rgrid: solar radius on this grid.
   const N = W*H, radii = FINAL_RADII.map(s => Math.max(0.6, s*Rgrid/FINAL_REF_R));
@@ -1830,6 +2717,9 @@ function finalSharpen(d, W, H, Rgrid, mid, dark, light, k){
       MD[p] = a>b ? (b>e ? b : (a<e ? a : e)) : (a>e ? a : (b<e ? b : e));
     }
   }
+  // inner softening: the sharpened picture blended back towards its input
+  let LW = null;
+  if (ls > 0){ LW = new Float32Array(N); for (let y=0,i=0;y<H;y++) for (let x=0;x<W;x++,i++) LW[i] = _lsw(Math.hypot(y-cy, x-cx)/Rgrid, ls, lsr); }
   for (let c=0;c<3;c++){
     const C=ch[c], MD=med[c], MN=mn[c], MX=mx[c];
     for (let i=0;i<N;i++){
@@ -1837,6 +2727,7 @@ function finalSharpen(d, W, H, Rgrid, mid, dark, light, k){
       if (mid>0){ let b=MD[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += mid*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
       if (dark>0){ let b=MN[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += dark*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
       if (light>0){ let b=MX[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += light*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+      if (LW) o = C[i] + LW[i]*(o - C[i]);
       d[4*i+c] = o<0?0:o>1?255:o*255;
     }
   }
@@ -1850,7 +2741,7 @@ function finalSharpen(d, W, H, Rgrid, mid, dark, light, k){
 function _stageA(S, y0, y1){
   const {P, N, W, H, DEC, draft, DS, fnMix, detailGain, baseLift, envGamma, radialFlatten, innerMix,
          innerDim, promGain, temp, satur, hlDesat, discLevel, discTrim, earthShine, knee, LOGK, KK, LKN,
-         RPROF, SKYP, SKYPM, BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK} = S;
+         RPROF, SKYP, SKYPM, BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK, LSS, LSR} = S;
   const V0 = S.V0, V1 = S.V1, V2 = S.V2, EGA = S.EG, CT = S.CT || null;
   const bg=L.bg, rp=L.rprof, ear=L.earth, pr=L.prom, ch=L.ratio, wf=L.wf, rr_=L.r;
   const _cl = v => { v = v/255*3.0; return v<0.2?0.2:v>3.0?3.0:v; };
@@ -1914,6 +2805,7 @@ function _stageA(S, y0, y1){
         if (HMIX > 0 && L.hilllog){
           // OVERLAY of the masks-only layer (0.5 + 0.75 k E) at opacity HMIX
           let dd = Math.max(-0.5, Math.min(0.5, HMIX*0.75*hillE(j, r)));
+          if (LSS > 0) dd *= _lsw(r/GEO.R, LSS, LSR);          // inner softening -- render.py
           // eased out under the prominence layer -- see render.py
           if (L.pl_F && (P.promFade||0) > 0) dd *= 1 - P.promFade*(L.pl_F[j]/255);
           Y = Y < 0.5 ? Y*(1 + 2*dd) : 1 - (1 - Y)*(1 - 2*dd);
@@ -2013,7 +2905,7 @@ function _poolSource(){
     + "const STRUCT_R=" + JSON.stringify(STRUCT_R) + ", STRUCT_K=" + STRUCT_K + ", STRUCT_LIMB=" + JSON.stringify(STRUCT_LIMB) + ";\n"
     + "const _ss = " + _ss.toString() + ";\n"
     + [makeDetail, _stageA, _stageB, _passApply, _parWork, _boxesForGauss, _boxBlurH, _boxBlurV, _gauss, _erf,
-       _boxBlurHR, _boxBlurVC, _fsSPMD].map(f => f.toString()).join("\n")
+       _boxBlurHR, _boxBlurVC, _lsw, _fsSPMD].map(f => f.toString()).join("\n")
     + "\npostMessage({t: 'up'});"
     + "\nonmessage = e => { const m = e.data;"
     + " if (m.t === 'L'){ L = m.L; GEO = m.GEO; nafeMed = m.nafeMed; return; }"
@@ -2190,6 +3082,7 @@ function _fsSPMD(J, rank, nr){
       const kk = s*STRUCT_K, dl = STRUCT_LIMB[1]-STRUCT_LIMB[0];
       for (let i=p0;i<p1;i++){
         const yv=Y[i]; let w=Math.min(1,Math.max(0,4*yv*(1-yv)))*Math.min(1,Math.max(0,(rp[i]/Rgrid-STRUCT_LIMB[0])/dl));
+        if (J.ls > 0) w *= _lsw(rp[i]/Rgrid, J.ls, J.lsr);
         if (w<=0) continue;
         const g=Math.exp(kk*(band[i]-sum[rp[i]|0])*w), j=4*i;
         d[j]=Math.min(255,d[j]*g); d[j+1]=Math.min(255,d[j+1]*g); d[j+2]=Math.min(255,d[j+2]*g);
@@ -2258,10 +3151,12 @@ function _fsSPMD(J, rank, nr){
         }
         const C = ch[c];
         for (let i=p0;i<p1;i++){
-          let o = C[i];
+          let o = C[i], lw = 1;
+          if (J.ls > 0){ const y = (i/W)|0, x = i - y*W; lw = _lsw(Math.hypot(y-J.cy, x-J.cx)/J.R, J.ls, J.lsr); }
           if (mid>0){ let b=MD[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += mid*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
           if (dark>0){ let b=MN[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += dark*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
           if (light>0){ let b=MX[i]; b=b<0?0:b>1?1:b; const dd = o<=0.25 ? ((16*o-12)*o+4)*o : Math.sqrt(o); o += light*((b<=0.5 ? o-(1-2*b)*o*(1-o) : o+(2*b-1)*(dd-o))-o); }
+          if (lw !== 1) o = C[i] + lw*(o - C[i]);
           d[4*i+c] = o<0?0:o>1?255:o*255;
         }
       }
@@ -2303,6 +3198,7 @@ function _fsPool(r){
   const dd = new Uint8ClampedArray(new SharedArrayBuffer(r.data.length)); dd.set(r.data);
   const J = {job: r.job, W, H, d: dd, buf: FSP.buf, ctl: new Int32Array(new SharedArrayBuffer(16)),
              st: r.st, cy: GEO.cy, cx: GEO.cx, R: GEO.R, mid: r.mid, dark: r.dark, light: r.light, k: r.k,
+             ls: r.ls, lsr: r.lsr,
              radii, resp: _fsResp(radii),
              tm: new Float32Array(new SharedArrayBuffer(4*ty*tx)), ts: new Float32Array(new SharedArrayBuffer(4*ty*tx)),
              sum: new Float64Array(new SharedArrayBuffer(8*(Math.ceil(Math.hypot(W, H)) + 2)))};
@@ -2358,7 +3254,7 @@ function renderNow(){
   // the radial profile, evaluated from its own numbers and INTERPOLATED -- as
   // a full-res 8-bit layer it was a staircase and printed rings
   const RPROF0 = GEO.rprofile || null;
-  // SKY PEDESTAL (lab 2026-10-19) -- render.py: the measured sky light taken
+  // SKY PEDESTAL (2026-10-19) -- render.py: the measured sky light taken
   // off in linear light, and the radial profile with the same pedestal off
   const SKYP = ((P.skySub||0) > 0 && GEO.skyP3 > 0) ? P.skySub*GEO.skyP3 : 0;
   const SKYPM = GEO.profMax || 1;
@@ -2509,6 +3405,7 @@ function renderNow(){
                   fnMix, detailGain, baseLift, envGamma, radialFlatten, innerMix, innerDim, promGain,
                   temp, satur, hlDesat, discLevel, discTrim, earthShine, knee, LOGK, KK, LKN, RPROF, SKYP, SKYPM,
                   BC, CG, CN, lvl, HMIX, HN, HG, HSPAN, HZS, HZR, HZF, HZSIGN, HTH, HRSP, HATT, HSGS, HK,
+                  LSS: Math.min(1, Math.max(0, P.limbSoft||0)), LSR: (P.limbSoftR||1.4),
                   CT: ((P.colourMode|0) === 2) ? monoTintLut(P) : null,
                   V0: C.V0, V1: C.V1, V2: C.V2, EG: C.EG};
       _parRun("A", SA);
@@ -2571,15 +3468,17 @@ const INDET_GAIN = 6.0, INDET_SPAN = 0.05;
 function detailFade(P){
   const s = Math.max(0, P.detailStart ?? 8), w = Math.max(s, 4), DEC = GEO.decim || 4, rr = L.r, rm = L.rmask;
   if (!rr || !rm) return null;
+  const ls = Math.min(1, Math.max(0, P.limbSoft||0)), lsr = P.limbSoftR||1.4;
   const N = rr.length, A = new Float32Array(N);
   for (let i = 0; i < N; i++){
     let t = ((rr[i] - rm[i]) * DEC - s) / w; t = t < 0 ? 0 : t > 1 ? 1 : t; A[i] = t*t*(3 - 2*t);
+    if (ls > 0) A[i] *= _lsw(rr[i]/GEO.R, ls, lsr);            // inner softening -- render.py
   }
   return A;
 }
 let DFADE = null, DFADE_KEY = "";
 function detailFadeCached(P){
-  const k = String(P.detailStart ?? 8) + "|" + (L.r ? L.r.length : 0);
+  const k = String(P.detailStart ?? 8) + "|" + (P.limbSoft||0) + "|" + (P.limbSoftR||1.4) + "|" + (L.r ? L.r.length : 0);
   if (k !== DFADE_KEY){ DFADE = _toShared(detailFade(P)); DFADE_KEY = k; }
   return DFADE;
 }
@@ -2854,6 +3753,7 @@ async function saveSite(clear){
   if (!j.ok){ $("siteMsg").textContent = j.error; return; }
   _siteShow(j);
   $("siteMsg").textContent += clear ? " Cleared; applied at the next Start." : " Saved; applied at the next Start (stars re-checked, detail layers rebuilt).";
+  loadChecklist();
 }
 $("siteLat").addEventListener("change", () => {
   if ($("siteLon").value.trim()) return;
@@ -2899,6 +3799,243 @@ $("siteCity").addEventListener("change", () => {
   saveSite(false);
 });
 loadEclipses();
+// THE MAP PICKER: OpenStreetMap tiles (Web Mercator, drawn on a canvas, no
+// library), the path of totality from the eclipse elements (eclipses.path)
+// and the local circumstances at the clicked place (/api/eclipselocal).
+// "Use this place" fills the form; Save stores it.
+const MAP = {z: 3, cx: 0, cy: 0, tiles: new Map(), ok: 0, fail: 0, src: 0, path: null, date: "", pick: null, res: null, drag: null};
+const MAP_SRC = [
+  {url: (z,x,y) => `/api/tile/osm/${z}/${x}/${y}.png`,
+   attr: `&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors`},
+  {url: (z,x,y) => `/api/tile/carto/${z}/${x}/${y}.png`,
+   attr: `&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>`}];
+const MAP_ZMIN = 1, MAP_ZMAX = 17;
+function _mw(z){ return 256 * Math.pow(2, z); }
+function _ll2w(lat, lon, z){   // world pixels at zoom z
+  const W = _mw(z), la = Math.max(-85.05, Math.min(85.05, lat)) * Math.PI / 180;
+  return [(lon + 180) / 360 * W, (1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2 * W];
+}
+function _w2ll(x, y, z){
+  const W = _mw(z), n = Math.PI - 2 * Math.PI * y / W;
+  return [180 / Math.PI * Math.atan(Math.sinh(n)), ((x / W * 360 - 180) + 540) % 360 - 180];
+}
+function _mapTile(z, x, y){
+  const k = `${MAP.src}/${z}/${x}/${y}`;
+  let t = MAP.tiles.get(k);
+  if (t) return t;
+  t = new Image(); t._ok = false;
+  t.onload = () => { t._ok = true; MAP.ok++; $("mapErr").style.display = "none"; mapDraw(); };
+  t.onerror = () => { MAP.fail++;
+    if (!MAP.ok && MAP.fail >= 6 && MAP.src + 1 < MAP_SRC.length){   // first source unreachable: try the next
+      MAP.src++; MAP.fail = 0; MAP.tiles.clear(); $("mapAttr").innerHTML = MAP_SRC[MAP.src].attr; mapDraw(); }
+    else if (!MAP.ok && MAP.fail >= 6) mapTileError(); };
+  t.src = MAP_SRC[MAP.src].url(z, x, y);
+  MAP.tiles.set(k, t);
+  if (MAP.tiles.size > 600){ const first = MAP.tiles.keys().next().value; MAP.tiles.delete(first); }
+  return t;
+}
+// the path's rings unwrapped across the date line (longitudes kept continuous)
+function _unwrap(pts){
+  const out = []; let off = 0, prev = null;
+  for (const [la, lo] of pts){
+    let l = lo + off;
+    if (prev !== null){ while (l - prev > 180){ off -= 360; l -= 360; } while (prev - l > 180){ off += 360; l += 360; } }
+    out.push([la, l]); prev = l;
+  }
+  return out;
+}
+// the band as one ring (north limit, the sunset end, the south limit
+// backwards, the sunrise end) unwrapped in one go, so all of it ends up on
+// the same side of the date line; the centre line shifted by whole turns to
+// sit with it
+function _pathLL(P){
+  const sc = P.start_cap || [], ec = P.end_cap || [];
+  const ring = _unwrap(P.north.concat(ec, P.south.slice().reverse(), sc.slice().reverse()));
+  let C = _unwrap(P.central);
+  if (ring.length && C.length){
+    const mr = ring.reduce((a, p) => a + p[1], 0) / ring.length, mc = C.reduce((a, p) => a + p[1], 0) / C.length;
+    const k = Math.round((mr - mc) / 360) * 360; if (k) C = C.map(([la, lo]) => [la, lo + k]);
+  }
+  return {R: ring, C};
+}
+let MAP_ERR_SHOWN = false;
+async function mapTileError(){
+  if (MAP_ERR_SHOWN) return; MAP_ERR_SHOWN = true;
+  let why = "";
+  try { const j = await (await fetch("/api/tilestatus")).json(); why = Object.values(j.errors || {}).join("; "); } catch (e) {}
+  const el = $("mapErr");
+  el.textContent = "The map tiles could not be loaded" + (why ? ` (${why})` : "") + ". The path of totality and picking a place still work.";
+  el.style.display = "";
+}
+function mapDraw(){
+  const cv = $("mapCv"); if (!cv || !$("mapPick").classList.contains("on")) return;
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)){ cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0e1116"; g.fillRect(0, 0, w, h);
+  const z = MAP.z, W = _mw(z), n = Math.pow(2, z), x0 = MAP.cx - w / 2, y0 = MAP.cy - h / 2;
+  for (let ty = Math.max(0, Math.floor(y0 / 256)); ty <= Math.min(n - 1, Math.floor((y0 + h) / 256)); ty++){
+    for (let tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + w) / 256); tx++){
+      const t = _mapTile(z, ((tx % n) + n) % n, ty), px = tx * 256 - x0, py = ty * 256 - y0;
+      if (t._ok) g.drawImage(t, px, py, 256, 256);
+      else {   // a coarser tile already loaded stands in until this one arrives
+        let drawn = false;
+        for (let dz = 1; dz <= 4 && !drawn && z - dz >= 0; dz++){
+          const m = Math.pow(2, dz), nn = n / m, ux = Math.floor(((tx % n) + n) % n / m), uy = Math.floor(ty / m);
+          const p = MAP.tiles.get(`${MAP.src}/${z-dz}/${ux}/${uy}`);
+          if (p && p._ok){ const s = 256 / m, sx = (((tx % n) + n) % n % m) * s, sy = (ty % m) * s;
+            g.drawImage(p, sx, sy, s, s, px, py, 256, 256); drawn = true; }
+        }
+        if (!drawn){ g.strokeStyle = "#1b2028"; g.strokeRect(px + .5, py + .5, 255, 255); }
+      }
+    }
+  }
+  const P = MAP.path;
+  if (P && P.central && P.central.length){
+    const L = _pathLL(P), toW = pts => pts.map(([la, lo]) => _ll2w(la, lo, z));
+    const R = toW(L.R), C = toW(L.C);
+    // copies one world width either side, so a path over the date line or
+    // a view across it still shows the band
+    const ks = [-1, 0, 1].map(k => k * W);
+    for (const k of ks){
+      const dx = k - x0, dy = -y0;
+      if (R.length > 2){
+        g.beginPath();
+        R.forEach(([x, y], i) => i ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy));
+        g.closePath();
+        g.fillStyle = "rgba(232,163,61,.28)"; g.fill();
+        g.strokeStyle = "rgba(232,163,61,.95)"; g.lineWidth = 1.5; g.stroke();
+      }
+      g.setLineDash([6, 4]); g.strokeStyle = "rgba(255,200,90,.95)"; g.lineWidth = 1.2;
+      g.beginPath(); C.forEach(([x, y], i) => i ? g.lineTo(x + dx, y + dy) : g.moveTo(x + dx, y + dy)); g.stroke();
+      g.setLineDash([]);
+    }
+  }
+  if (MAP.pick){
+    let [px, py] = _ll2w(MAP.pick[0], MAP.pick[1], z);
+    px -= x0; py -= y0; px -= Math.round((px - w / 2) / W) * W;   // nearest copy
+    g.beginPath(); g.arc(px, py, 7, 0, 2 * Math.PI); g.fillStyle = MAP.res && MAP.res.total ? "#ffd27a" : "#e07a6a"; g.fill();
+    g.lineWidth = 2; g.strokeStyle = "#000"; g.stroke();
+    g.beginPath(); g.arc(px, py, 2, 0, 2 * Math.PI); g.fillStyle = "#000"; g.fill();
+  }
+}
+function mapFit(){
+  const P = MAP.path, cv = $("mapCv"); if (!P || !P.central.length) return;
+  // fit to the band; a path over the polar cap (stretched without end in this
+  // projection) is fitted to its part below 72 degrees when most of it is there
+  const L = _pathLL(P);
+  let all = L.R.length ? L.R : L.C;
+  const low = all.filter(p => Math.abs(p[0]) < 72);
+  if (low.length >= 0.3 * all.length) all = low;
+  const w = Math.max(200, cv.clientWidth), h = Math.max(150, cv.clientHeight);
+  let z = MAP_ZMAX;
+  for (; z > MAP_ZMIN; z--){
+    const q = all.map(([la, lo]) => _ll2w(la, lo, z)), xs = q.map(p => p[0]), ys = q.map(p => p[1]);
+    if (Math.max(...xs) - Math.min(...xs) < w * 0.9 && Math.max(...ys) - Math.min(...ys) < h * 0.9) break;
+  }
+  const q = all.map(([la, lo]) => _ll2w(la, lo, z)), xs = q.map(p => p[0]), ys = q.map(p => p[1]);
+  MAP.z = z; MAP.cx = (Math.max(...xs) + Math.min(...xs)) / 2; MAP.cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  mapDraw();
+}
+function mapZoom(dz, sx, sy){
+  const cv = $("mapCv"), w = cv.clientWidth, h = cv.clientHeight;
+  const nz = Math.max(MAP_ZMIN, Math.min(MAP_ZMAX, MAP.z + dz)); if (nz === MAP.z) return;
+  if (sx == null){ sx = w / 2; sy = h / 2; }
+  const wx = MAP.cx - w / 2 + sx, wy = MAP.cy - h / 2 + sy, f = Math.pow(2, nz - MAP.z);
+  MAP.cx = wx * f - sx + w / 2; MAP.cy = wy * f - sy + h / 2; MAP.z = nz;
+  mapDraw();
+}
+async function mapLoadPath(date){
+  MAP.date = date; MAP.path = null; mapDraw();
+  try {
+    const j = await (await fetch("/api/eclipsepath?date=" + encodeURIComponent(date))).json();
+    if (j.ok && MAP.date === date){ MAP.path = j; if (MAP.pick) mapPickAt(MAP.pick[0], MAP.pick[1], true); }
+  } catch (e) {}
+}
+function _mmss(s){ const d = Math.round(s); return `${Math.floor(d / 60)} min ${String(d % 60).padStart(2, "0")} s`; }
+async function mapPickAt(lat, lon, keepView){
+  MAP.pick = [lat, lon]; MAP.res = null; $("mapUse").disabled = true; mapDraw();
+  $("mapInfo").textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} …`;
+  try {
+    const j = await (await fetch(`/api/eclipselocal?date=${encodeURIComponent(MAP.date)}&lat=${lat}&lon=${lon}&h=${parseFloat($("siteH").value) || 0}`)).json();
+    if (!j.ok || !MAP.pick || MAP.pick[0] !== lat || MAP.pick[1] !== lon) return;
+    MAP.res = j; mapDraw();
+    const off = _fmtOff(j.utc_offset), from = j.offset_from === "longitude" ? "guessed from the longitude, check it" : j.offset_from;
+    let h = `<b>${j.lat.toFixed(5)}, ${j.lon.toFixed(5)}</b> · `;
+    if (j.total && j.sun_alt > 0){
+      h += `total for <b>${_mmss(j.duration_s)}</b> · C2 ${j.c2_local} · mid ${j.mid_local} · C3 ${j.c3_local} local`
+        + ` (UTC${off}, ${from}) · ${j.mid_ut} UT · Sun ${j.sun_alt.toFixed(1)}° high`;
+    } else if (j.sun_alt <= 0){
+      h += `<span class="no">the Sun is below the horizon here at mid-eclipse</span>`;
+    } else {
+      h += `<span class="no">not total here</span> · partial, magnitude ${j.magnitude.toFixed(3)} at ${j.mid_local} local (UTC${off}) · Sun ${j.sun_alt.toFixed(1)}° high`;
+    }
+    $("mapInfo").innerHTML = h;
+    $("mapUse").disabled = false;
+  } catch (e) { $("mapInfo").textContent = "Could not compute the circumstances here."; }
+}
+function mapOpen(){
+  if (!MAP.ok){ MAP.src = 0; MAP.fail = 0; MAP.tiles.clear(); $("mapAttr").innerHTML = MAP_SRC[0].attr; }
+  MAP_ERR_SHOWN = false; $("mapErr").style.display = "none";
+  const sel = $("mapEcl");
+  if (!sel.options.length) for (const e of ECLS){ const o = document.createElement("option"); o.value = e.date; o.textContent = e.name; sel.appendChild(o); }
+  if (!ECLS.length){ $("siteMsg").textContent = "No eclipse list loaded."; return; }
+  const want = $("siteEcl").value || ($("siteDate").value.trim() || $("siteDate").placeholder || "").slice(0, 10);
+  sel.value = ECLS.some(e => e.date === want) ? want : (ECLS.some(e => e.date === "2026-08-12") ? "2026-08-12" : ECLS[0].date);
+  $("mapPick").classList.add("on");
+  const la = parseFloat($("siteLat").value), lo = parseFloat($("siteLon").value);
+  const have = isFinite(la) && isFinite(lo) && /^-?[0-9.]+$/.test($("siteLat").value.trim()) && /^-?[0-9.]+$/.test($("siteLon").value.trim());
+  MAP.pick = null; MAP.res = null; $("mapUse").disabled = true; $("mapInfo").textContent = "Click a place on the map.";
+  mapLoadPath(sel.value).then(() => {
+    if (have){ MAP.z = 7; [MAP.cx, MAP.cy] = _ll2w(la, lo, 7); mapPickAt(la, lo); }
+    else mapFit();
+  });
+}
+function mapClose(){ $("mapPick").classList.remove("on"); MAP.drag = null; }
+$("siteMap").addEventListener("click", e => { e.preventDefault(); mapOpen(); });
+$("mapCancel").addEventListener("click", mapClose);
+$("mapEcl").addEventListener("change", () => { mapLoadPath($("mapEcl").value).then(() => { if (!MAP.pick) mapFit(); }); });
+$("mapIn").addEventListener("click", () => mapZoom(1));
+$("mapOut").addEventListener("click", () => mapZoom(-1));
+$("mapFit").addEventListener("click", mapFit);
+$("mapUse").addEventListener("click", () => {
+  const j = MAP.res; if (!j) return;
+  $("siteLat").value = j.lat.toFixed(5); $("siteLon").value = j.lon.toFixed(5);
+  $("siteDate").value = j.date; $("siteTime").value = j.mid_local; $("siteTz").value = _fmtOff(j.utc_offset);
+  if ($("siteEcl").value !== j.date){ $("siteEcl").value = j.date; $("siteEcl").dispatchEvent(new Event("change")); }
+  mapClose();
+  $("siteMsg").textContent = (j.total ? "" : "Not total at this place. ") + "Filled in from the map; add the height if you know it, then Save.";
+});
+(() => {
+  const cv = $("mapCv");
+  cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); MAP.drag = {x: e.clientX, y: e.clientY, cx: MAP.cx, cy: MAP.cy, moved: false}; });
+  cv.addEventListener("pointermove", e => {
+    const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
+    const [la, lo] = _w2ll(MAP.cx - r.width / 2 + sx, MAP.cy - r.height / 2 + sy, MAP.z);
+    $("mapCur").textContent = `${la.toFixed(4)}, ${lo.toFixed(4)}`;
+    const d = MAP.drag; if (!d) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) > 4){ d.moved = true; cv.classList.add("drag"); }
+    if (d.moved){ MAP.cx = d.cx - dx; MAP.cy = Math.max(0, Math.min(_mw(MAP.z), d.cy - dy)); mapDraw(); }
+  });
+  cv.addEventListener("pointerup", e => {
+    const d = MAP.drag; MAP.drag = null; cv.classList.remove("drag");
+    if (!d || d.moved) return;
+    const r = cv.getBoundingClientRect(), sx = e.clientX - r.left, sy = e.clientY - r.top;
+    const wy = MAP.cy - r.height / 2 + sy; if (wy < 0 || wy > _mw(MAP.z)) return;
+    const [la, lo] = _w2ll(MAP.cx - r.width / 2 + sx, wy, MAP.z);
+    mapPickAt(+la.toFixed(5), +lo.toFixed(5));
+  });
+  cv.addEventListener("dblclick", e => { const r = cv.getBoundingClientRect(); mapZoom(1, e.clientX - r.left, e.clientY - r.top); });
+  let wheelAcc = 0;
+  cv.addEventListener("wheel", e => {
+    e.preventDefault(); wheelAcc += e.deltaY;
+    if (Math.abs(wheelAcc) < 60) return;
+    const r = cv.getBoundingClientRect(); mapZoom(wheelAcc < 0 ? 1 : -1, e.clientX - r.left, e.clientY - r.top); wheelAcc = 0;
+  }, {passive: false});
+  window.addEventListener("resize", mapDraw);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && $("mapPick").classList.contains("on")) mapClose(); });
+})();
 $("siteSave").addEventListener("click", e => { e.preventDefault(); saveSite(false); });
 $("siteClear").addEventListener("click", e => { e.preventDefault(); saveSite(true); });
 // The Stars group's note: how many stars, and -- when the bundled ecliptic
@@ -3100,9 +4237,9 @@ function _fsMakeWorker(){
       + ", FINAL_GATE=" + JSON.stringify(FINAL_GATE) + ";\n"
       + "const _ERF_LUT=new Float32Array(" + JSON.stringify(Array.from(_ERF_LUT)) + ");\n"
       + "const STRUCT_R=" + JSON.stringify(STRUCT_R) + ", STRUCT_K=" + STRUCT_K + ", STRUCT_LIMB=" + JSON.stringify(STRUCT_LIMB) + ";\n"
-      + [_boxesForGauss, _boxBlurH, _boxBlurV, _gauss, _softLight, _erf, structureBoost, finalSharpen].map(f => f.toString()).join("\n")
+      + [_boxesForGauss, _boxBlurH, _boxBlurV, _gauss, _softLight, _erf, _lsw, structureBoost, finalSharpen].map(f => f.toString()).join("\n")
       + "\nonmessage = e => { const m = e.data; const d = new Uint8ClampedArray(m.buf);"
-      + " structureBoost(d, m.W, m.H, m.cy, m.cx, m.R, m.st); finalSharpen(d, m.W, m.H, m.R, m.mid, m.dark, m.light, m.k);"
+      + " structureBoost(d, m.W, m.H, m.cy, m.cx, m.R, m.st, m.ls, m.lsr); finalSharpen(d, m.W, m.H, m.R, m.mid, m.dark, m.light, m.k, m.cy, m.cx, m.ls, m.lsr);"
       + " postMessage({job: m.job, buf: d.buffer}, [d.buffer]); };";
     _fsWorker = new Worker(URL.createObjectURL(new Blob([src], {type: "text/javascript"})));
     _fsWorker.onmessage = e => {
@@ -3129,13 +4266,13 @@ function _fsPost(r){
   if (_fsBusy){ _fsNext = r; return; }
   _fsBusy = true; w._jobs[r.job] = r;
   w.postMessage({job: r.job, buf: r.data.buffer, W: r.W, H: r.H, R: GEO.R, cy: GEO.cy, cx: GEO.cx, st: r.st,
-                 mid: r.mid, dark: r.dark, light: r.light, k: r.k, view: r.view}, [r.data.buffer]);
+                 mid: r.mid, dark: r.dark, light: r.light, k: r.k, ls: r.ls, lsr: r.lsr, view: r.view}, [r.data.buffer]);
 }
 function _fsMain(r){                                    // no worker: the old path
   if (r.job !== _fsJob) return;
   const copy = new ImageData(r.data, r.W, r.H);
-  structureBoost(copy.data, r.W, r.H, GEO.cy, GEO.cx, GEO.R, r.st);
-  finalSharpen(copy.data, r.W, r.H, GEO.R, r.mid, r.dark, r.light, r.k);
+  structureBoost(copy.data, r.W, r.H, GEO.cy, GEO.cx, GEO.R, r.st, r.ls, r.lsr);
+  finalSharpen(copy.data, r.W, r.H, GEO.R, r.mid, r.dark, r.light, r.k, GEO.cy, GEO.cx, r.ls, r.lsr);
   if (r.view === "moon") moonMask(copy.data, r.PE); else { promOverlay(copy.data); starOverlay(copy.data); }
   ringPass(copy.data, r.PE);
   octx.putImageData(copy, 0, 0); draw();
@@ -3147,7 +4284,8 @@ function scheduleFinal(base){
   if ((VIEW !== "composite" && VIEW !== "moon") || !(mid>0||dark>0||light>0||st>0)) return;
   if (RENDER_DRAFT) return;                              // only on the full picture
   const r = {job: _fsJob, data: new Uint8ClampedArray(base.data), W: base.width, H: base.height,
-             view: VIEW, PE, mid, dark, light, st, k: PE.finalNoise||0, t0: 0};
+             view: VIEW, PE, mid, dark, light, st, k: PE.finalNoise||0,
+             ls: Math.min(1, Math.max(0, PE.limbSoft||0)), lsr: (PE.limbSoftR||1.4), t0: 0};
   _finalTimer = setTimeout(() => { _finalTimer = null; r.t0 = performance.now(); _fsPost(r); }, 200);
 }
 document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () => {
@@ -3299,7 +4437,7 @@ function solveWhite(x0, y0, x1, y1, pred, label){
              + (clipped ? "  (wanted " + dispFmt(tW) + " / " + dispFmt(nW) + " - clamped to the slider range; that spot is further from neutral than these sliders reach)" : ""));
 }
 // LOOK PRESETS: colour and tone fitted (looks/fit.py, reference set) to measured
-// 2026-10-16 (lab, judged by eye): eight looks fitted to the new reference set
+// 2026-10-16 (judged by eye): eight looks fitted to the new reference set
 // (looks2/fit5.py: tone with the corona held near neutral, lift <= 0.4,
 // compression <= 0.8, limb-ring saturation and streamer/gap spread in the loss;
 // then detail incl. Noise reduction; then a colour-only fit and corrections by
@@ -3409,7 +4547,7 @@ $("lookpreset").addEventListener("change", e => {
 $("pickwb").addEventListener("click", () => { if (PICKWB) pickCancel("white point: cancelled"); else pickBegin(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && PICKWB) pickCancel("white point: cancelled"); });
 
-// ---- the 1:1 crop (lab 0.25.1): export pixels of a window, see /api/crop ----
+// ---- the 1:1 crop (0.25.1): export pixels of a window, see /api/crop ----
 var PICKCROP = false, CROPAT = null, CROPBUSY = false, CROPURL = null;   // var: draw() may run before this line
 function cropBegin(){
   if (!ready || !GEO) return;
@@ -3565,6 +4703,8 @@ function pickChoose(p){
   PICK = null;
   if (k === "folder") loadFolder();
   else if (k === "flatDir" && $("folder").value.trim()) loadFolder();
+  else if (k.startsWith("dir_")) saveDir(k.slice(4), p);
+  else if (k === "importPath") setTab(2);
   else if (k === "settingsPath") settingsLoad(p);
   else if (k === "processingPath") processingLoad(p);
 }
@@ -3689,6 +4829,8 @@ async function processingLoad(path){
       else el.value = v;
     }
     syncSimple();
+    RECIPE = {file: j.file, camera: j.camera == null ? null : j.camera};
+    recipeCheckSoon();
     const ch = j.changed || [];
     let msg = j.file + " — " + j.n + " setting(s) set"
             + (j.from ? " (recorded from " + j.from + ")" : "");
@@ -3771,36 +4913,470 @@ $("cancelrun").addEventListener("click", async () => {
 // so the orientation control did nothing until the first export and then
 // gained one more listener on every export after that.
 $("orient").addEventListener("change", e => setOrient(e.target.value));
-$("export").addEventListener("click", async () => {
-  const fmt = document.querySelector("input[name=fmt]:checked").value;
-  $("export").disabled = true;
-  const r = await fetch("/api/export", {method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({format: fmt, params: effParams(), name: $("expname").value, view: VIEW, orient: ORIENT, size: $("exphalf").checked ? "half" : "full", promLayer: $("expprom").checked, moonLayer: $("expmoon").checked})});
-  const j = await r.json();
-  if (j.ok){ $("status").textContent = "exporting → " + j.path; runStart("export"); pollExport(); }
-  else { $("status").textContent = j.error; $("export").disabled = false; }
-});
-async function pollExport(){
-  let j;
-  try {
-    j = await (await fetch("/api/progress")).json();
-    runSync(j);
-  } catch (e){ return pollAgain(pollExport, 700, e); }   // see pollAgain
-  POLL_FAILS = 0;
-  if (j.done){
-    $("export").disabled = false;
-    runStop(j.error ? (j.cancelled ? "■" : "✕") : "✓",
-            j.error ? (j.cancelled ? "export cancelled" : "export failed") : "export done");
-    if (!j.error) loadVersions();
-    $("status").textContent = j.error ? ("export failed: "+j.error) :
-      (j.lines[j.lines.length-1] || "export done");
-    return;
+// ---------------------------------------------------------------- the polish (2026-11-08)
+// 1. THE STACKING OPTIONS IN FOUR GROUPS. The controls keep their ids and
+// handlers; only where they sit changes, so recipes, the recipe check and the
+// re-stack detection read them as before.
+(() => {
+  const grid = document.querySelector("#optpanel > .optgrid"); if (!grid) return;
+  const G = [
+    ["align", "Alignment", "how the frames are registered", ["alignMode", "intraLock", "colourPlanes", "alignCorr", "alignFilter"]],
+    ["merge", "Brightness &amp; merge", "how the exposures are matched and joined", ["photometry", "photoSolve", "tierMode", "feather", "wb"]],
+    ["stack", "Stacking", "how the frames of one exposure become one", ["stackCombine", "bracketMode", "frames", "denoise", "simpleStack"]],
+    ["spark", "Detail &amp; extras", "layers built after the stack, and extra files", ["fnrgfPreset", "despeckle", "partialConv", "exportTiers", "tierLinear"]]];
+  const ICO = {"images": "<svg viewBox=\"0 0 16 16\"><rect x=\"2\" y=\"4.5\" width=\"9\" height=\"9\" rx=\"1.5\"/><path d=\"M5 2.5h7.5a1 1 0 0 1 1 1V11\"/><circle cx=\"6.5\" cy=\"9\" r=\"2\"/></svg>", "proc": "<svg viewBox=\"0 0 16 16\"><path d=\"M2.5 4h11M2.5 8h11M2.5 12h11\"/><circle cx=\"6\" cy=\"4\" r=\"1.5\" class=\"f\"/><circle cx=\"10.5\" cy=\"8\" r=\"1.5\" class=\"f\"/><circle cx=\"5\" cy=\"12\" r=\"1.5\" class=\"f\"/></svg>", "result": "<svg viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"3\"/><path d=\"M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3\"/></svg>", "export": "<svg viewBox=\"0 0 16 16\"><path d=\"M3 10v3h10v-3\"/><path d=\"M8 2.5v8M5 5.5l3-3 3 3\"/></svg>", "folder": "<svg viewBox=\"0 0 16 16\"><path d=\"M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z\"/></svg>", "check": "<svg viewBox=\"0 0 16 16\"><path d=\"M2.5 4.5l1.2 1.2L6 3.4M2.5 8.5l1.2 1.2L6 7.4M2.5 12.5l1.2 1.2L6 11.4M8.5 4.8h5M8.5 8.8h5M8.5 12.8h5\"/></svg>", "timeline": "<svg viewBox=\"0 0 16 16\"><path d=\"M2 13.5h12\"/><path d=\"M4 11.5V9M7 11.5V6M10 11.5V8M13 11.5V3.5\"/></svg>", "frames": "<svg viewBox=\"0 0 16 16\"><rect x=\"2\" y=\"2\" width=\"5\" height=\"5\" rx=\"1\"/><rect x=\"9\" y=\"2\" width=\"5\" height=\"5\" rx=\"1\"/><rect x=\"2\" y=\"9\" width=\"5\" height=\"5\" rx=\"1\"/><rect x=\"9\" y=\"9\" width=\"5\" height=\"5\" rx=\"1\"/></svg>", "shield": "<svg viewBox=\"0 0 16 16\"><path d=\"M8 1.8l5 2v4c0 3-2.2 5.2-5 6.4C5.2 13 3 10.8 3 7.8v-4z\"/><path d=\"M5.8 8l1.6 1.6 3-3\"/></svg>", "run": "<svg viewBox=\"0 0 16 16\"><path d=\"M4.5 2.8v10.4L13 8z\"/></svg>", "pin": "<svg viewBox=\"0 0 16 16\"><path d=\"M8 14.2s4.5-4.3 4.5-7.6a4.5 4.5 0 0 0-9 0c0 3.3 4.5 7.6 4.5 7.6z\"/><circle cx=\"8\" cy=\"6.6\" r=\"1.6\"/></svg>", "doc": "<svg viewBox=\"0 0 16 16\"><path d=\"M4 2.5h8v11H4z\"/><path d=\"M6 5.5h4M6 8h4M6 10.5h2.5\"/></svg>", "align": "<svg viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"5.5\"/><path d=\"M8 1v3M8 12v3M1 8h3M12 8h3\"/><circle cx=\"8\" cy=\"8\" r=\"1.2\"/></svg>", "merge": "<svg viewBox=\"0 0 16 16\"><path d=\"M2 12.5c3 0 4-9 6-9s3 9 6 9\"/><path d=\"M2 14h12\"/></svg>", "stack": "<svg viewBox=\"0 0 16 16\"><path d=\"M2 5l6-3 6 3-6 3z\"/><path d=\"M2 8.5l6 3 6-3\"/><path d=\"M2 11.5l6 3 6-3\"/></svg>", "spark": "<svg viewBox=\"0 0 16 16\"><path d=\"M8 1.5l1.6 4.9L14.5 8l-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z\"/></svg>", "out": "<svg viewBox=\"0 0 16 16\"><rect x=\"2.5\" y=\"2.5\" width=\"11\" height=\"11\" rx=\"1.5\"/><path d=\"M5 10.5l2-2.5 1.5 1.5L11 6\"/></svg>"};
+  const wrap = document.createElement("div"); wrap.className = "ogroups";
+  const used = new Set();
+  for (const [ic, title, sub, ids] of G){
+    const g = document.createElement("div"); g.className = "ogrp";
+    g.innerHTML = `<div class="ogh"><span class="sico">${ICO[ic]}</span><b>${title}</b><small>${sub}</small></div>`;
+    const inner = document.createElement("div"); inner.className = "optgrid";
+    for (const id of ids){
+      const el = $(id); if (!el) continue;
+      const box = el.closest("label.opt, label.optchk, div.opt, label") || el;
+      if (used.has(box)) continue;
+      used.add(box); inner.appendChild(box);
+    }
+    g.appendChild(inner); wrap.appendChild(g);
   }
-  pollAgain(pollExport, 700);
+  // anything not named above stays, in a last group, so nothing is lost
+  const rest = [...grid.children].filter(c => !used.has(c) && c.textContent.trim());
+  if (rest.length){
+    const g = document.createElement("div"); g.className = "ogrp";
+    g.innerHTML = `<div class="ogh"><b>More</b></div>`;
+    const inner = document.createElement("div"); inner.className = "optgrid";
+    rest.forEach(c => inner.appendChild(c)); g.appendChild(inner); wrap.appendChild(g);
+  }
+  grid.replaceWith(wrap);
+})();
+// 2. A GOLD DOT ON EVERY STACKING OPTION THAT IS OFF ITS DEFAULT (the value
+// the page starts with), and the count in the section title
+function markNonDefault(){
+  let n = 0;
+  document.querySelectorAll("#optpanel select, #optpanel input[type=checkbox]").forEach(el => {
+    const box = el.closest("label") || el.parentElement; if (!box) return;
+    let nd;
+    if (el.tagName === "SELECT"){ const d = [...el.options].find(o => o.defaultSelected) || el.options[0]; nd = d && el.value !== d.value; }
+    else nd = el.checked !== el.defaultChecked;
+    box.classList.toggle("nondef", !!nd); if (nd) n++;
+  });
+  const on = $("optnote"); if (on) on.textContent = n ? `· ${n} changed from default` : "· all at their defaults";
 }
+$("optpanel").addEventListener("change", markNonDefault);
+markNonDefault();
+// 3. THE STEPS: each tab says where it stands (a line under its name), and a
+// finished step gets a check mark; the Next buttons follow the same state
+let XDONE = 0;
+function syncSteps(){
+  const imp = document.body.classList.contains("srcimport");
+  const hasFolder = imp ? !!$("importPath").value.trim() : (!!$("folder").value.trim() && (!!TL || $("cksec").style.display !== "none"));
+  const running = $("pbarwrap").classList.contains("run");
+  document.body.classList.toggle("nofolder", !hasFolder && !imp);
+  const sub = (n, t) => { const e = $("tsub" + n); if (e && e.textContent !== t) e.textContent = t; };
+  const done = (n, d) => { const b = document.querySelector(`.tabbtn[data-tab="${n}"]`); if (b) b.classList.toggle("done", !!d); };
+  sub(1, imp ? "finished HDR image" : (TL && TL.n ? `${TL.n} frames · ${(TL.exposures || []).length} exp.` : (hasFolder ? "folder loaded" : "choose a folder")));
+  sub(2, running ? "running…" : (ready ? "stacked" : (hasFolder ? "ready to start" : "")));
+  sub(3, ready ? "shape the look" : "after the stack");
+  sub(4, XDONE ? `${XDONE} written` : (ready ? "pick products" : ""));
+  sub(5, EDONE ? `${EDONE} made` : (ready ? "posters, overlays…" : ""));
+  done(1, hasFolder); done(2, ready); done(4, XDONE > 0); done(5, EDONE > 0);
+  const n1 = $("next1"), n2 = $("next2");
+  if (n1) n1.disabled = !hasFolder;
+  if (n2) n2.disabled = !ready;
+  if (TAB === 5 && E_ITEMS && E_ITEMS.some(it => it.ready) !== !!ready) eLoad();
+}
+// Cmd/Ctrl + 1..5 switch the tabs (not while typing in a field)
+document.addEventListener("keydown", e => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+  if (!/^[1-5]$/.test(e.key)) return;
+  e.preventDefault(); setTab(+e.key);
+});
+{ const mac = /Mac/.test(navigator.platform || navigator.userAgent);
+  document.querySelectorAll(".tabbtn").forEach(b => { b.title = (b.title || "") + `  (${mac ? "⌘" : "Ctrl+"}${b.dataset.tab})`; }); }
+setInterval(syncSteps, 700);
+syncSteps();
+document.querySelectorAll(".nextbtn").forEach(b => b.addEventListener("click", () => setTab(+b.dataset.goto)));
+$("p1browse").addEventListener("click", () => $("brwFolder").click());
+$("p1import").addEventListener("click", () => { const b = document.querySelector('#srcmode [data-mode="import"]'); if (b) b.click(); });
 
+// TAB 4, EXPORT (2026-11-08): one card per product, each with a small
+// picture of what it will write (/api/xthumb: rendered from the preview layers
+// with the page's current settings). Tick cards and "Export selected" runs
+// them one after the other; a card's own button runs just that one.
+const XFMT_NAME = {tif16: "TIFF 16-bit", tif8: "TIFF 8-bit", png: "PNG 16-bit", jpg: "JPG"};
+const XVIEW_NAME = {mgn: "MGN", fnrgf: "FNRGF", inner: "Inner", tangential: "Tangential", prom: "Prom gate",
+                    moon: "Moon", partialconv: "Partial conv.", flat: "Flat"};
+function xFmt(){ return document.querySelector("input[name=fmt]:checked").value; }
+function xSize(){ return document.querySelector("input[name=xsize]:checked").value; }
+function xPolar(){ return {north: $("polarnorth").value, outer: $("polarouter").value, grid: $("polargrid").checked,
+  earth: $("polarearth").checked, radial: $("polarradial").value, centre: $("polarcentre").value, mirrored: $("polarmirror").checked,
+  manual: $("polarmanual").value.trim(), offset: $("polaroffset").value.trim(),
+  tiles: $("polartiles").value, tileFmt: $("polartilefmt").value}; }
+function xViews(){
+  return [...document.querySelectorAll("#views [data-view]")]
+    .filter(b => b.dataset.view !== "composite" && b.style.display !== "none")
+    .map(b => b.dataset.view);
+}
+function xCard(n){ return document.querySelector(`.xcard[data-card="${n}"]`); }
+function xMeta(){
+  if (!GEO || !GEO.fullW) return;
+  const half = xSize() === "half", rot = ORIENT === "cw" || ORIENT === "ccw";
+  let w = GEO.fullW, h = GEO.fullH; if (half){ w = Math.floor(w / 2); h = Math.floor(h / 2); } if (rot) [w, h] = [h, w];
+  const bpp = {tif16: 6, tif8: 3, png: 6, jpg: 0}[xFmt()];
+  const mb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB";
+  document.querySelectorAll(".xmeta").forEach(m => {
+    const k = m.dataset.meta, by = k === "f32" ? w * h * 12 : w * h * bpp;
+    m.innerHTML = `<span>${w.toLocaleString("en")} × ${h.toLocaleString("en")} px</span>`
+      + (by ? `<span>up to ${mb(by)}</span>` : `<span>a few MB</span>`)
+      + (half ? "<span>50 %, 2×2 binned</span>" : "") + (ORIENT ? `<span>${$("orient").selectedOptions[0].textContent}</span>` : "");
+  });
+}
+function xSyncTags(){
+  try { xMeta(); } catch (e) {}
+  const f = XFMT_NAME[xFmt()];
+  document.querySelectorAll(".xtag[data-fmt]").forEach(t => t.textContent = f + (xSize() === "half" ? " · 50 %" : ""));
+  const pn = xCard("polar").querySelector(".xtnote");
+  pn.textContent = (xFmt() === "tif16" || xFmt() === "tif8") ? "the clean map (no labels)" : "with axes and labels";
+  let n = 0;
+  document.querySelectorAll(".xcard").forEach(c => { if (c.querySelector(".xinc").checked) n++; });
+  $("export").textContent = n ? `Export selected (${n})` : "Export selected";
+}
+// the thumbnails: one request at a time, newest wish wins
+const XT = {url: {}, busy: false, want: []};
+function xThumbReq(kind, extra){ return Object.assign({kind, params: effParams(), orient: ORIENT}, extra || {}); }
+function xThumbTargets(){
+  const t = [[xCard("picture").querySelector("img"), xThumbReq("composite")],
+             [xCard("plain").querySelector("img"), xThumbReq("plain")],
+             [xCard("hdr32").querySelector("img"), xThumbReq("hdr32")],
+             [xCard("polar").querySelector("img"), xThumbReq("polar", {polar: xPolar(), format: xFmt()})],
+             [xCard("polarlayers").querySelector("img"), xThumbReq("polarlayers", {polar: xPolar()})]];
+  document.querySelectorAll("#xvgrid img").forEach(im => t.push([im, xThumbReq("view:" + im.dataset.view)]));
+  return t;
+}
+function xBuildViews(){
+  const g = $("xvgrid"), have = [...g.querySelectorAll(".xvt")].map(e => e.dataset.view).join(","), vs = xViews();
+  if (have === vs.join(",")) return;
+  g.innerHTML = vs.map(v => `<label class="xvt" data-view="${v}"><img alt="" data-view="${v}"><span><input type="checkbox" class="xvchk" value="${v}"> ${XVIEW_NAME[v] || v}</span></label>`).join("");
+}
+let XT_T = null;
+function xRefreshThumbs(){ clearTimeout(XT_T); XT_T = setTimeout(() => { if (!ready) return; xBuildViews(); XT.want = xThumbTargets(); xThumbPump(); }, 250); }
+async function xThumbPump(){
+  if (XT.busy) return;
+  XT.busy = true;
+  try {
+    while (XT.want.length && TAB === 4){
+      const [img, req] = XT.want.shift();
+      const key = JSON.stringify(req);
+      if (XT.url[key]){ if (img.src !== XT.url[key]) img.src = XT.url[key]; continue; }
+      img.closest(".xthumb, .xvt").classList.add("loading");
+      try {
+        const r = await fetch("/api/xthumb", {method: "POST", headers: {"Content-Type": "application/json"}, body: key});
+        if (r.ok){ const u = URL.createObjectURL(await r.blob()); XT.url[key] = u; img.src = u; }
+      } catch (e) {}
+      img.closest(".xthumb, .xvt").classList.remove("loading");
+    }
+  } finally { XT.busy = false; }
+}
+// the jobs a card stands for
+function xJobs(card){
+  const base = {format: xFmt(), params: effParams(), name: $("expname").value, orient: ORIENT, size: xSize()};
+  const n = card.dataset.card;
+  if (n === "picture") return [Object.assign({}, base, {view: "composite", promLayer: $("expprom").checked,
+                                 moonLayer: $("expmoon").checked, polar: {on: false}, _label: "picture"})];
+  if (n === "plain") return [Object.assign({}, base, {product: "plain", _label: "plain stack"})];
+  if (n === "hdr32") return [Object.assign({}, base, {format: "hdr32", _label: "linear merge"})];
+  if (n === "polar") return [Object.assign({}, base, {view: "composite", polar: Object.assign(xPolar(), {on: true, only: true}), _label: "polar map"})];
+  if (n === "polarlayers") return [Object.assign({}, base, {product: "polarlayers", polar: xPolar(), _label: "polar layers"})];
+  if (n === "views") return [...document.querySelectorAll(".xvchk:checked")].map(c =>
+    Object.assign({}, base, {view: c.value, _label: (XVIEW_NAME[c.value] || c.value) + " view"}));
+  return [];
+}
+let XQ_RUN = false;
+async function xRunCards(cards){
+  if (XQ_RUN || !ready) return;
+  const plan = [];
+  for (const c of cards){
+    const js = xJobs(c);
+    if (!js.length){ c.querySelector(".xstat").textContent = c.dataset.card === "views" ? "tick a view first" : ""; continue; }
+    c.querySelector(".xstat").textContent = "queued"; c.classList.add("queued");
+    for (const j of js) plan.push([c, j]);
+  }
+  if (!plan.length) return;
+  XQ_RUN = true; $("export").disabled = true;
+  document.querySelectorAll(".xone").forEach(b => b.disabled = true);
+  runStart("export");
+  let ok = 0, bad = 0;
+  for (let i = 0; i < plan.length; i++){
+    const [c, job] = plan[i];
+    const st = c.querySelector(".xstat");
+    c.classList.remove("queued"); c.classList.add("working");
+    st.textContent = "writing " + job._label + " …";
+    $("xprog").textContent = `${i + 1} of ${plan.length}: ${job._label}`;
+    const body = Object.assign({}, job); delete body._label;
+    let res;
+    try {
+      res = await (await fetch("/api/export", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})).json();
+    } catch (e) { res = {ok: false, error: String(e)}; }
+    if (!res.ok){ st.textContent = "✕ " + res.error; c.classList.remove("working"); c.classList.add("failed"); bad++; continue; }
+    let j = null;
+    for (;;){
+      await new Promise(r => setTimeout(r, 700));
+      try { j = await (await fetch("/api/progress")).json(); runSync(j); } catch (e) { continue; }
+      if (j.lines && j.lines.length) $("xprog").textContent = `${i + 1} of ${plan.length}: ` + j.lines[j.lines.length - 1].replace(/^\[ok\]\s*/, "").slice(0, 160);
+      if (j.done) break;
+    }
+    c.classList.remove("working");
+    if (j.error){ st.textContent = "✕ " + j.error; c.classList.add("failed"); bad++; }
+    else {
+      const last = (j.lines || []).filter(l => /saved /.test(l)).pop() || "";
+      const m = last.match(/saved (\S+)/);
+      st.textContent = "✓ " + (m ? m[1].split("/").pop() : "done");
+      st.title = last;
+      c.classList.add("done"); ok++;
+    }
+  }
+  runStop(bad ? "✕" : "✓", "export done");
+  XDONE += ok;
+  $("xprog").textContent = `${ok} written` + (bad ? `, ${bad} failed` : "") + " — eclipseforge_output/";
+  $("status").textContent = $("xprog").textContent;
+  XQ_RUN = false; $("export").disabled = !ready;
+  document.querySelectorAll(".xone").forEach(b => b.disabled = false);
+  loadVersions();
+}
+$("export").addEventListener("click", () =>
+  xRunCards([...document.querySelectorAll(".xcard")].filter(c => c.querySelector(".xinc").checked)));
+document.querySelectorAll(".xone").forEach(b => b.addEventListener("click", () => xRunCards([b.closest(".xcard")])));
+$("xgrid").addEventListener("change", e => {
+  if (e.target.classList.contains("xvchk") && e.target.checked) xCard("views").querySelector(".xinc").checked = true;
+  if (e.target.closest(".xcard")) e.target.closest(".xcard").classList.remove("done", "failed");
+  xSyncTags();
+  if (e.target.closest("#polaropts")) xRefreshThumbs();
+});
+document.querySelectorAll("input[name=fmt], input[name=xsize]").forEach(r => r.addEventListener("change", () => { xSyncTags(); xRefreshThumbs(); }));
+$("orient").addEventListener("change", () => { xSyncTags(); xRefreshThumbs(); });
+["polarmanual", "polaroffset"].forEach(id => $(id).addEventListener("input", () => xRefreshThumbs()));
+xSyncTags();
 
+/* ---- tab 5: EXTRAS (0.30.0) ---------------------------------------------
+   The cards come from /api/extras (the catalogue in extras.py: id, title,
+   description, options). A preview is the product made on the preview
+   layers; Generate makes it on the full render and writes it to
+   eclipseforge_output/extras/. Options live on the card; a change refreshes
+   its preview. The angle origin (solar/celestial, by hand, adjust) is the
+   Polar map card's, so the two agree. */
+var EDONE = 0, E_ITEMS = null, E_SIG = "";   // var: syncSteps runs before this line
+const ET = {url: {}, busy: false, want: []};
+const E_GROUP = {picture: ["From the picture", "the finished picture as tab 3 shows it"],
+                 frames: ["From the frames", "the single frames in the folder; previews read a few of them, Generate reads them all"],
+                 motion: ["Motion and sound", "clips and a sound file; the cards show stills"]};
+function eCard(id){ return document.querySelector(`.xcard[data-extra="${id}"]`); }
+function eOptHtml(it){
+  // the few options that matter on the card; the rest under "More options"
+  const one = o => eOpt1(o);
+  const basic = (it.options || []).filter(o => !o.adv), more = (it.options || []).filter(o => o.adv);
+  // under "More options": the choices first, then the ticks, each in rows of their own
+  const mSel = more.filter(o => o.type !== "check"), mChk = more.filter(o => o.type === "check");
+  const blk = a => a.length ? `<div class="eopts">${a.map(one).join("")}</div>` : "";
+  return `<div class="eopts">${basic.map(one).join("")}</div>` +
+    (more.length ? `<details class="emore"><summary>More options <span>(${more.length})</span></summary>${blk(mSel)}${blk(mChk)}</details>` : "");
+}
+function eOpt1(o){
+  return [o].map(o => {
+    const t = o.title ? ` title="${o.title.replace(/"/g, "&quot;")}"` : "";
+    if (o.type === "check") return `<label class="chk"${t}><input type="checkbox" data-opt="${o.id}"${o.default ? " checked" : ""}> ${o.label}</label>`;
+    const sets = o.sets ? ` data-sets="${JSON.stringify(o.sets).replace(/"/g, "&quot;")}"` : "";
+    if (o.type === "select") return `<label${t}><span class="on">${o.label}</span><select data-opt="${o.id}"${sets}>` +
+      o.values.map(v => `<option value="${v[0]}"${String(v[0]) === String(o.default) ? " selected" : ""}>${v[1]}</option>`).join("") + `</select></label>`;
+    return `<label${t}><span class="on">${o.label}</span><input type="text" data-opt="${o.id}" value="${o.default == null ? "" : o.default}" spellcheck="false"></label>`;
+  })[0];
+}
+function eBuild(items){
+  const g = $("egrid"); let h = ""; let grp = "";
+  for (const it of items){
+    if (it.group !== grp){ grp = it.group; const gg = E_GROUP[grp] || [grp, ""]; h += `<div class="egroup">${gg[0]} <small>${gg[1]}</small></div>`; }
+    const tn = it.group === "frames" ? "preview from a few frames" : (it.group === "motion" ? "stills of the clip" : "");
+    const cls = "xcard" + (it.coming ? " coming" : (it.ready ? "" : " notready"));
+    h += `<div class="${cls}" data-extra="${it.id}">
+      <div class="xthumb">${it.coming ? `<span class="soon">next round</span>` : (it.ready ? `<img alt=""><span class="xtnote">${tn}</span><span class="xtlook">click: large</span>` : `<span class="soon">${it.why || "needs a result"}</span>`)}</div>
+      <div class="xbody">
+        <div class="xhead"><label><input type="checkbox" class="xinc"${it.ready ? "" : " disabled"}> <b>${it.title}</b></label>${it.out ? `<span class="xtag">${it.out}</span>` : ""}</div>
+        <p class="xdesc">${it.desc}</p>
+        ${it.ready && it.why ? `<div class="ewhy">${it.why}</div>` : ""}
+        ${it.options && it.options.length ? eOptHtml(it) : ""}
+        <div class="xfoot"><span class="xstat"></span>${it.ready ? `<button class="mini eone">Generate</button>` : ""}</div>
+      </div></div>`;
+  }
+  g.innerHTML = h;
+  g.querySelectorAll(".xtnote").forEach(e => { e.dataset.base = e.textContent; });
+  g.querySelectorAll(".eone").forEach(b => b.addEventListener("click", () => eRun([b.closest(".xcard")])));
+  g.querySelectorAll(".xthumb img").forEach(im => im.addEventListener("click", () => {
+    if (!im.src) return;
+    $("elboximg").src = im.src; $("elboxcap").textContent = im.closest(".xcard").querySelector(".xhead b").textContent + " — preview from the quarter-size layers; the file is made from the full picture";
+    $("elbox").classList.add("on");
+  }));
+}
+$("elbox").addEventListener("click", () => $("elbox").classList.remove("on"));
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("elbox").classList.remove("on"); });
+async function eLoad(){
+  let j;
+  try { j = await (await fetch("/api/extras")).json(); } catch (e) { return; }
+  if (!j.ok) return;
+  const sig = JSON.stringify(j.items.map(it => [it.id, it.ready, it.coming, it.why]));
+  if (sig !== E_SIG && !EQ_RUN){ E_SIG = sig; E_ITEMS = j.items; eBuild(j.items); ET.url = {}; }   // never rebuild under a running queue
+  eSum();
+  eRefresh();
+}
+function eOpts(card){
+  const o = {};
+  card.querySelectorAll("[data-opt]").forEach(el => { o[el.dataset.opt] = el.type === "checkbox" ? el.checked : el.value; });
+  return o;
+}
+// THE POSTER'S MAP IN THE STANDARD VARIANT (2026-11-10): a soft look and the
+// look it was made from differ in a few settings only (the inner corona's
+// brightness and detail); the map takes the standard's values for exactly
+// those, everything else -- colour, white, earthshine, what was changed by
+// hand -- stays as the picture has it.
+const SOFT_PAIR = {brightStreamersSoft: "brightStreamers", calmBlueSoft: "calmBlue", sunsetSoft: "sunset",
+  cleanSteelSoft: "expM4", silverRaysSoft: "silverRays", nightNavySoft: "nightNavy",
+  midnightSilverSoft: "midnightSilver", goldenHourSoft: "goldenHour", sunflowerSoft: "sunflower"};
+function standardParams(){
+  const soft = $("lookpreset").value, std = SOFT_PAIR[soft];
+  if (!std || !LOOKS[soft] || !LOOKS[std]) return null;
+  const q = JSON.parse(JSON.stringify(P));
+  const a = LOOKS[soft], b = LOOKS[std];
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])){
+    if (k === "warm" || !(k in b)) continue;
+    if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) q[k] = JSON.parse(JSON.stringify(b[k]));
+  }
+  return effParams(q);
+}
+function eReq(card){
+  const r = {kind: card.dataset.extra, opts: eOpts(card), params: effParams(), polar: xPolar()};
+  if (r.kind === "poster" && r.opts.maplook === "standard"){ const m = standardParams(); if (m) r.mapParams = m; }
+  return r;
+}
+let ET_T = null;
+function eRefresh(){ clearTimeout(ET_T); ET_T = setTimeout(() => {
+  if (!ready || TAB !== 5) return;
+  ET.want = [...document.querySelectorAll("#egrid .xcard:not(.coming):not(.notready)")].map(c => [c, eReq(c)]);
+  ePump(); }, 250); }
+async function ePump(){
+  if (ET.busy) return;
+  ET.busy = true;
+  try {
+    while (ET.want.length && TAB === 5){
+      const [card, req] = ET.want.shift();
+      const img = card.querySelector(".xthumb img"); if (!img) continue;
+      const key = JSON.stringify(req);
+      if (ET.url[key]){ if (img.src !== ET.url[key]) img.src = ET.url[key]; continue; }
+      card.querySelector(".xthumb").classList.add("loading");
+      try {
+        const r = await fetch("/api/extra/preview", {method: "POST", headers: {"Content-Type": "application/json"}, body: key});
+        if (r.ok){ const u = URL.createObjectURL(await r.blob()); ET.url[key] = u; img.src = u; card.querySelector(".xtnote").textContent = card.querySelector(".xtnote").dataset.base || ""; }
+        else { let e = {}; try { e = await r.json(); } catch (x) {} card.querySelector(".xtnote").textContent = e.error || "preview failed"; }
+      } catch (e) {}
+      card.querySelector(".xthumb").classList.remove("loading");
+    }
+  } finally { ET.busy = false; }
+}
+function eSum(){
+  let n = 0;
+  document.querySelectorAll("#egrid .xinc:checked").forEach(() => n++);
+  $("exgen").textContent = n ? `Generate selected (${n})` : "Generate selected";
+  $("exgen").disabled = !ready || !n;
+}
+let EQ_RUN = false; const EQ = [];
+function eRun(cards){
+  // Generate never blocks: a click while something is being made puts the
+  // card in the queue ("queued"), the queue runs one product after the other
+  if (!ready) return;
+  for (const c of cards){
+    if (c.classList.contains("coming") || c.classList.contains("notready")) continue;
+    if (EQ.includes(c) || c.classList.contains("working")) continue;
+    EQ.push(c);
+    c.querySelector(".xstat").textContent = "queued"; c.classList.remove("done", "failed"); c.classList.add("queued");
+  }
+  if (!EQ_RUN && EQ.length) ePlay();
+}
+async function ePlay(){
+  EQ_RUN = true;
+  runStart("extras");
+  let ok = 0, bad = 0, n = 0;
+  while (EQ.length){
+    const c = EQ.shift(), st = c.querySelector(".xstat"), label = c.querySelector(".xhead b").textContent;
+    n++;
+    c.classList.remove("queued"); c.classList.add("working");
+    st.textContent = "making " + label.toLowerCase() + " …";
+    const pre = () => `${label}` + (EQ.length ? ` (${EQ.length} more queued)` : "");
+    $("exprog").textContent = pre();
+    const body = Object.assign(eReq(c), {name: $("exname").value});
+    let res;
+    for (let k = 0; k < 600; k++){            // wait for a running job (e.g. an export) to finish
+      try {
+        res = await (await fetch("/api/extra/generate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})).json();
+      } catch (e) { res = {ok: false, error: String(e)}; }
+      if (res.ok || !/still running/.test(res.error || "")) break;
+      st.textContent = "waiting: " + res.error;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (!res.ok){ st.textContent = "✕ " + res.error; c.classList.remove("working"); c.classList.add("failed"); bad++; continue; }
+    st.textContent = "making " + label.toLowerCase() + " …";
+    let j = null;
+    for (;;){
+      await new Promise(r => setTimeout(r, 700));
+      try { j = await (await fetch("/api/progress")).json(); runSync(j); } catch (e) { continue; }
+      if (j.lines && j.lines.length) $("exprog").textContent = pre() + ": " + j.lines[j.lines.length - 1].replace(/^\[ok\]\s*/, "").slice(0, 140);
+      if (j.done) break;
+    }
+    c.classList.remove("working");
+    if (j.error){ st.textContent = "✕ " + j.error; c.classList.add("failed"); bad++; }
+    else {
+      const last = (j.lines || []).filter(l => /saved /.test(l)).pop() || "";
+      const m = last.match(/saved (\S+)/);
+      st.textContent = "✓ " + (m ? m[1].split("/").pop() : "done");
+      st.title = last;
+      c.classList.add("done"); ok++;
+    }
+  }
+  runStop(bad ? "✕" : "✓", "extras done");
+  EDONE += ok;
+  $("exprog").textContent = `${ok} made` + (bad ? `, ${bad} failed` : "") + " — eclipseforge_output/extras/";
+  $("status").textContent = $("exprog").textContent;
+  EQ_RUN = false; eSum();
+  loadVersions();
+}
+$("exgen").addEventListener("click", () => eRun([...document.querySelectorAll("#egrid .xcard")].filter(c => c.querySelector(".xinc").checked)));
+function eApplyLook(card, sel){
+  // a "look" select sets the card's other options; they stay editable
+  let sets = {}; try { sets = JSON.parse(sel.dataset.sets || "{}"); } catch (x) {}
+  const vals = sets[sel.value]; if (!vals) return;
+  for (const [k, v] of Object.entries(vals)){
+    const el = card.querySelector(`[data-opt="${k}"]`); if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!v; else el.value = String(v);
+  }
+}
+function eLookMatch(card){
+  // an option changed by hand away from the look: the look reads "my own settings"
+  const sel = card.querySelector("[data-sets]"); if (!sel) return;
+  let sets = {}; try { sets = JSON.parse(sel.dataset.sets || "{}"); } catch (x) {}
+  const vals = sets[sel.value]; if (!vals) return;
+  for (const [k, v] of Object.entries(vals)){
+    const el = card.querySelector(`[data-opt="${k}"]`); if (!el) continue;
+    const cur = el.type === "checkbox" ? el.checked : el.value;
+    if (String(cur) !== String(v)){ if ([...sel.options].some(o => o.value === "own")) sel.value = "own"; return; }
+  }
+}
+$("egrid").addEventListener("change", e => {
+  const c = e.target.closest(".xcard");
+  if (c){ c.classList.remove("done", "failed"); }
+  if (c && e.target.dataset && e.target.dataset.sets) eApplyLook(c, e.target);
+  else if (c && e.target.dataset && e.target.dataset.opt !== undefined) eLookMatch(c);
+  if (e.target.classList.contains("xinc")) eSum();
+  else if (e.target.dataset.opt !== undefined) eRefresh();
+});
+$("egrid").addEventListener("input", e => { if (e.target.dataset.opt !== undefined && e.target.type === "text") eRefresh(); });
+["polarmanual", "polaroffset", "polarnorth"].forEach(id => $(id).addEventListener("change", () => { ET.url = {}; eRefresh(); }));
+$("expname").addEventListener("input", () => { $("exname").value = $("expname").value; });
 
 // ---------------------------------------------------------------- block 3a
 // Per-group eye: hide a group's EFFECT without touching its sliders -- the
@@ -3819,8 +5395,8 @@ const BYPASS = {
   "Diamond ring": {ringBlend:0}
 };
 const HIDDEN = new Set();
-function effParams(){
-  const q = Object.assign({}, P);
+function effParams(src){
+  const q = Object.assign({}, src || P);
   for (const g of HIDDEN) Object.assign(q, BYPASS[g] || {});
   for (const k of HIDDENK) q[k] = itemOff(k);
   // the Colour mode -- render.py colour_mode
@@ -4213,7 +5789,7 @@ function syncStartLabel(){
   else if (!CACHE.cached){ sub = "full stack from the raws"; kind = "stack"; cls = "restack"; mark([]); }
   else {
     const d = diffOpts(); mark(d);
-    if (CACHE.inputs_changed){ sub = "re-stack · raw files changed"; kind = "stack"; cls = "restack"; }
+    if (CACHE.inputs_changed){ sub = "re-stack · frames changed"; kind = "stack"; cls = "restack"; }
     else if (d.length){ sub = "re-stack · " + d.length + " option" + (d.length > 1 ? "s" : "") + " changed"; kind = "stack"; cls = "restack"; }
     else if (CACHE.layers_stale){ sub = "layers only, no re-stack"; kind = "layers"; cls = "ok"; }
     else if (CACHE.hill_stale){ sub = "rebuild masks, no re-stack"; kind = "masks"; cls = "ok"; }
@@ -4222,6 +5798,7 @@ function syncStartLabel(){
   RUN_KIND = kind;
   b.innerHTML = main + (sub ? '<span class="sub">' + sub + durNote(kind) + '</span>' : "");
   dot.className = "sdot" + (cls ? " " + cls : "");
+  try { syncStale(); } catch (e) {}
 }
 async function refreshCache(){
   try { const r = await fetch("/api/cachestate"); CACHE = r.ok ? await r.json() : null; } catch(e){ CACHE = null; }
@@ -4240,6 +5817,7 @@ function setSrcMode(mode){
   $("srcraw").style.display = raw ? "" : "none";
   $("srcimp").style.display = raw ? "none" : "";
   document.querySelectorAll("#srcmode .segbtn").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  document.body.classList.toggle("srcimport", !raw);
   if (raw) $("importPath").value = ""; else { $("simpleStack").checked = false; syncSimple(); }
   try { localStorage.setItem("efh.srcmode", mode); } catch(e){}
   if (!raw) syncStart();

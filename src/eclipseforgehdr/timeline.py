@@ -70,7 +70,15 @@ def _exif_table(folder, raws, wd):
 def build(folder, wd):
     """The timeline as JSON-able dict (see gui.html, drawTimeline)."""
     from .raw import list_raws
-    raws = list_raws(folder)
+    raws = list_raws(folder, selected=False)
+    # the user's switches (Frames panel): switched-off frames are drawn too,
+    # in their own colour, and forced ones carry a flag
+    try:
+        from .frameselect import load as _sel_load, key as _sel_key
+        _sel = _sel_load(folder)
+    except Exception:
+        _sel, _sel_key = {"off": set(), "force": set()}, None
+    _sk = (lambda p: _sel_key(p, folder)) if _sel_key else (lambda p: os.path.basename(p))
     tab = _exif_table(folder, raws, wd)
     paths = [p for p in raws if tab.get(os.path.basename(p), (None, None))[0]]
     sec = {p: float(tab[os.path.basename(p)][0]) for p in paths}
@@ -136,9 +144,11 @@ def build(folder, wd):
     frames = []
     for p in order:
         n = os.path.basename(p)
-        frames.append({"name": n, "sec": sec[p], "t": round(t[p], 3),
+        k = _sk(p)
+        st = "off" if k in _sel["off"] else status.get(n)
+        frames.append({"name": n, "key": k, "sec": sec[p], "t": round(t[p], 3),
                        "bracket": int(res["of"].get(p, 0)),
-                       "status": status.get(n), "gain": gain.get(n)})
+                       "status": st, "gain": gain.get(n), "forced": k in _sel["force"]})
     # THE SHORT EXPOSURES (2026-10-18): the frames kept apart for the
     # prominence layer belong to the shoot too, often the first frames after
     # C2. Drawn on the same time axis, own colour, not part of any bracket.
@@ -148,7 +158,7 @@ def build(folder, wd):
             from .pipeline import find_short_dir
             sd = find_short_dir(folder)
             if sd:
-                sraws = list_raws(sd)
+                sraws = list_raws(sd, selected=False)
                 stab = _exif_table(sd, sraws, wd)
                 t0 = min(ep.values())
                 sgrp = {}
@@ -159,9 +169,11 @@ def build(folder, wd):
                         sgrp.setdefault(e, []).append((p, float(sc)))
                 for e, g in sgrp.items():
                     for i, (p, sc) in enumerate(sorted(g, key=lambda q: _natural(os.path.basename(q[0])))):
-                        frames.append({"name": os.path.basename(p), "sec": sc,
+                        k = _sk(p)
+                        frames.append({"name": os.path.basename(p), "key": k, "sec": sc,
                                        "t": round((e - t0) + (i + 0.5) / len(g), 3),
-                                       "bracket": -1, "status": "short", "gain": None})
+                                       "bracket": -1, "status": "off" if k in _sel["off"] else "short",
+                                       "gain": None, "forced": False})
                         n_short += 1
                 frames.sort(key=lambda f: f["t"])
         except Exception:

@@ -1,4 +1,4 @@
-"""STAR DETECTION (lab 0.25.1, step 2 of the star layer).
+"""STAR DETECTION (0.25.1, step 2 of the star layer).
 
 Finds stars in the merge without knowing in advance where they are, and writes
 them to STARS_FILE in the work directory. Nothing is drawn or rendered yet;
@@ -47,7 +47,7 @@ SIGMAS = (0.6, 1.0, 1.5, 2.25)        # band-pass widths, binned px (R ~ 300 px)
 RMIN = 1.4                             # inner limit, lunar radii
 Z_FLOOR = 6.0
 Z_POSSIBLE = 5.0
-# lab 0.25.1 (2026-10-10): candidates between Z_VERIFY and Z_POSSIBLE ("faint")
+# 0.25.1 (2026-10-10): candidates between Z_VERIFY and Z_POSSIBLE ("faint")
 # go to the catalogue check too, but only as verification: one is kept, as a
 # star, only when a solution puts a catalogue star under it; it never seeds a
 # solution, and unconfirmed ones are dropped. A mag-7.7 star at z 5.09 in one

@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.29.2
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.30.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -14,6 +14,9 @@ a few minutes, then adjust the result on a live preview and export it.
 
 Everything runs on your own machine. No cloud, no account, no telemetry: the
 interface is a small web server on `127.0.0.1` that only your browser talks to.
+The one connection out is the map of the site picker, which downloads map
+tiles (OpenStreetMap / CARTO) and keeps them for offline use; nothing of your
+images leaves the computer.
 
 | | |
 |:---:|:---:|
@@ -28,11 +31,50 @@ adjustments of the "Night navy" preset and the Moon layer.*
 
 ![The EclipseForgeHDR interface](docs/images/eclipseforge_gui.jpg)
 
-*The folder and the flats go in the top bar; the row of buttons switches the
-preview between the composite and each individual layer; every slider on the
-right re-renders live, with no re-processing.*
+*The interface before 0.30.0. Since 0.30.0 the same controls sit in five tabs
+(Images, Processing, Result, Export, Extras); the row of buttons still switches
+the preview between the composite and each individual layer, and every slider
+re-renders live, with no re-processing.*
 
 ---
+
+## New in 0.30.0
+
+- **Five tabs that follow the work:** 1 Images (folder, frames, checklist,
+  shooting timeline), 2 Processing (stacking options, site and time, recipe
+  check, Start and the log), 3 Result (preview, looks, stars), 4 Export (one
+  card per product, each with a small preview), 5 Extras.
+- **Frames panel** (tab 1): every frame found — brackets, short exposures,
+  contact frames, flats, darks, bias — with a preview from the raw data. Switch
+  a frame off, or force a bracket frame in past the automatic checks (forced
+  frames are marked). The darks, bias, short-exposure, contact and phases
+  folders can also be chosen by hand.
+- **Recipe check** (tab 2): before Start, the chosen stacking options are
+  checked against the loaded data, with a one-click fix where one applies.
+  Start is never blocked.
+- **Site picker on a map** with the path of totality, for 14 total eclipses
+  from 2017 to 2037, and city lists for each.
+- **Polar map:** the corona unwrapped around the Sun, position angle across and
+  distance up, from solar or celestial north (or a north you enter by hand).
+  Linear or shape-true radius, N/E/S/W in the middle, a mirrored view, grid and
+  the Earth for scale; also as two layers (map and lettering) and as seamless
+  tiles for carousels.
+- **More exports:** the plain HDR stack (one log stretch, no detail layers),
+  the linear HDR merge as a 32-bit float TIFF, and every detail view.
+- **Extras tab:** Sky & Sun overlay (also as a transparent layer and an SVG),
+  poster (picture plus polar map), limb panorama, corona in motion (for
+  repeated brackets), a film from the single frames to the finished picture
+  that unrolls into the polar map, and the corona as sound. Sizes for social
+  media (16:9, 1:1, 4:5, 3:4, 9:16) with safe zones for reels, stories and
+  posts.
+- **Sharper stacks:** the links between exposures are measured above the
+  sensor's fixed pattern; darks at several exposures are fitted per photosite;
+  the earthshine strength is decided from the data.
+- **Inner softening** (inner corona group): eases detail and sharpening next to
+  the Moon's edge, full from a chosen radius.
+- **Re-stack once:** caches from 0.29.x are not reused.
+- **New requirements** (installed automatically): `certifi` for the map tiles
+  and `imageio-ffmpeg` for the video clips.
 
 ## New in 0.29.2
 
@@ -409,8 +451,13 @@ stopping on a line.
   Silver rays, Night navy, Midnight silver, Golden hour, Sunflower, each
   also in a soft version with a brighter, smoother inner corona
 - Star layer, with an optional catalogue check and a sky map of the field
-- Optional observing site and time, with a place picker for the 2026 and 2027
-  eclipses
+- Optional observing site and time, with a map picker showing the path of
+  totality for 14 eclipses from 2017 to 2037
+- Frames panel: every frame with a preview, switched off or forced in by hand
+- Recipe check of the stacking options against the loaded data before Start
+- Polar map (angle × radius) as an export, also in layers and as tiles
+- Extras: Sky & Sun overlay, poster, limb panorama, corona in motion, film and
+  corona sound, in social-media sizes with safe zones
 - 1:1 crop of the export at any point of the preview
 - Moon layer (earthshine) from the longest exposures; prominence layer from
   the shortest
@@ -433,8 +480,8 @@ stopping on a line.
 ## Before you install
 
 EFHDR is a Python program. It runs on **macOS, Windows and Linux** — everything
-it needs (numpy, scipy, scikit-image, Pillow, tifffile, rawpy, exifread, Flask)
-ships ready-built for all three. Testing so far has been on macOS and Windows;
+it needs (numpy, scipy, scikit-image, Pillow, tifffile, rawpy, exifread, Flask,
+certifi, imageio-ffmpeg) ships ready-built for all three. Testing so far has been on macOS and Windows;
 treat Linux as untested rather than unsupported.
 
 The one real requirement is **memory**. A run holds every tier of the bracket in

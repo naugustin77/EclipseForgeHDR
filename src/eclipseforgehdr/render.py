@@ -77,7 +77,7 @@ DEFAULTS = {
     #               laid over it as an opaque colour; how close the brightest
     #               core may come to white (0 = the opaque colour as before)
     "promLight": 0.8,
-    # THE STAR LAYER (stars.py, lab 0.25.1): stars found in the stack, lifted
+    # THE STAR LAYER (stars.py, 0.25.1): stars found in the stack, lifted
     # out of the corona and laid back over the finished picture.
     #   starStrength  1 = as bright as in the stack, above 1 brighter; the page
     #                 does not go below 1 (the stars are part of the stack)
@@ -99,6 +99,10 @@ DEFAULTS = {
     # where the inner-detail and filament layers start, in full-resolution px
     # outside the disc mask; they reach full strength at twice that (min 4 px)
     "detailStart": 8.0,
+    # INNER SOFTENING (2026-10-28): eases the detail and sharpening near the
+    # limb and gives them in full from `limbSoftR` (in R) outward -- see
+    # limb_soft_weight. 0 = off and the picture is exactly as before.
+    "limbSoft": 0.0, "limbSoftR": 1.4,
     # RAW-PATH WHITE BALANCE, SOLVED RATHER THAN EYEBALLED.
     #
     # These were 0.9 / 1.205, a by-eye correction from 0.12.0, and tint at 1.205
@@ -156,10 +160,10 @@ DEFAULTS = {
     # not this change.
     "temp": 1.0, "tint": 1.0, "bgNeutral": 1.0, "satur": 1.0, "hlCompress": 0.0, "hlDesat": 0.0,
     "outGamma": 1.0, "bgBlack": 0.02,
-    # Sky pedestal (lab 2026-10-19): the share of the measured sky light that
+    # Sky pedestal (2026-10-19): the share of the measured sky light that
     # is taken off before the envelope curve -- see Layers.sky_p3. 0 = off.
     "skySub": 0.0,
-    # Final sharpening (lab, Oct 2026): a published Photoshop finish with a
+    # Final sharpening (Oct 2026): a published Photoshop finish with a
     # noise gate. All off by default -- it is a finish, not a default look.
     "finalMid": 0.0, "finalDark": 0.0, "finalLight": 0.0, "finalNoise": 3.0,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
@@ -175,11 +179,11 @@ DEFAULTS = {
     # on the page (display RGB; the default is the look's blue, LOOK_BLUE).
     "moonCurve": [[0.0, 0.0], [1.0, 1.0]],
     "moonHueR": 0.579, "moonHueG": 0.756, "moonHueB": 1.0,
-    # the sky lift's colour (lab 2026-10-08): the colour the lift heads towards
+    # the sky lift's colour (2026-10-08): the colour the lift heads towards
     # at Sky lift colour 1, picked as for the Moon; the default is the old blue
     # axis exactly, so every look before it renders unchanged
     "skyHueR": 0.579, "skyHueG": 0.756, "skyHueB": 1.0,
-    # COLOUR MODE (lab 2026-10-08): 0 = colour from the data (as before),
+    # COLOUR MODE (2026-10-08): 0 = colour from the data (as before),
     # 1 = monochrome (no colour anywhere; the composite exports as one
     # channel), 2 = mono + tints (grey corona; sky, Moon and prominences take
     # the picked colours). promHue*: the prominence colour used in mode 2.
@@ -434,7 +438,7 @@ class Layers:
         self.lum_span = float(hi - lo)
         xn = np.clip((lum - lo) / (hi - lo), 0, 1)
         Bg = xn ** (1 / 3.0)
-        # THE SKY PEDESTAL (lab 2026-10-19). A sunset (or bright) sky adds a
+        # THE SKY PEDESTAL (2026-10-19). A sunset (or bright) sky adds a
         # smooth light level under the whole frame, and the black point above
         # deliberately keeps it (it sits 5 sigma under the sky). Radial flatten
         # then multiplies that pedestal along with the corona, so the sky
@@ -1178,7 +1182,7 @@ def _detail_layers(src, P, preview=True, views=False):
     return mg, fn, inner_eff
 
 
-# FINAL SHARPENING (lab, Oct 2026). A Photoshop finish, read out of a
+# FINAL SHARPENING (Oct 2026). A Photoshop finish, read out of a
 # published action file and reproduced here, plus a noise
 # gate Photoshop cannot have.
 #
@@ -1297,7 +1301,7 @@ def apply_tone(rgb, pts, ceiling, moon_pts=None, eg=None, pin=None):
         rgb = out
         del out, egf
     if ceiling < 0.999:
-        # PINNED (lab 0.25.1, the 1:1 crop): a crop of the picture must use
+        # PINNED (0.25.1, the 1:1 crop): a crop of the picture must use
         # the WHOLE picture's statistic, or its whites land elsewhere than the
         # export's. `pin` carries the number from a full-frame render.
         if pin is not None and "tone_p" in pin:
@@ -1396,7 +1400,7 @@ def corona_white(layers, P, lo=1.05, hi=1.6):
 def look(rgb, P, r, R, eg, pin=None):
     """`pin`: a dict of the picture-wide numbers (ring median, contain-whites
     percentile, Moon disc median). Filled by a full-frame render, read by a
-    crop render, so the crop matches the export (the 1:1 crop, lab 0.25.1)."""
+    crop render, so the crop matches the export (the 1:1 crop, 0.25.1)."""
     cl = float(P.get("coronaLevel", 0) or 0)
     sl = float(P.get("skyLevel", 0) or 0)
     mc = float(P.get("moonColour", 0) or 0)
@@ -1512,7 +1516,21 @@ def _noise_response(radii):
     return np.array(out)
 
 
-def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_rows=768):
+# INNER SOFTENING (2026-10-28). One radial weight for everything that adds
+# fine detail: the partial-convolution layer, the inner and filament detail
+# layers, Structure and the final sharpening. At the limb it is 1 - limbSoft,
+# it rises smoothly (smoothstep) to 1 at limbSoftR solar radii and stays 1
+# beyond, so the streamers further out keep all their detail. The bright inner
+# corona keeps its smooth glow instead of picking up texture where the stack is
+# brightest. 0 = off: the weight is exactly 1 everywhere and nothing changes.
+def limb_soft_weight(r_over_R, s, rr):
+    s = float(np.clip(s, 0.0, 1.0)); rr = max(float(rr), 1.05)
+    t = np.clip((np.asarray(r_over_R, np.float32) - np.float32(1.0)) / np.float32(rr - 1.0), 0, 1)
+    return (np.float32(1.0) - np.float32(s) * (np.float32(1.0) - t * t * (3 - 2 * t))).astype(np.float32)
+
+
+def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_rows=768,
+                  soft=None):
     """rgb: finished display image, float32 in 0..1, (H, W, 3). R: solar radius
     on THIS grid (already divided by the preview decimation).
 
@@ -1576,7 +1594,17 @@ def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_row
             o = o + dark * (_soft_light(o, np.clip(mn, 0, 1)) - o)
         if light > 0:
             o = o + light * (_soft_light(o, np.clip(mx, 0, 1)) - o)
-        out[y0:y1] = np.clip(o[y0 - a0:y1 - a0], 0, 1)
+        o = o[y0 - a0:y1 - a0]
+        if soft is not None:
+            # inner softening: the sharpened rows blended back towards the input
+            _scy, _scx, _ss, _srr = soft
+            _yy = (np.arange(y0, y1, dtype=np.float32) - np.float32(_scy))[:, None]
+            _xx = (np.arange(W, dtype=np.float32) - np.float32(_scx))[None, :]
+            _w = limb_soft_weight(np.sqrt(_yy * _yy + _xx * _xx) / np.float32(R), _ss, _srr)
+            _b = blk[y0 - a0:y1 - a0]
+            o = _b + _w[:, :, None] * (o - _b)
+            del _yy, _xx, _w, _b
+        out[y0:y1] = np.clip(o, 0, 1)
         del med, mn, mx, o
     return out
 
@@ -1598,7 +1626,7 @@ STRUCT_K = 1.5
 STRUCT_LIMB = (1.01, 1.04)
 
 
-def structure_boost(rgb, cy, cx, R, s, pin=None):
+def structure_boost(rgb, cy, cx, R, s, pin=None, soft=None):
     if s <= 1e-6:
         return rgb
     H, W = rgb.shape[:2]
@@ -1650,6 +1678,8 @@ def structure_boost(rgb, cy, cx, R, s, pin=None):
     del rb, sel
     w = np.clip(4.0 * Y * (1.0 - Y), 0.0, 1.0) * np.clip(
         (rp / R - STRUCT_LIMB[0]) / (STRUCT_LIMB[1] - STRUCT_LIMB[0]), 0.0, 1.0)
+    if soft is not None:                       # inner softening (limb_soft_weight)
+        w = w * limb_soft_weight(rp / np.float32(R), soft[0], soft[1])
     g = np.exp(np.float32(s * STRUCT_K) * band * w).astype(np.float32)
     return np.clip(rgb * g[:, :, None], 0, 1).astype(np.float32)
 
@@ -1713,6 +1743,10 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         return x * x * (3 - 2 * x)
     wf = _ss((r - 1.02 * R) / (0.55 * R))
     wI = edge * _ss((1.45 * R - r) / (0.40 * R))
+    # INNER SOFTENING -- limb_soft_weight; None when off, so nothing below changes
+    _lsS = float(np.clip(float(P.get("limbSoft", 0.0) or 0.0), 0.0, 1.0))
+    _lsR = float(P.get("limbSoftR", 1.4) or 1.4)
+    _lsW = limb_soft_weight(r / np.float32(R), _lsS, _lsR) if _lsS > 1e-6 else None
     # Glare dim gets its OWN profile. It used to share wI, whose smoothstep
     # window closes at 1.45 R -- and at full strength that is a 3.3x brightness
     # ramp ending at a definite radius, which prints as a ring. Instrumental
@@ -1999,6 +2033,8 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         # 0: 0.5 + 0.75 k E. So the view shows the layer, and the slider is
         # its opacity.
         _d = np.clip(np.float32(_hmix * _HILL_HEADROOM) * _E, -0.5, 0.5)
+        if _lsW is not None:
+            _d *= _lsW
         # THE 0.24 PROMINENCE LAYER: under the layer the corona's partial-conv detail is
         # eased out, so the trace the colour removal leaves at a prominence's
         # foot does not show through the layer's soft edge
@@ -2160,6 +2196,10 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         _t = np.clip((_dm - np.float32(_ds)) / np.float32(max(_ds, 4.0)), 0, 1)
         _dfade = (_t * _t * (3 - 2 * _t)).astype(np.float32)
         del _dm, _t
+        if _lsW is not None:
+            _dfade *= _lsW
+    _lsOn = _lsW is not None
+    _lsW = None                                   # the map is not needed below
     # THE INNER DETAIL LAYER, on the finished picture's brightness (colour kept)
     _gd = float(P.get("innerDetail", 0.0) or 0.0)
     if _gd > 0 and view == "composite" and "indet" in src:
@@ -2187,12 +2227,14 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     # STRUCTURE, then FINAL SHARPENING, on the finished picture, before the ring overlay.
     if view in ("composite", "moon") and float(P.get("structure", 0.0)) > 1e-6:
         rgb = structure_boost(np.ascontiguousarray(rgb, np.float32), cy, cx, R,
-                              float(P["structure"]), pin=pin)
+                              float(P["structure"]), pin=pin,
+                              soft=(_lsS, _lsR) if _lsOn else None)
     if max(float(P.get("finalMid", 0)), float(P.get("finalDark", 0)),
            float(P.get("finalLight", 0))) > 1e-6:
         rgb = final_sharpen(np.ascontiguousarray(rgb, np.float32), R,
                             float(P["finalMid"]), float(P["finalDark"]),
-                            float(P["finalLight"]), float(P.get("finalNoise", 0)))
+                            float(P["finalLight"]), float(P.get("finalNoise", 0)),
+                            soft=(cy, cx, _lsS, _lsR) if _lsOn else None)
     # THE 0.24 PROMINENCE LAYER, over the finished picture (after the final
     # sharpening, so its soft edge is not sharpened into a line)
     if view == "composite" and getattr(layers, "has_promlayer", False):
@@ -2249,7 +2291,7 @@ def crop_layers(L, y0, y1, x0, x1):
     [y0:y1, x0:x1] -- so render(crop, P, preview=False) renders that window
     of the export at full resolution in a fraction of the time. Picture-wide
     numbers are NOT the crop's: pass the `pin` of a full-frame render.
-    (The 1:1 crop, lab 0.25.1; the same shim the cloud comparisons used.)"""
+    (The 1:1 crop, 0.25.1; the same shim the cloud comparisons used.)"""
     import copy
     C = copy.copy(L)
     Hf, Wf = L.full["bg"].shape
@@ -2387,6 +2429,134 @@ def thumbnail(arr, path, width=480):
     Image.fromarray((np.clip(a, 0, 1) * 255 + 0.5).astype(np.uint8)).save(
         path, quality=86, optimize=True)
     return path
+
+
+# THE MERGE ITSELF, as a 32-bit float TIFF (2026-10-29): the linear HDR
+# before any look -- no stretch, no detail layers, no colour controls -- for
+# finishing in other software. The pixels are hdr_rgb.npy as the stack wrote it
+# (white balanced, sRGB primaries, linear), scaled so the corona's 99.99th
+# percentile of luminance outside the Moon sits at 1.0; brighter features
+# (prominence cores) stay above 1, nothing is clipped. Orientation and the
+# 50 % size apply as for every export. A linear ICC profile is embedded.
+def export_hdr32(wd, out_path, orient="", size="full", geometry=None):
+    import tifffile
+    from . import icc
+    from .pipeline import load_big
+    hdr = load_big(os.path.join(wd, "hdr_rgb.npy"))
+    a = np.asarray(hdr, np.float32)
+    if size == "half":
+        h2, w2 = a.shape[0] // 2, a.shape[1] // 2
+        a = a[:h2 * 2, :w2 * 2].reshape(h2, 2, w2, 2, 3).mean(axis=(1, 3)).astype(np.float32)
+    a = np.nan_to_num(np.maximum(a, 0.0), nan=0.0, posinf=0.0)
+    Y = 0.2126 * a[:, :, 0] + 0.7152 * a[:, :, 1] + 0.0722 * a[:, :, 2]
+    sel = Y > 0
+    if geometry is not None:
+        q = 0.5 if size == "half" else 1.0
+        cy, cx, R = (float(geometry["cy"]) * q, float(geometry["cx"]) * q,
+                     float(geometry["R"]) * q)
+        yy = np.arange(a.shape[0], dtype=np.float32)[:, None] - np.float32(cy)
+        xx = np.arange(a.shape[1], dtype=np.float32)[None, :] - np.float32(cx)
+        sel &= (yy * yy + xx * xx) > np.float32((1.02 * R) ** 2)
+        del yy, xx
+    ref = float(np.percentile(Y[sel][::7], 99.99)) if sel.any() else 1.0
+    del Y, sel
+    a /= np.float32(max(ref, 1e-12))
+    a = apply_orient(a, orient)
+    prof = icc.linear_profile()
+    tifffile.imwrite(out_path, np.ascontiguousarray(a, np.float32), photometric="rgb",
+                     extratags=[(34675, 1, len(prof), prof, False)],
+                     description=("EclipseForgeHDR merged HDR; scene-linear, sRGB primaries, "
+                                  "camera white balance; no look applied; 1.0 = the corona's "
+                                  "99.99th luminance percentile outside the Moon"))
+    return ref
+
+
+def plain_stack(wd, size="full", geometry=None, step=1):
+    """THE PLAIN HDR STACK (2026-11-08): the merge itself made viewable with one
+    neutral stretch -- no detail layers, no look, no sharpening -- as a
+    starting point for finishing elsewhere, and as a control picture of what
+    the stack holds. Whatever the look on tab 3 is, this is the same.
+
+    The stretch is a logarithm on LUMINANCE, the colour carried by the ratio
+    (so it is not shifted channel by channel): 1.0 is the corona's 99.99th
+    percentile outside the Moon, as in the 32-bit export, the top of the scale
+    the 99.999th of the whole frame (prominence cores included), and the log's
+    knee is set so the sky -- the 2nd percentile outside the Moon -- lands at
+    6 % of the output. Returns display-encoded RGB in 0..1 (float32).
+    `step` decimates for a thumbnail."""
+    from .pipeline import load_big
+    hdr = load_big(os.path.join(wd, "hdr_rgb.npy"))
+    a = np.asarray(hdr[::step, ::step] if step > 1 else hdr, np.float32)
+    if size == "half" and step == 1:
+        h2, w2 = a.shape[0] // 2, a.shape[1] // 2
+        a = a[:h2 * 2, :w2 * 2].reshape(h2, 2, w2, 2, 3).mean(axis=(1, 3)).astype(np.float32)
+    a = np.nan_to_num(np.maximum(a, 0.0), nan=0.0, posinf=0.0)
+    Y = 0.2126 * a[:, :, 0] + 0.7152 * a[:, :, 1] + 0.0722 * a[:, :, 2]
+    sel = Y > 0
+    if geometry is not None:
+        q = (0.5 if (size == "half" and step == 1) else 1.0) / float(step)
+        cy, cx, R = (float(geometry["cy"]) * q, float(geometry["cx"]) * q, float(geometry["R"]) * q)
+        yy = np.arange(a.shape[0], dtype=np.float32)[:, None] - np.float32(cy)
+        xx = np.arange(a.shape[1], dtype=np.float32)[None, :] - np.float32(cx)
+        sel &= (yy * yy + xx * xx) > np.float32((1.02 * R) ** 2)
+        del yy, xx
+    if not sel.any():
+        sel = Y > 0
+    sub = Y[sel][::3] if sel.sum() > 300000 else Y[sel]
+    ref = float(np.percentile(sub, 99.99)) if sub.size else 1.0
+    ref = max(ref, 1e-12)
+    top = max(1.0, float(np.percentile(sub, 99.999)) / ref) if sub.size else 1.0
+    sky = float(np.percentile(sub, 2.0)) / ref if sub.size else 1e-4
+    sky = min(max(sky, 1e-7), 0.5)
+    lo, hi = 0.0, 16.0                       # log10 k: knee placed by bisection
+    for _ in range(40):
+        m = 0.5 * (lo + hi)
+        k = 10.0 ** m
+        if np.log1p(k * sky) / np.log1p(k * top) > 0.06:
+            hi = m
+        else:
+            lo = m
+    k = 10.0 ** (0.5 * (lo + hi))
+    Yn = Y / np.float32(ref)
+    f = (np.log1p(np.float32(k) * Yn) / np.float32(np.log1p(k * top))).astype(np.float32)
+    g = np.where(Yn > 1e-12, f / np.maximum(Yn, 1e-12), 0.0).astype(np.float32)
+    out = a / np.float32(ref) * g[:, :, None]
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
+def write_picture(arr, fmt, out_path, gray=False, description=""):
+    """One display-encoded picture (0..1) to tif16 | tif8 | png | jpg, tagged
+    sRGB when it is colour."""
+    from . import icc
+    _prof = icc.srgb_profile()
+    if gray and arr.ndim == 3:
+        arr = np.ascontiguousarray(0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2])
+    _tags = [] if gray else [(34675, 1, len(_prof), _prof, False)]
+    if fmt == "tif16":
+        import tifffile
+        tifffile.imwrite(out_path, (arr * 65535 + 0.5).astype(np.uint16), compression="zlib",
+                         extratags=_tags, photometric="minisblack" if gray else "rgb",
+                         description=description)
+    elif fmt == "tif8":
+        import tifffile
+        tifffile.imwrite(out_path, (arr * 255 + 0.5).astype(np.uint8), compression="zlib",
+                         extratags=_tags, photometric="minisblack" if gray else "rgb")
+    elif fmt == "png":
+        a16 = (arr * 65535 + 0.5).astype(np.uint16)
+        try:
+            import cv2
+            cv2.imwrite(out_path, a16 if gray else a16[:, :, ::-1])
+            if not gray:
+                _png_add_iccp(out_path, _prof)
+        except Exception:
+            Image.fromarray((arr * 255 + 0.5).astype(np.uint8)).save(
+                out_path, icc_profile=(None if gray else _prof))
+    elif fmt == "jpg":
+        Image.fromarray((arr * 255 + 0.5).astype(np.uint8)).save(
+            out_path, quality=92, optimize=True, icc_profile=(None if gray else _prof))
+    else:
+        raise ValueError(fmt)
+    return out_path
 
 
 def export(layers: Layers, params, fmt, out_path, view="composite", size="full",

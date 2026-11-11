@@ -104,12 +104,29 @@ def _find_dir(folder, names):
     return None
 
 
+def _chosen(folder, role):
+    """The folder chosen by hand in tab 1 (frameselect.dir_override):
+    (True, path or None) when one is set, (False, None) for automatic."""
+    try:
+        from .frameselect import dir_override
+        st, p = dir_override(folder, role)
+        if st == "off":
+            return True, None
+        if st == "path":
+            return True, p
+    except Exception:
+        pass
+    return False, None
+
+
 def find_bias_dir(folder):
-    return _find_dir(folder, _BIAS_DIR_NAMES)
+    hit, p = _chosen(folder, "bias")
+    return p if hit else _find_dir(folder, _BIAS_DIR_NAMES)
 
 
 def find_dark_dir(folder):
-    return _find_dir(folder, _DARK_DIR_NAMES)
+    hit, p = _chosen(folder, "darks")
+    return p if hit else _find_dir(folder, _DARK_DIR_NAMES)
 
 
 def fingerprint(d):
@@ -302,6 +319,116 @@ def _stack(paths, shape, log, label, want_iso=None):
     return master.astype(np.float32), meanA, meanB, info
 
 
+#: A DARK SCALED UP to a longer tier than it was shot at scales its own noise
+#: with it. Beyond WARN times its exposure the run says so; beyond MAX the tier
+#: gets the bias only. Scaling DOWN to shorter tiers is always safe: the dark
+#: current and the master's noise both shrink with the factor.
+DARK_EXTRAP_WARN = 4.0
+DARK_EXTRAP_MAX = 10.0
+
+#: exposures within this fraction of each other are one group of darks
+DARK_GROUP_TOL = 0.02
+
+
+def _fit_exposures(paths, bias, shape, log, want_iso=None):
+    """DARKS AT SEVERAL EXPOSURES (2026-10-28).
+
+    A dark folder may hold sets at different shutter speeds. Averaging them
+    into one master and dividing by the median exposure (what a single set
+    gets) mixes rates: the mean of a 0.5 s and a 2 s dark is not the dark of
+    either. Instead each exposure group is stacked on its own and the dark
+    current is fitted per photosite as a straight line through them,
+
+        D_k = offset + rate * t_k     (weights: frames per group)
+
+    with the offset held at the master bias when there is one, and fitted too
+    when there is not -- with two or more exposures the darks measure their own
+    offset, so no median stand-in is needed.
+
+    Returns (sig, t_eff, info) with sig = rate * t_eff, so the caller's
+    per-second arithmetic, gate and verdict run unchanged; t_eff is the
+    weighted exposure the fit is anchored at and `noise` the fitted rate's
+    noise times t_eff. None when there are not at least two exposure groups of
+    two or more usable frames -- then the single-set path runs as before."""
+    from .raw import read_exif
+    secs = []
+    for p in paths:
+        try:
+            secs.append((p, float(read_exif(p)[0] or 0.0)))
+        except Exception:
+            secs.append((p, 0.0))
+    groups = []
+    for p, sec in sorted(secs, key=lambda x: x[1]):
+        if sec <= 0:
+            continue
+        if groups and abs(sec - groups[-1][0]) <= DARK_GROUP_TOL * groups[-1][0]:
+            groups[-1][1].append(p)
+        else:
+            groups.append([sec, [p]])
+    groups = [g for g in groups if len(g[1]) >= 2]
+    if len(groups) < 2:
+        return None
+    log(f"dark: {len(groups)} exposure groups ("
+        + ", ".join(f"{len(g[1])} x {g[0]:g} s" for g in groups)
+        + "); dark current fitted per photosite", None)
+    S = {}
+    tk, nk, sk, skc, used = [], [], [], [], []
+    rej = []
+    iso = None
+    for sec, gp in groups:
+        D, A, B, gi = _stack(gp, shape, log, f"dark {sec:g}s", want_iso)
+        del A, B
+        rej += gi.get("rejected", [])
+        if D is None or "noise" not in gi:
+            log(f"[warn] dark: the {sec:g} s group is not used ({gi.get('error', 'no noise estimate')})", None)
+            continue
+        n = float(gi["n_used"])
+        if bias is not None:
+            D -= bias
+        # running weighted sums: w = n, the frames in the group
+        for key, val in (("SD", D * np.float32(n)), ("StD", D * np.float32(n * sec))):
+            S[key] = val if key not in S else S[key] + val
+        del D
+        tk.append(sec); nk.append(n); sk.append(float(gi["noise"]))
+        skc.append(gi.get("noise_cfa") or [gi["noise"]] * 4)
+        used += [sec] * int(n)
+        iso = gi.get("iso", iso)
+    if len(tk) < 2:
+        S.clear()
+        return None
+    t = np.array(tk); w = np.array(nk)
+    if bias is not None:
+        # through the offset: rate = sum(w t D) / sum(w t^2)
+        den = float(np.sum(w * t * t))
+        rate = S["StD"] / np.float32(den)
+        a = w * t / den                                  # rate = sum(a_k D_k)
+        src = "master bias"
+    else:
+        Sw, St, Stt = float(w.sum()), float(np.sum(w * t)), float(np.sum(w * t * t))
+        det = Sw * Stt - St * St
+        rate = (np.float32(Sw) * S["StD"] - np.float32(St) * S["SD"]) / np.float32(det)
+        a = (Sw * w * t - St * w) / det
+        src = "a line fitted through the darks' exposures (no bias frames)"
+    S.clear()
+    # the fitted rate's noise from each group master's own: var = sum(a_k^2 s_k^2)
+    sd_rate = float(np.sqrt(np.sum((a * np.array(sk)) ** 2)))
+    sd_rate_cfa = [float(np.sqrt(np.sum((a * np.array([c[i] for c in skc])) ** 2)))
+                   for i in range(4)]
+    t_eff = float(np.sum(w * t * t) / np.sum(w * t))
+    info = {"n_found": len(paths), "n_used": int(sum(nk)),
+            "rejected": rej,
+            "combine": "per-photosite fit over " + ", ".join(f"{int(n)} x {s_:g} s"
+                                                            for s_, n in zip(tk, nk)),
+            "exposures": [float(x) for x in tk], "frames_per_exposure": [int(x) for x in nk],
+            "seconds": t_eff, "seconds_max": float(max(tk)),
+            "seconds_spread": [float(min(tk)), float(max(tk))],
+            "noise": sd_rate * t_eff, "noise_cfa": [v * t_eff for v in sd_rate_cfa],
+            "bias_source": src, "fitted": True}
+    if iso:
+        info["iso"] = int(iso)
+    return (rate * np.float32(t_eff)).astype(np.float32), t_eff, info
+
+
 def build(folder, bias_dir, dark_dir, shape=None, progress=None,
           light_iso=None, max_light_seconds=None):
     """Master bias and per-second dark rate for a light folder.
@@ -326,10 +453,17 @@ def build(folder, bias_dir, dark_dir, shape=None, progress=None,
         del bA, bB
 
     if dark_dir and os.path.isdir(dark_dir):
-        d, dA, dB, di = _stack(list_raws(dark_dir), shape, log, "dark",
-                               light_iso)
+        _fit = _fit_exposures(list_raws(dark_dir), bias, shape, log, light_iso)
+        if _fit is not None:
+            # darks at several exposures: the rate fitted per photosite, and
+            # `sig` already measured from the offset (see _fit_exposures)
+            sig, t, di = _fit
+            d = sig; dA = dB = None
+        else:
+            d, dA, dB, di = _stack(list_raws(dark_dir), shape, log, "dark",
+                                   light_iso)
+            t = di.get("seconds"); sig = None
         info["dark"] = di
-        t = di.get("seconds")
         if d is None:
             pass
         elif not t or t <= 0:
@@ -341,7 +475,9 @@ def build(folder, bias_dir, dark_dir, shape=None, progress=None,
             # which is wrong for every tier except the dark's own -- so say so
             # and use the dark's median as a stand-in offset rather than
             # silently smearing it across the bracket.
-            if bias is not None:
+            if sig is not None:
+                pass                      # fitted over several exposures
+            elif bias is not None:
                 sig = d - bias
                 di["bias_source"] = "master bias"
             else:
@@ -555,10 +691,15 @@ def describe(info):
         if di.get("error"):
             out.append(f"[warn] dark: {di['error']}")
         elif di.get("rate_median") is not None:
-            out.append(f"[ok] master dark: {di.get('combine', '')} from "
-                       f"{os.path.basename(info.get('dark_dir') or '')}/ at "
-                       f"{di.get('seconds', 0):g}s"
-                       + (f", ISO {di['iso']}" if di.get("iso") else ""))
+            if di.get("fitted"):
+                out.append(f"[ok] master dark: {di.get('combine', '')} from "
+                           f"{os.path.basename(info.get('dark_dir') or '')}/"
+                           + (f", ISO {di['iso']}" if di.get("iso") else ""))
+            else:
+                out.append(f"[ok] master dark: {di.get('combine', '')} from "
+                           f"{os.path.basename(info.get('dark_dir') or '')}/ at "
+                           f"{di.get('seconds', 0):g}s"
+                           + (f", ISO {di['iso']}" if di.get("iso") else ""))
             out.append(f"dark: offset taken from {di.get('bias_source', '?')}")
             out.append(f"dark: median dark current "
                        f"{di.get('rate_median', 0.0):.4f} ADU/s")
@@ -611,7 +752,9 @@ def load_or_build(folder, bias_dir, dark_dir, shape, progress=None,
            # reusing it would leave the defect map empty and the read noise
            # unmeasured on exactly the folders that already have calibration
            # frames -- so it is a different key, not a migration.
-           "tmax": round(float(max_light_seconds or 0.0), 6), "fmt": 2}
+           # fmt 3 (2026-10-28): darks at several exposures are fitted per
+           # photosite instead of averaged into one master
+           "tmax": round(float(max_light_seconds or 0.0), 6), "fmt": 3}
     npy = os.path.join(workdir, "masterdark.npz") if workdir else None
     js = os.path.join(workdir, "masterdark.json") if workdir else None
     if npy and os.path.exists(npy) and js and os.path.exists(js):

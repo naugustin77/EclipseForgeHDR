@@ -205,6 +205,7 @@ def _load(path, demosaic_method="mhc", calib=None, seconds=None):
     satm = (_b >= sat_raw).any(axis=(1, 3))
     del _b
     if calib:
+        from .dark import DARK_EXTRAP_MAX as _DARK_EXTRAP_MAX
         bias, rate, flat = calib.get("bias"), calib.get("rate"), calib.get("flat")
         if bias is not None and bias.shape == bay.shape:
             bay = bay - bias
@@ -217,7 +218,8 @@ def _load(path, demosaic_method="mhc", calib=None, seconds=None):
             # a FITS that reports none gets this one, measured once on the
             # shortest tier's own corners -- see _calibration.
             bay = bay - np.float32(calib["black"])
-        if rate is not None and rate.shape == bay.shape and seconds:
+        if rate is not None and rate.shape == bay.shape and seconds and (
+                not calib.get("dark_ref") or seconds / calib["dark_ref"] <= _DARK_EXTRAP_MAX):
             bay = bay - rate * np.float32(seconds)
         if flat is not None and flat.shape == bay.shape:
             bay = bay / flat
@@ -284,6 +286,17 @@ def _calibration(folder, files, flat_dir, secs, progress, short_file=None):
             if rate is not None and tuple(rate.shape) == shape:
                 out["rate"] = np.asarray(rate, np.float32)
                 info["dark_applied"] = True
+                # the same limit as the full pipeline: no dark scaled up more
+                # than DARK_EXTRAP_MAX times its own exposure (see dark.py)
+                _di = ci.get("dark") or {}
+                _dref = float(_di.get("seconds_max") or _di.get("seconds") or 0.0)
+                if _dref > 0:
+                    out["dark_ref"] = _dref
+                    _far = sorted(set(t for t in (secs or []) if t / _dref > _dark.DARK_EXTRAP_MAX))
+                    if _far:
+                        progress.log("[warn] calibration: " + ", ".join(f"{t:g} s" for t in _far)
+                                     + f" get no dark -- it would be scaled up more than "
+                                     f"{_dark.DARK_EXTRAP_MAX:g}x from {_dref:g} s", None)
             info["calib"] = ci
         except Exception as e:
             progress.log(f"[warn] bias/dark correction skipped ({e})", None)

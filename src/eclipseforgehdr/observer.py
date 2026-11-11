@@ -1,4 +1,4 @@
-"""THE OBSERVING SITE AND TIME (lab 0.25.1), optional.
+"""THE OBSERVING SITE AND TIME (0.25.1), optional.
 
 Where and when the bracket was shot: latitude, longitude, height, and the date
 and local clock time of totality with its offset from UTC. Every eclipse

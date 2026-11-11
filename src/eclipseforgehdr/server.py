@@ -64,6 +64,18 @@ def index():
     return r
 
 
+# THE APP ICON (2026-11-08): the app's icon, also as the page's tab icon
+# and beside the name in the tab bar. Same origin, so the page's cross-origin
+# isolation (see index) does not block it.
+@app.get("/app_icon.png")
+@app.get("/favicon.ico")
+def app_icon():
+    fn = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_icon.png")
+    if not os.path.isfile(fn):
+        return "", 404
+    return send_file(fn, mimetype="image/png", max_age=86400)
+
+
 @app.get("/api/version")
 def version():
     from . import __version__
@@ -200,6 +212,30 @@ def set_folder():
         sd = find_short_dir(folder)
     except Exception:
         sd = None
+    # the user's own frame switches (Frames panel), said here so a folder that
+    # stacks fewer frames than it holds does not look like a fault
+    try:
+        from .frameselect import load as _sel_load
+        _sl = _sel_load(folder)
+        _sel_n = {"off": len(_sl["off"]), "force": len(_sl["force"])}
+    except Exception:
+        _sel_n = {"off": 0, "force": 0}
+    # the contact-frame folder, and the folders chosen by hand in tab 1
+    try:
+        from .contacts import find_contact_dir as _fcd
+        _cd = _fcd(folder)
+    except Exception:
+        _cd = None
+    try:
+        from .frameprod import find_phases_dir as _fpd
+        _pd = _fpd(folder)
+    except Exception:
+        _pd = None
+    try:
+        from .frameselect import load as _sel_load2
+        _dirs_set = dict(_sel_load2(folder).get("dirs") or {})
+    except Exception:
+        _dirs_set = {}
     # A finished HDR the user might want to import rather than stack: a lone
     # 16-bit TIFF sitting in the folder is almost always exactly that.
     cand = []
@@ -219,6 +255,10 @@ def set_folder():
                     "dark_count": len(list_raws(dd)) if dd else 0,
                     "short_dir": sd,
                     "short_count": len(list_raws(sd)) if sd else 0,
+                    "frames_off": _sel_n["off"], "frames_forced": _sel_n["force"],
+                    "contact_dir": _cd, "contact_count": len(list_raws(_cd)) if _cd else 0,
+                    "phases_dir": _pd, "phases_count": len(list_raws(_pd)) if _pd else 0,
+                    "dirs_set": _dirs_set,
                     "tiffs": cand[:24]})
 
 
@@ -233,6 +273,340 @@ def timeline_api():
         return jsonify(build(f, workdir(f)))
     except Exception as e:
         return jsonify({"ok": False, "error": f"timeline: {e}"})
+
+
+# ---- FRAMES PANEL (2026-11-08) ---------------------------------
+# Every frame the app finds, by role, with the camera's preview, and the
+# user's switch for each: auto (the app decides), off (never used) or force
+# (bracket frames only: used even where an automatic check would leave it
+# out). The choice lives in eclipseforge_frames.json in the image folder
+# (frameselect.py); nothing is moved or deleted.
+
+def _frame_index(folder, args):
+    from . import frameselect as _fs
+    idx = {}
+    for role, title, forceable, d, ps in _fs.groups(folder, args.get("flat") or None,
+                                                    args.get("bias") or None,
+                                                    args.get("dark") or None):
+        for p in ps:
+            idx[_fs.key(p, folder)] = (p, role, forceable)
+    return idx
+
+
+@app.get("/api/frames")
+def frames_api():
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"})
+    try:
+        from . import frameselect as _fs
+        from .timeline import _exif_table, build as _tl_build
+        wd = workdir(f)
+        sel = _fs.load(f)
+        tl = {}
+        try:
+            for fr in (_tl_build(f, wd).get("frames") or []):
+                tl[fr.get("key")] = fr
+        except Exception:
+            pass
+        # sharpness of the last run, as a fraction of the tier's sharpest frame
+        sharp = {}
+        try:
+            for tier in json.load(open(os.path.join(wd, "quality.json"))).values():
+                sc = tier.get("scores") or {}
+                mx = max(sc.values()) if sc else 0
+                for n, v in sc.items():
+                    if mx > 0:
+                        sharp[n] = round(float(v) / mx, 3)
+        except Exception:
+            pass
+        # the short exposures the prominence layer took (promlayer.SHORT_META)
+        prom = {}
+        try:
+            from .promlayer import SHORT_META as _SM
+            for it in json.load(open(os.path.join(wd, _SM))).get("items") or []:
+                n = it.get("name")
+                if n and not str(n).startswith("tier "):
+                    why = ("" if it.get("used") else
+                           ("no match, corr %.2f" % it["corr"]) if it.get("corr") is not None else
+                           ("error: " + str(it["error"])) if it.get("error") else "Moon not found")
+                    prom[n] = (bool(it.get("used")), why)
+        except Exception:
+            pass
+        groups = []
+        for role, title, forceable, d, ps in _fs.groups(f, request.args.get("flat") or None,
+                                                        request.args.get("bias") or None,
+                                                        request.args.get("dark") or None):
+            try:
+                tab = _exif_table(d, ps, wd)
+            except Exception:
+                tab = {}
+            frs = []
+            # THE CONTACT FRAMES THAT SET THE CLOCK (contacts.shoot_contacts):
+            # the last one before the bracket (C2) and the first one after (C3),
+            # and only when the site is entered
+            clock = {}
+            if role == "contact":
+                try:
+                    from .timeline import epoch_of as _ep
+                    from . import observer as _ob
+                    site = _ob.load(f)
+                    if site and site.get("date") and site.get("lat") is not None:
+                        from .raw import list_raws as _lr
+                        _lp = _lr(f)
+                        _lt = _exif_table(f, _lp, wd)
+                        le = [e for e in (_ep(_lt.get(os.path.basename(q), (None, None))[1]) for q in _lp)
+                              if e is not None]
+                        ce = {p_: _ep(tab.get(os.path.basename(p_), (None, None))[1]) for p_ in ps
+                              if _fs.key(p_, f) not in sel["off"]}
+                        ce = {p_: e for p_, e in ce.items() if e is not None}
+                        if le:
+                            bef = [p_ for p_, e in ce.items() if e < min(le)]
+                            aft = [p_ for p_, e in ce.items() if e > max(le)]
+                            if bef:
+                                clock[max(bef, key=ce.get)] = "clock: C2"
+                            if aft:
+                                clock[min(aft, key=ce.get)] = "clock: C3"
+                except Exception:
+                    clock = {}
+            for p in ps:
+                k, n = _fs.key(p, f), os.path.basename(p)
+                sec, ts = tab.get(n, (None, None))
+                t = tl.get(k) if role in ("lights", "short") else None
+                if role == "short" and n in prom and k not in sel["off"]:
+                    status, note = ("prom", "") if prom[n][0] else ("promunused", prom[n][1])
+                elif role == "contact" and p in clock:
+                    status, note = "clock", clock[p]
+                else:
+                    status, note = ((t or {}).get("status") if role == "lights" else None), ""
+                frs.append({"key": k, "name": n, "sec": sec, "ts": ts,
+                            "state": ("off" if k in sel["off"] else
+                                      "force" if (forceable and k in sel["force"]) else "auto"),
+                            "status": status, "note": note,
+                            "gain": (t or {}).get("gain") if role == "lights" else None,
+                            "sharp": sharp.get(n) if role == "lights" else None})
+            groups.append({"role": role, "title": title, "forceable": forceable,
+                           "dir": _fs.key(d, f), "frames": frs})
+        return jsonify({"ok": True, "groups": groups, "file": _fs.SEL_FILE,
+                        "n_off": len(sel["off"]), "n_force": len(sel["force"])})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"frames: {e}"})
+
+
+@app.get("/api/framepreview")
+def frame_preview():
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"}), 400
+    k = request.args.get("k", "")
+    kind = request.args.get("s", "thumb")
+    if kind not in ("thumb", "big", "crop"):
+        kind = "thumb"
+    try:
+        from . import frameselect as _fs
+        hit = _frame_index(f, request.args).get(k)
+        if not hit:
+            return jsonify({"ok": False, "error": "not a frame of this folder"}), 404
+        out = _fs.preview(hit[0], kind, os.path.join(workdir(f), "framepreviews"),
+                          mode=request.args.get("m", "strong"))
+        return send_file(out, mimetype="image/jpeg", max_age=3600)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/frames")
+def frames_set():
+    """{"set": {key: "auto" | "off" | "force"}} -> saved; the next Start
+    re-stacks when the selection changed what it would stack."""
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"}), 400
+    _b = _busy()
+    if _b:
+        return jsonify({"ok": False, "error": f"{_b} is still running — change the frames when it has finished"}), 400
+    try:
+        from . import frameselect as _fs
+        data = request.json or {}
+        idx = _frame_index(f, data)
+        sel = _fs.load(f)
+        off, force = set(sel["off"]), set(sel["force"])
+        for k, v in (data.get("set") or {}).items():
+            if k not in idx:
+                continue
+            off.discard(k)
+            force.discard(k)
+            if v == "off":
+                off.add(k)
+            elif v == "force" and idx[k][2]:
+                force.add(k)
+        _fs.save(f, off, force)
+        return jsonify({"ok": True, "n_off": len(off), "n_force": len(force - off)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/checklist")
+def checklist():
+    """TAB 1: what the folder holds and what is missing, as a short list of
+    findings, each with a level (ok | warn | missing | info), one line of text
+    and where to act. Only reads what the other views already read: the time
+    stamps of the frames (cached), the folders found, the site."""
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"})
+    items = []
+
+    def add(level, title, text, act=None):
+        items.append({"level": level, "title": title, "text": text, "act": act})
+    try:
+        from .raw import list_raws, read_exif
+        from .timeline import build as _tl_build, _exif_table
+        from .dark import find_dark_dir, find_bias_dir, DARK_EXTRAP_WARN, DARK_EXTRAP_MAX, DARK_GROUP_TOL
+        from .flat import find_flat_dir
+        from .contacts import find_contact_dir
+        from .pipeline import find_short_dir
+        from . import frameselect as _fs, observer as _ob
+        wd = workdir(f)
+        lights = list_raws(f)
+        tl = {}
+        try:
+            tl = _tl_build(f, wd)
+        except Exception:
+            pass
+        exps = sorted({float(x) for x in (tl.get("exposures") or [])})
+        ex_txt = lambda t: (f"{t:g} s" if t >= 1 else f"1/{round(1 / t):g} s")
+        # 1. the bracket
+        if len(lights) < 3:
+            add("missing", "Corona frames", f"{len(lights)} frame(s) found; at least 3 are needed", {"field": "folder"})
+        else:
+            br = (f"{tl.get('n_brackets')} repeated brackets" if tl.get("repeated") else "one bracket")
+            add("ok", "Corona frames", f"{len(lights)} frames, {len(exps)} exposure(s)"
+                + (f" ({ex_txt(exps[0])} to {ex_txt(exps[-1])})" if len(exps) > 1 else
+                   (f" ({ex_txt(exps[0])})" if exps else "")) + f", {br}")
+        if lights and not tl.get("timed", True):
+            add("warn", "Time stamps", "some frames carry no time stamp: no timeline, no clock check, "
+                "no Moon-motion correction from the shooting times")
+        if tl.get("unread"):
+            add("warn", "Exposure times", f"{tl['unread']} frame(s) without an exposure time are left out")
+        # 2. darks: which exposures they reach (the run's rule: a dark scaled up
+        # more than DARK_EXTRAP_MAX times is not used, above WARN it is noisy)
+        dd, bd = find_dark_dir(f), find_bias_dir(f)
+        light_iso = None
+        try:
+            light_iso = int(read_exif(lights[len(lights) // 2])[1] or 0) or None
+        except Exception:
+            pass
+        if dd:
+            dps = list_raws(dd)
+            dt = _exif_table(dd, dps, wd)
+            dsec = sorted(float(v[0]) for v in dt.values() if v and v[0])
+            groups = []
+            for x in dsec:
+                if groups and abs(x - groups[-1]) <= DARK_GROUP_TOL * groups[-1]:
+                    continue
+                groups.append(x)
+            dref = max(dsec) if dsec else 0.0
+            over = [t for t in exps if dref and t / dref > DARK_EXTRAP_MAX]
+            noisy = [t for t in exps if dref and DARK_EXTRAP_WARN < t / dref <= DARK_EXTRAP_MAX]
+            iso_bad = 0
+            if light_iso:
+                for q in dps[:6]:
+                    try:
+                        i = int(read_exif(q)[1] or 0)
+                        if i and i != light_iso:
+                            iso_bad += 1
+                    except Exception:
+                        pass
+            txt = (f"{len(dps)} in {os.path.basename(dd)}/ at "
+                   + ", ".join(ex_txt(g) for g in groups[:6]) + ("…" if len(groups) > 6 else ""))
+            if over:
+                add("warn", "Darks", txt + "; too short for " + ", ".join(ex_txt(t) for t in over)
+                    + f" (more than {DARK_EXTRAP_MAX:g}x): those get "
+                    + ("the bias only" if bd else "no dark correction"), {"field": "dir_darks"})
+            elif noisy:
+                add("warn", "Darks", txt + "; scaled up more than "
+                    f"{DARK_EXTRAP_WARN:g}x for " + ", ".join(ex_txt(t) for t in noisy)
+                    + " (their noise is scaled with them)", {"field": "dir_darks"})
+            else:
+                add("ok", "Darks", txt + "; they reach every exposure", {"field": "dir_darks"})
+            if iso_bad:
+                add("warn", "Darks ISO", f"{iso_bad} of the first {min(6, len(dps))} darks were not shot at "
+                    f"ISO {light_iso} like the light frames; those are left out", {"field": "dir_darks"})
+        else:
+            add("info", "Darks", "none: no dark-current correction (hot pixels are still repaired). "
+                "Choose a folder if they are elsewhere", {"field": "dir_darks"})
+        add("ok" if bd else "info", "Bias",
+            f"{len(list_raws(bd))} in {os.path.basename(bd)}/" if bd else
+            "none: the black level comes from the camera" + (", and the darks carry it" if dd else ""),
+            {"field": "dir_bias"})
+        # 3. flats, from the field if one is typed there
+        fq = (request.args.get("flat") or "").strip()
+        fd = None if fq.lower() in ("off", "none") else (fq if fq and os.path.isdir(fq) else find_flat_dir(f))
+        add("ok" if fd else "warn", "Flats",
+            f"{len(list_raws(fd))} in {os.path.basename(fd)}/" if fd else
+            "none: vignetting and dust are not corrected", {"field": "flatDir"})
+        # 4. short exposures and contact frames
+        sd = find_short_dir(f)
+        add("ok" if sd else "info", "Short exposures",
+            f"{len(list_raws(sd))} in {os.path.basename(sd)}/, for the prominence layer" if sd else
+            "none: the prominences come from the bracket's shortest exposures", {"field": "dir_short"})
+        cd = find_contact_dir(f)
+        site = None
+        try:
+            site = _ob.load(f)
+        except Exception:
+            pass
+        has_site = bool(site and site.get("ut") and site.get("lat") is not None)
+        if cd:
+            add("ok" if has_site else "info", "Contact frames",
+                f"{len(list_raws(cd))} in {os.path.basename(cd)}/"
+                + ("; they set the camera clock" if has_site else
+                   "; enter the observing site (tab 2) so they can set the camera clock"),
+                {"field": "dir_contact"} if has_site else {"tab": 2})
+        else:
+            add("info", "Contact frames", "none: the camera clock is taken as it is", {"field": "dir_contact"})
+        # 5. the site and the user's own frame choices
+        add("ok" if has_site else "info", "Observing site",
+            "entered" if has_site else
+            "not entered: the star match is less exact and the polar map has no solar north", {"tab": 2})
+        sel = _fs.load(f)
+        if sel["off"] or sel["force"]:
+            add("info", "Your frame choices", f"{len(sel['off'])} switched off, {len(sel['force'])} forced in")
+        return jsonify({"ok": True, "items": items})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"checklist: {e}", "items": items})
+
+
+@app.post("/api/framedirs")
+def frame_dirs():
+    """A darks, bias, short-exposure or contact-frame folder chosen by hand:
+    {"role": "darks", "value": "/path" | "" (automatic) | "off"}."""
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "load a folder first"}), 400
+    _b = _busy()
+    if _b:
+        return jsonify({"ok": False, "error": f"{_b} is still running"}), 400
+    from . import frameselect as _fs
+    data = request.json or {}
+    role = str(data.get("role") or "")
+    if role not in _fs.DIR_ROLES:
+        return jsonify({"ok": False, "error": f"unknown role {role!r}"}), 400
+    v = str(data.get("value") or "").strip()
+    if v and v.lower() not in ("auto", "off", "none", "-"):
+        p = os.path.abspath(os.path.expanduser(v))
+        if not os.path.isdir(p):
+            return jsonify({"ok": False, "error": f"not a folder: {v}"}), 400
+        if os.path.abspath(p) == os.path.abspath(f):
+            return jsonify({"ok": False, "error": "that is the image folder itself; choose its subfolder"}), 400
+        try:
+            from .pipeline import holds_lights as _hl
+            if _hl(f, p):
+                return jsonify({"ok": False, "error": "that folder holds the light frames"}), 400
+        except Exception:
+            pass
+    _fs.set_dir(f, role, v)
+    return jsonify({"ok": True})
 
 
 @app.post("/api/clearcache")
@@ -342,7 +716,7 @@ def _star_summary(ly):
 
 
 def _build_stars(wd, prog):
-    """STAR LIST (lab 0.25.1): stars found in the merge, written to
+    """STAR LIST (0.25.1): stars found in the merge, written to
     stars.json; seconds, rebuilt when missing or older than the merge. Never
     stops a run."""
     try:
@@ -415,6 +789,340 @@ def get_eclipses():
     from . import eclipses as _ec
     return jsonify({"ok": True, "eclipses": [{"date": d, "name": e["name"], "cities": _ec.cities(d)}
                                              for d, e in sorted(_ec.ECLIPSES.items())]})
+
+
+# THE RECIPE CHECK (2026-11-08). Tab 2, above Start: the processing
+# options as set in the page against what the folder holds, so a setting that
+# cannot help with this data, or works against it, shows before the run and
+# not in the picture afterwards. Only settled facts of how each option works
+# are checked here (what it needs, what it does with this data); nothing is
+# judged on a threshold that was not measured. Never blocks Start: each
+# finding carries the suggested value and the page offers a button for it.
+@app.post("/api/recipecheck")
+def recipecheck():
+    import math as _m
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"})
+    data = request.json if request.is_json else {}
+    o = {k: str(v) for k, v in (data.get("processing") or {}).items()}
+    rec = data.get("recipe") or None
+    items = []
+
+    def add(level, title, text, fix=None):
+        items.append({"level": level, "title": title, "text": text, "fix": fix})
+
+    def fix(key, value, label):
+        return {"id": _PROCESSING_KEYS[key][1], "value": value, "label": label}
+    try:
+        from .raw import list_raws, read_camera_info, RAW_EXTS
+        from .timeline import build as _tl_build
+        from .dark import find_dark_dir
+        from . import observer as _ob
+        wd = workdir(f)
+        lights = list_raws(f)
+        tl = {}
+        try:
+            tl = _tl_build(f, wd)
+        except Exception:
+            pass
+        fr = [x for x in (tl.get("frames") or []) if x.get("bracket", 0) >= 0 and x.get("status") != "off"]
+        by = {}
+        for x in fr:
+            by.setdefault(float(f"{x['sec']:.4g}"), []).append(x)
+        exps = sorted(by)
+        ex_txt = lambda t: (f"{t:g} s" if t >= 1 else f"1/{round(1 / t):g} s")
+        counts = {e: len(by[e]) for e in exps}
+        nmin = min(counts.values()) if counts else 0
+        steps = [_m.log2(exps[i + 1] / exps[i]) for i in range(len(exps) - 1)]
+        maxstep = max(steps) if steps else 0.0
+        simple = o.get("simple") == "True"
+        frames = o.get("frames", "all")
+
+        # 1. the simple stack: the fallback merge
+        if simple and len(exps) > 1:
+            add("warn", "Simple stack", "the fallback merge (no ladder, no edge feathering) is on; "
+                f"this set has {len(exps)} exposures with steps up to {maxstep:.1f} EV, where it can show "
+                "rings. Use it when the normal stack fails", fix("simple", "False", "Use the normal stack"))
+        elif not simple:
+            add("ok", "Stack", "normal stack")
+        # 2. clipped mean: the run applies it only to an exposure with 3 or
+        # more frames (pipeline: _clip_stack and _n_added >= 3), the others
+        # are a plain mean
+        if not simple and o.get("stack_combine") == "clip" and lights and counts:
+            used = {e: (1 if frames == "best" else (max(1, c // 2) if frames == "best50" else c))
+                    for e, c in counts.items()}
+            thin = [e for e in exps if used[e] < 3]
+            if frames == "best":
+                add("info", "Tier combine", "Best only keeps one frame per exposure, so Clipped mean has "
+                    "nothing to compare and every exposure is a plain mean")
+            elif len(thin) == len(exps):
+                add("info", "Tier combine", f"Clipped mean needs 3 frames of one exposure to find a particle "
+                    f"strike; no exposure here has that many (at most {max(used.values())}), so all are a "
+                    "plain mean. No harm; strikes stay unless the frames are repeated")
+            elif thin:
+                add("info", "Tier combine", f"Clipped mean runs on the exposures with 3 or more frames; "
+                    + ", ".join(ex_txt(e) for e in thin[:6]) + (" …" if len(thin) > 6 else "")
+                    + " have fewer and are a plain mean")
+            else:
+                add("ok", "Tier combine", "clipped mean")
+        # 3. fewer frames than there are
+        if not simple and frames in ("best", "best50") and nmin >= 2:
+            k = 1 if frames == "best" else max(1, nmin // 2)
+            add("info", "Frames", f"{'Best only' if frames == 'best' else 'Best half'} keeps {k} of "
+                f"{nmin}+ frames per exposure: noise about {_m.sqrt(nmin / k):.1f}x that of all frames. "
+                "If the run's sharpness spread is near 1.0, averaging all costs no detail",
+                fix("frames", "all", "Use all frames"))
+        # 4. HDR per bracket needs repeated brackets
+        if not simple and o.get("bracket_mode") == "hdr":
+            if not tl.get("repeated"):
+                add("info", "Brackets", "HDR per bracket is meant for repeated brackets; this set is one "
+                    "bracket, so the run merges it as usual (Stack per exposure)",
+                    fix("bracket_mode", "tiers", "Use Stack per exposure"))
+            else:
+                add("info", "Brackets", f"HDR per bracket on {tl.get('n_brackets')} brackets: experimental, "
+                    "meant for long eclipses where sky or Moon position change between brackets")
+        # 5. the Moon's drift inside one exposure's frames, against Moon Align
+        site = None
+        try:
+            site = _ob.load(f)
+        except Exception:
+            pass
+        circ = None
+        try:
+            from . import eclipses as _ec
+            circ = _ec.check_site(site)
+        except Exception:
+            circ = None
+        lock = o.get("intra_lock", "corona")
+        if not simple and lock in ("moon", "mixed") and tl.get("timed") and exps:
+            spread = {e: (max(x["t"] for x in by[e]) - min(x["t"] for x in by[e])) for e in exps}
+            e_w = max(spread, key=spread.get)
+            sp = spread[e_w]
+            rate_r = None
+            try:
+                if site and site.get("lat") is not None and site.get("date"):
+                    rate_r = _ec.moon_rate(str(site["date"])[:10], float(site["lat"]), float(site["lon"]),
+                                           float(site.get("height_m") or 0.0))
+            except Exception:
+                rate_r = None
+            R = None
+            try:
+                R = float(json.load(open(os.path.join(wd, "geometry.json")))["R"])
+            except Exception:
+                R = None
+            if R and sp > 0:
+                px = (rate_r * R if rate_r else 0.5 / (1920.0 / (2.0 * R))) * sp
+                lvl = "warn" if (px > 1.0 and lock == "moon") else "info"
+                add(lvl, "Intra-tier lock", f"{'Moon Align' if lock == 'moon' else 'Mixed'}: the frames of "
+                    f"{ex_txt(e_w)} span {sp:.0f} s, in which the Moon moves about {px:.1f} px against the corona"
+                    + ("" if rate_r else " (typical rate; enter the site for this eclipse's)")
+                    + (("; locked on the Moon, the corona is smeared by that much" if lock == "moon" else
+                        "; exposures with little corona to lock on (usually the fast ones, whose inner corona "
+                        "matters most) go on the Moon and smear by up to that much") if px > 1.0 else
+                       "; below a pixel, no harm"),
+                    fix("intra_lock", "corona", "Use Corona Align") if px > 1.0 else None)
+            elif sp > 0:
+                add("info", "Intra-tier lock", f"{'Moon Align' if lock == 'moon' else 'Mixed'}: the frames of "
+                    f"{ex_txt(e_w)} span {sp:.0f} s; the Moon moves about 0.5 arcsec/s against the corona, "
+                    "so locked on the Moon the corona smears by that much (in pixels after the first run)",
+                    fix("intra_lock", "corona", "Use Corona Align"))
+        elif not simple and lock in ("moon", "mixed"):
+            add("info", "Intra-tier lock", f"{'Moon Align' if lock == 'moon' else 'Mixed'}: without time stamps "
+                "the Moon's drift inside an exposure cannot be worked out. Corona Align is safe when an "
+                "exposure's frames are spread over totality", fix("intra_lock", "corona", "Use Corona Align"))
+        elif not simple:
+            add("ok", "Intra-tier lock", "Corona Align")
+        # 6. colour planes at a low Sun
+        if not simple and o.get("colour_planes") == "off":
+            if circ and circ.get("sun_alt") is not None and circ["sun_alt"] < 30:
+                add("warn", "Colour planes", f"the Sun was {circ['sun_alt']:.0f}\u00b0 high: the air spreads "
+                    "red and blue apart (atmospheric dispersion). Align to green measures it and moves them "
+                    "only when the offset is 0.2 px or more", fix("colour_planes", "auto", "Align to green"))
+            else:
+                add("info", "Colour planes", "As recorded: red and blue are not checked against green. "
+                    "Align to green is safe at any Sun height (it moves nothing below 0.2 px)",
+                    fix("colour_planes", "auto", "Align to green"))
+        elif not simple:
+            add("ok", "Colour planes", "aligned to green where measured")
+        # 7. alignment off on camera raws
+        am = o.get("align_mode", "auto")
+        if lights and am == "keep":
+            raw_in = all(os.path.splitext(p)[1].lower() in RAW_EXTS for p in lights)
+            add("warn" if raw_in else "info", "Alignment",
+                ("Keep frames as they are: these are camera raws, which no other program has registered, so "
+                 "nothing aligns them and any shift between frames stays in the stack") if raw_in else
+                ("Keep frames as they are: right only for frames another program already registered; "
+                 "Automatic recognises those by their registration border"),
+                fix("align_mode", "auto", "Use Automatic"))
+        else:
+            add("ok", "Alignment", "automatic" if am == "auto" else "always align")
+        # 8. hot pixels: no darks and no repair
+        if o.get("despeckle") == "False" and not find_dark_dir(f):
+            add("warn", "Hot pixels", "no darks and Fix hot pixels is off: hot photosites stay in the picture "
+                "as coloured dots", {"id": "despeckle", "value": "True", "label": "Fix hot pixels"})
+        # 9. edge weight with big exposure steps
+        if not simple and o.get("feather") == "taper" and maxstep >= 2.0:
+            add("info", "Merge weight", f"Exact edge with steps up to {maxstep:.1f} EV between exposures: "
+                "radiometrically right, but if rings show just outside the limb, Blended edge hides them",
+                fix("feather", "plain", "Use Blended edge"))
+        # 10. photometric chain over many tiers
+        if not simple and o.get("photo_solve") == "chain" and len(exps) >= 4:
+            add("info", "Photometric solve", f"Chain over {len(exps)} exposures: one bad link shifts every "
+                "exposure after it. Network solves all links together", fix("photo_solve", "network", "Use Network"))
+        # 11. the recipe's own data
+        if rec and rec.get("camera") is not None:
+            cam = {}
+            try:
+                cam = read_camera_info(lights[len(lights) // 2]) if lights else {}
+            except Exception:
+                cam = {}
+            rc = rec["camera"]
+            rname = rc.get("camera") if isinstance(rc, dict) else str(rc)
+            rfl = rc.get("focal_mm") if isinstance(rc, dict) else None
+            diff = []
+            if rname and cam.get("camera") and rname.strip() != cam["camera"].strip():
+                diff.append(f"camera {rname} vs {cam['camera']}")
+            if rfl and cam.get("focal_mm") and abs(float(rfl) - float(cam["focal_mm"])) > 1:
+                diff.append(f"{float(rfl):g} mm vs {float(cam['focal_mm']):g} mm")
+            if diff:
+                nd = [k for k, (dv, _) in _PROCESSING_KEYS.items() if o.get(k) is not None and o.get(k) != dv]
+                add("info", "Recipe", f"{rec.get('file') or 'the recipe'} was saved for other data ("
+                    + "; ".join(diff) + ")" + (f"; its non-default settings: {', '.join(nd)}" if nd else ""))
+        warn = sum(1 for x in items if x["level"] == "warn")
+        return jsonify({"ok": True, "items": items, "warn": warn,
+                        "exposures": [ex_txt(e) for e in exps], "per_exposure_min": nmin})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"recipe check: {e}", "items": items})
+
+
+# MAP TILES THROUGH THE APP'S SERVER (2026-11-08). The map picker asked the
+# tile servers straight from the page and on the Mac the map stayed empty.
+# Fetched here instead: one identifying User-Agent (the tile servers' usage
+# policy asks for that), at most two downloads at a time, CA certificates
+# from certifi where present (a frozen Python may have none of its own), and
+# every tile kept on disk -- a map once seen also works offline in the field.
+# When a tile cannot be had the reason is kept and the page can say it.
+_TILE_SRC = {"osm": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+             "carto": "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"}
+_TILE_DIR = os.path.join(os.path.expanduser("~"), ".cache", "eclipseforgehdr", "tiles")
+_TILE_FRESH_S = 30 * 86400
+_TILE_SEM = threading.Semaphore(2)
+_TILE_ERR = {}
+_TILE_SSL = None
+
+
+def _tile_ssl():
+    global _TILE_SSL
+    if _TILE_SSL is None:
+        import ssl
+        try:
+            import certifi
+            _TILE_SSL = ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            _TILE_SSL = ssl.create_default_context()
+    return _TILE_SSL
+
+
+@app.get("/api/tile/<src>/<int:z>/<int:x>/<int:y>.png")
+def map_tile(src, z, x, y):
+    import time as _t
+    import urllib.request
+    from . import __version__
+    if src not in _TILE_SRC or not (0 <= z <= 17) or not (0 <= x < 2 ** z) or not (0 <= y < 2 ** z):
+        return jsonify({"ok": False, "error": "no such tile"}), 404
+    fn = os.path.join(_TILE_DIR, src, str(z), str(x), f"{y}.png")
+    if os.path.isfile(fn) and _t.time() - os.path.getmtime(fn) < _TILE_FRESH_S:
+        return send_file(fn, mimetype="image/png", max_age=86400)
+    url = _TILE_SRC[src].format(s="abcd"[(x + y) % 4], z=z, x=x, y=y)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": f"EclipseForgeHDR/{__version__} (eclipse image processing; site picker map)"})
+    try:
+        with _TILE_SEM:
+            with urllib.request.urlopen(req, timeout=10, context=_tile_ssl()) as r:
+                body = r.read()
+                ctype = r.headers.get("Content-Type", "")
+        if not body or "image" not in ctype:
+            raise ValueError(f"the tile server sent {ctype or 'nothing'} instead of an image")
+        os.makedirs(os.path.dirname(fn), exist_ok=True)
+        tmp = fn + ".part"
+        with open(tmp, "wb") as fh:
+            fh.write(body)
+        os.replace(tmp, fn)
+        _TILE_ERR.pop(src, None)
+        return send_file(io.BytesIO(body), mimetype="image/png", max_age=86400)
+    except Exception as e:
+        msg = str(getattr(e, "reason", "") or e)
+        if hasattr(e, "code"):
+            msg = f"HTTP {e.code} {msg}"
+        _TILE_ERR[src] = msg[:200]
+        if os.path.isfile(fn):                     # stale but better than nothing
+            return send_file(fn, mimetype="image/png", max_age=600)
+        return jsonify({"ok": False, "error": msg}), 502
+
+
+@app.get("/api/tilestatus")
+def map_tile_status():
+    return jsonify({"ok": True, "errors": dict(_TILE_ERR), "cache": _TILE_DIR})
+
+
+@app.get("/api/eclipsepath")
+def get_eclipsepath():
+    """The path of totality for the map picker: centre line and the two
+    limits as [lat, lon] lists (eclipses.path)."""
+    from . import eclipses as _ec
+    d = (request.args.get("date") or "")[:10]
+    if d not in _ec.ECLIPSES:
+        return jsonify({"ok": False, "error": "not a bundled eclipse"}), 404
+    return jsonify({"ok": True, **_ec.path(d)})
+
+
+@app.get("/api/eclipselocal")
+def get_eclipselocal():
+    """Local circumstances at a clicked place: total or not, duration, the
+    contacts in UT and local time, the Sun's height. The UTC offset comes
+    from the nearest listed place in the path (its time zone on that date)
+    when one is within about 300 km, else from the longitude (marked as a
+    guess)."""
+    import math as _m
+    from . import eclipses as _ec
+    d = (request.args.get("date") or "")[:10]
+    if d not in _ec.ECLIPSES:
+        return jsonify({"ok": False, "error": "not a bundled eclipse"}), 404
+    try:
+        lat = float(request.args.get("lat")); lon = float(request.args.get("lon"))
+        h = float(request.args.get("h") or 0.0)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "bad position"}), 400
+    lon = (lon + 540.0) % 360.0 - 180.0
+    if not (-90.0 <= lat <= 90.0):
+        return jsonify({"ok": False, "error": "bad latitude"}), 400
+    r = _ec.local(d, lat, lon, h)
+    off, src, best = None, "longitude", None
+    for c in _ec.cities(d):
+        p1, p2 = _m.radians(lat), _m.radians(c["lat"])
+        dl = _m.radians(c["lon"] - lon)
+        km = 6371.0 * _m.acos(max(-1.0, min(1.0, _m.sin(p1) * _m.sin(p2) + _m.cos(p1) * _m.cos(p2) * _m.cos(dl))))
+        if best is None or km < best[0]:
+            best = (km, c)
+    if best and best[0] < 300.0:
+        o = _ec.utc_offset_h(best[1].get("tz"), d, r["mid_ut"]) if best[1].get("tz") else best[1].get("utc_offset")
+        if o is not None:
+            off, src = o, "near " + best[1]["name"] + (", " + best[1]["country"] if best[1].get("country") else "")
+    if off is None:
+        off = float(round(lon / 15.0))
+
+    def lt(x):
+        return _ec.hms(x + off) if x is not None else None
+    out = {"ok": True, "date": d, "lat": round(lat, 5), "lon": round(lon, 5),
+           "total": bool(r.get("total")), "duration_s": round(r.get("duration_s") or 0.0, 1),
+           "sun_alt": round(r["sun_alt"], 1), "magnitude": round(r.get("magnitude") or 0.0, 4),
+           "mid_ut": _ec.hms(r["mid_ut"]), "mid_local": lt(r["mid_ut"]),
+           "c2_ut": _ec.hms(r["c2_ut"]) if r.get("c2_ut") is not None else None,
+           "c3_ut": _ec.hms(r["c3_ut"]) if r.get("c3_ut") is not None else None,
+           "c2_local": lt(r.get("c2_ut")), "c3_local": lt(r.get("c3_ut")),
+           "utc_offset": off, "offset_from": src}
+    return jsonify(out)
 
 
 @app.get("/api/site")
@@ -955,7 +1663,7 @@ def start_run():
                         from . import __version__ as _ver
                         _diff.append(f"build: cached {o.get('build')!r}, this is {_ver!r}")
                     if o.get("inputs") != _input_fingerprint(folder):
-                        _diff.append("raw files changed (name, size or date)")
+                        _diff.append("frames changed (files added, removed or replaced, or switched in the Frames panel)")
                     if "short_inputs" in o and o.get("short_inputs") != _short_fingerprint(folder):
                         _diff.append("short-exposure frames changed")
                     prog.log("re-stacking, cache mismatch: "
@@ -1198,6 +1906,18 @@ def cache_state():
             out["opts"] = {k: v for k, v in o.items()
                            if k not in ("inputs", "flat_inputs", "bias_inputs", "dark_inputs")}
             out["inputs_changed"] = (o.get("inputs") != _input_fingerprint(folder))
+            # the other frame folders, which the Frames panel can switch too
+            try:
+                from .flat import fingerprint as _ffp
+                from .dark import fingerprint as _dfp
+                out["inputs_changed"] = bool(
+                    out["inputs_changed"]
+                    or ("short_inputs" in o and o.get("short_inputs") != _short_fingerprint(folder))
+                    or ("flat_inputs" in o and o.get("flat_applied") and o.get("flat_inputs") != _ffp(o.get("flat_dir")))
+                    or ("bias_inputs" in o and o.get("bias_applied") and o.get("bias_inputs") != _dfp(o.get("bias_dir")))
+                    or ("dark_inputs" in o and o.get("dark_applied") and o.get("dark_inputs") != _dfp(o.get("dark_dir"))))
+            except Exception:
+                pass
         except Exception as e:
             out["error"] = str(e)
     if out["cached"]:
@@ -1226,7 +1946,12 @@ def get_geometry():
     from . import __version__
     cy, cx, R = ly.geometry(ly.prev_decim)
     h, w = ly.prev["bg"].shape
+    try:                       # the export's size, for the Export page
+        fh, fw = ly.full["bg"].shape[:2]
+    except Exception:
+        fh, fw = h * ly.prev_decim, w * ly.prev_decim
     return jsonify({"ok": True, "W": w, "H": h, "cy": cy, "cx": cx, "R": R,
+                    "fullW": int(fw), "fullH": int(fh),
                     "defaults": defaults_for(getattr(ly, "mode", None)),
                     "version": __version__,
                     "app": _BRAND_NAME, "lab": _BRAND_LAB,
@@ -1236,7 +1961,7 @@ def get_geometry():
                     "limbMargin": ly.limb_margin / ly.prev_decim,
                     "bgChroma": [float(x) for x in ly.bg_chroma],
                     "rprofile": [round(float(x), 5) for x in ly.rprof_1d],
-                    # the Sky pedestal (lab 2026-10-19): the sky light measured
+                    # the Sky pedestal (2026-10-19): the sky light measured
                     # in xn units, and the profile's scale -- see render.Layers
                     "skyP3": float(getattr(ly, "sky_p3", 0.0) or 0.0),
                     "profMax": float(getattr(ly, "prof_max", 1.0) or 1.0),
@@ -1848,7 +2573,8 @@ def processing_load():
                     "from": (doc.get("source") or {}).get("from"),
                     "changed": changed, "stacked": bool(ran),
                     "ids": {k: _PROCESSING_KEYS[k][1] for k in proc},
-                    "n": len(proc), "file": os.path.basename(path)})
+                    "n": len(proc), "file": os.path.basename(path),
+                    "camera": (doc.get("source") or {}).get("camera")})
 
 
 def _older_than(a, b):
@@ -1862,7 +2588,7 @@ def _older_than(a, b):
     return (ta < tb) if (ta and tb) else True
 
 
-# THE 1:1 CROP (lab 0.25.1, 2026-10-11). The preview is decimated, and
+# THE 1:1 CROP (0.25.1, 2026-10-11). The preview is decimated, and
 # decimation folds the finest things -- the 1.5 and 3 px sharpening bands,
 # the grain, the inner-detail and filament layers -- into one noise texture;
 # until now the only way to see the export's pixels was the export. This
@@ -1933,6 +2659,127 @@ def do_crop():
         return jsonify({"ok": False, "error": f"crop failed: {e}"}), 500
 
 
+def _polar_angles(po):
+    """The by-hand solar north (deg cw from image up, or None) and the fine
+    turn (deg) from the polar options; blank or bad text means not set."""
+    def num(v):
+        try:
+            v = str(v).strip().replace(",", ".")
+            return float(v) if v else None
+        except (TypeError, ValueError):
+            return None
+    m = num(po.get("manual")); off = num(po.get("offset")) or 0.0
+    return m, off
+
+
+# EXPORT THUMBNAILS (tab 4, 2026-11-08): small pictures of what each export
+# product will look like, rendered from the PREVIEW layers (a quarter of the
+# resolution) with the page's current settings, so they cost a fraction of an
+# export. Kept in memory by request, a few dozen at most.
+_XTHUMB = {}
+
+
+def _thumb_jpeg(arr, width=520, rgba_over=None):
+    a = np.clip(np.asarray(arr, np.float32), 0, 1)
+    if a.ndim == 3 and a.shape[2] == 1:
+        a = a[:, :, 0]
+    img = Image.fromarray((a * 255 + 0.5).astype(np.uint8))
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    if img.width > width:
+        img = img.resize((width, max(1, int(round(img.height * width / img.width)))), Image.LANCZOS)
+    b = io.BytesIO()
+    img.save(b, "JPEG", quality=85)
+    return b.getvalue()
+
+
+@app.post("/api/xthumb")
+def export_thumb():
+    import hashlib
+    from .render import render, apply_orient, plain_stack
+    ly = STATE["layers"]
+    if ly is None:
+        return jsonify({"ok": False, "error": "no result yet"}), 400
+    data = request.json if request.is_json else {}
+    kind = str(data.get("kind") or "composite")
+    params = dict(data.get("params") or {})
+    _or = str(data.get("orient", "") or "").strip().lower()
+    params["orient"] = _or if _or in ("flipv", "fliph", "180", "cw", "ccw") else ""
+    key = hashlib.sha1(json.dumps([STATE.get("folder"), id(ly), kind, params, data.get("polar")],
+                                  sort_keys=True, default=str).encode()).hexdigest()
+    if key in _XTHUMB:
+        return send_file(io.BytesIO(_XTHUMB[key]), mimetype="image/jpeg", max_age=0)
+    try:
+        wd = workdir(STATE["folder"])
+        q = ly.prev_decim
+        if kind == "plain":
+            geo = json.load(open(os.path.join(wd, "geometry.json")))
+            arr = apply_orient(plain_stack(wd, geometry=geo, step=max(2, q)), params["orient"])
+            jpg = _thumb_jpeg(arr)
+        elif kind == "hdr32":
+            # AS THE FILE OPENS, NO STRETCH (2026-11-08): the merge scaled as
+            # the 32-bit export scales it (1.0 = the corona's 99.99th
+            # percentile outside the Moon), clipped at 1, and shown the way a
+            # colour-managed program shows a file with a linear profile --
+            # sRGB-encoded for the screen, no tone curve on top
+            from .pipeline import load_big
+            geo = json.load(open(os.path.join(wd, "geometry.json")))
+            st = max(2, q)
+            a = np.asarray(load_big(os.path.join(wd, "hdr_rgb.npy"))[::st, ::st], np.float32)
+            a = np.nan_to_num(np.maximum(a, 0.0), nan=0.0, posinf=0.0)
+            Y = 0.2126 * a[:, :, 0] + 0.7152 * a[:, :, 1] + 0.0722 * a[:, :, 2]
+            yy = np.arange(a.shape[0], dtype=np.float32)[:, None] - np.float32(float(geo["cy"]) / st)
+            xx = np.arange(a.shape[1], dtype=np.float32)[None, :] - np.float32(float(geo["cx"]) / st)
+            sel = (Y > 0) & ((yy * yy + xx * xx) > np.float32((1.02 * float(geo["R"]) / st) ** 2))
+            ref = float(np.percentile(Y[sel], 99.99)) if sel.any() else (float(Y.max()) or 1.0)
+            x = np.clip(a / np.float32(max(ref, 1e-12)), 0.0, 1.0)
+            x = np.where(x <= 0.0031308, 12.92 * x, 1.055 * np.power(x, 1 / 2.4) - 0.055)
+            jpg = _thumb_jpeg(apply_orient(x.astype(np.float32), params["orient"]))
+        elif kind.startswith("view:"):
+            v = kind[5:]
+            arr = render(ly, params, preview=True, view=v)
+            arr = apply_orient(arr, params["orient"])
+            jpg = _thumb_jpeg(arr if v in ("composite", "moon") else arr[..., 0] if arr.ndim == 3 else arr)
+        elif kind in ("polar", "polarlayers"):
+            from . import polarmap as _pm
+            po = data.get("polar") or {}
+            rgb = render(ly, params, preview=True, view="composite")
+            cy, cx, R = ly.geometry(q)
+            pmap, meta, _o = _pm.polar_of(
+                rgb, cy, cx, R, wd, STATE["folder"],
+                north="celestial" if po.get("north") == "celestial" else "solar",
+                outer="frame" if po.get("outer") == "frame" else "circle",
+                radial="log" if po.get("radial") == "log" else "linear",
+                centre=(str(po.get("centre") or "S").upper() if str(po.get("centre") or "S").upper()
+                        in ("N", "E", "S", "W") else "S"),
+                mirrored=bool(po.get("mirrored", False)),
+                gray=int(params.get("colourMode", 0) or 0) == 1, unit_scale=float(q),
+                manual_cw=_polar_angles(po)[0], offset_deg=_polar_angles(po)[1])
+            # THE EXPORT'S SHAPE: a linear map has one row per pixel of radius,
+            # so on the preview (q times fewer pixels) it came out q times
+            # flatter than the file (2026-11-08, "too slim"). Its columns are
+            # averaged in blocks of q instead, which gives the file's shape. The
+            # log map is conformal and already has it.
+            if po.get("radial") != "log" and q > 1 and pmap.shape[1] >= 2 * q:
+                _w = pmap.shape[1] // q * q
+                pmap = pmap[:, :_w].reshape(pmap.shape[0], _w // q, q, pmap.shape[2]).mean(axis=2)
+            if kind == "polar" and data.get("format") in ("tif16", "tif8"):
+                jpg = _thumb_jpeg(pmap)                      # the TIFF is the clean map
+            else:
+                im = _pm.annotate(pmap, meta, grid=bool(po.get("grid", True)),
+                                  earth=bool(po.get("earth", True)))
+                jpg = _thumb_jpeg(np.asarray(im, np.float32) / 255.0)
+        else:                                                # the picture
+            arr = render(ly, params, preview=True, view="composite")
+            jpg = _thumb_jpeg(apply_orient(arr, params["orient"]))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"thumbnail: {e}"}), 500
+    if len(_XTHUMB) > 40:
+        _XTHUMB.pop(next(iter(_XTHUMB)))
+    _XTHUMB[key] = jpg
+    return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=0)
+
+
 @app.post("/api/export")
 def do_export():
     # BUSY GUARD (audit 2026-10-10): without it a second export orphaned the
@@ -1948,18 +2795,53 @@ def do_export():
     data = request.json
     fmt = data.get("format", "tif16")
     view = data.get("view", "composite")
+    # the extra products of tab 4 (2026-11-08): "plain" is the merge with one
+    # neutral stretch (render.plain_stack), "polarlayers" the annotated polar
+    # map as a base layer and a transparent overlay (polarmap.export_layers)
+    product = str(data.get("product") or "picture")
+    if product not in ("picture", "plain", "polarlayers"):
+        return jsonify({"ok": False, "error": f"unknown product {product!r}"}), 400
     size = data.get("size", "full")
     prom_layer = bool(data.get("promLayer", False))
     moon_layer = bool(data.get("moonLayer", False))
+    _po = data.get("polar") or {}
+    polar = bool(_po.get("on", False))
+    polar_north = "celestial" if _po.get("north") == "celestial" else "solar"
+    polar_outer = "frame" if _po.get("outer") == "frame" else "circle"
+    polar_grid = bool(_po.get("grid", True))
+    polar_earth = bool(_po.get("earth", True))
+    polar_radial = "log" if _po.get("radial") == "log" else "linear"
+    polar_centre = str(_po.get("centre") or "S").upper()
+    polar_centre = polar_centre if polar_centre in ("N", "E", "S", "W") else "S"
+    polar_mirror = bool(_po.get("mirrored", False))
+    polar_only = polar and bool(_po.get("only", False))
+    polar_manual, polar_offset = _polar_angles(_po)
+    # carousel tiles of the map (2026-11-10): n tiles of a social size
+    try:
+        _tn = int(_po.get("tiles") or 0)
+    except (TypeError, ValueError):
+        _tn = 0
+    polar_tiles = ({"n": _tn, "fmt": str(_po.get("tileFmt") or "3:4")}
+                   if 2 <= _tn <= 12 else None)
     params = data.get("params", {})
     # Purely cosmetic and applied last, so it needs no re-run and no re-render
     # of anything cached -- see render.apply_orient.
     _or = str(data.get("orient", "") or "").strip().lower()
     params = dict(params, orient=(_or if _or in ("flipv", "fliph", "180", "cw", "ccw") else ""))
-    if fmt not in ("tif16", "tif8", "png", "jpg"):
+    if fmt not in ("tif16", "tif8", "png", "jpg", "hdr32"):
         return jsonify({"ok": False, "error": f"unknown format {fmt!r}"}), 400
-    ext = {"tif16": ".tif", "tif8": ".tif", "png": ".png", "jpg": ".jpg"}[fmt]
+    ext = {"tif16": ".tif", "tif8": ".tif", "png": ".png", "jpg": ".jpg", "hdr32": ".tif"}[fmt]
     name = os.path.basename(str(data.get("name") or "").strip()) or "eclipseforge_render"
+    if fmt == "hdr32":
+        # the merge, not the render: the view, the look and the layers do not apply
+        name = name.replace("render", "merge") if "render" in name else name + "_merge"
+        view = "composite"
+        prom_layer = moon_layer = polar = False
+        product = "picture"
+    if product != "picture":
+        view = "composite"
+        prom_layer = moon_layer = polar = polar_only = False
+        name += "_plainstack" if product == "plain" else ""
     if view != "composite":
         name += "_" + view
     if size == "half":
@@ -1967,16 +2849,119 @@ def do_export():
     outdir = os.path.join(STATE["folder"], "eclipseforge_output")
     os.makedirs(outdir, exist_ok=True)
     base = os.path.join(outdir, name)
-    path = base + ("_16bit" if fmt == "tif16" else "") + ext
+    _suf = {"tif16": "_16bit", "hdr32": "_32bit_linear"}.get(fmt, "")
+    path = base + _suf + ext
     i = 1
     while os.path.exists(path):
-        path = base + ("_16bit" if fmt == "tif16" else "") + f"_{i}" + ext
+        path = base + _suf + f"_{i}" + ext
         i += 1
     prog = Progress()
     STATE["progress"] = prog
     prog.log(f"exporting {fmt} ...", 0.1)
 
+    if product == "polarlayers":
+        _k, _sfx = 0, ""
+        while (os.path.exists(base + "_polar_base_16bit" + _sfx + ".tif")
+               or os.path.exists(base + "_polar_overlay_16bit" + _sfx + ".tif")):
+            _k += 1
+            _sfx = f"_{_k}"
+        path = base + "_polar_base_16bit" + _sfx + ".tif"
+        _ovp = base + "_polar_overlay_16bit" + _sfx + ".tif"
+
     def work():
+        if product == "plain":
+            try:
+                from .render import plain_stack, write_picture, apply_orient
+                prog.log("writing the plain HDR stack (the merge, one neutral stretch, no look) ...", 0.3)
+                _wd = workdir(STATE["folder"])
+                _geo = json.load(open(os.path.join(_wd, "geometry.json")))
+                _a = apply_orient(plain_stack(_wd, size=size, geometry=_geo), params.get("orient", ""))
+                write_picture(_a, fmt, path, gray=int(params.get("colourMode", 0) or 0) == 1,
+                              description="eclipseforgehdr plain HDR stack: the merge with one "
+                                          "logarithmic luminance stretch; no detail layers, no look")
+                try:
+                    from .render import thumbnail
+                    thumbnail(_a, _thumb_path(path))
+                except Exception:
+                    pass
+                json.dump(params, open(path + ".params.json", "w"), indent=1)
+                prog.log(f"[ok] saved {path}", 1.0)
+            except Exception as e:
+                prog.error = f"plain stack: {e}"
+            prog.done = True
+            return
+        if product == "polarlayers":
+            try:
+                from . import polarmap as _pm
+                prog.log("rendering the picture for the polar map ...", 0.3)
+                _rgb = render(ly, params, preview=False, view="composite")
+                _gcy, _gcx, _gR = ly.geometry(1)
+                prog.log("unwrapping ...", 0.6)
+                pmap, meta, _o = _pm.polar_of(_rgb, _gcy, _gcx, _gR, workdir(STATE["folder"]),
+                                              STATE["folder"], north=polar_north, outer=polar_outer,
+                                              step=2.0 if size == "half" else 1.0, radial=polar_radial,
+                                              centre=polar_centre, mirrored=polar_mirror, manual_cw=polar_manual, offset_deg=polar_offset,
+                                              gray=int(params.get("colourMode", 0) or 0) == 1)
+                del _rgb
+                prog.log("writing the base and the overlay ...", 0.85)
+                W, H = _pm.export_layers(pmap, meta, path, _ovp, grid=polar_grid, earth=polar_earth)
+                json.dump(params, open(path + ".params.json", "w"), indent=1)
+                prog.log(f"[ok] saved {path} and {os.path.basename(_ovp)} ({W} x {H}; put the "
+                         f"overlay over the base, blend mode Normal)", 1.0)
+            except Exception as e:
+                prog.error = f"polar layers: {e}"
+            prog.done = True
+            return
+        if fmt == "hdr32":
+            try:
+                from .render import export_hdr32
+                prog.log("writing the merged HDR (32-bit float, linear) ...", 0.3)
+                _wd = workdir(STATE["folder"])
+                _geo = json.load(open(os.path.join(_wd, "geometry.json")))
+                _ref = export_hdr32(_wd, path, orient=params.get("orient", ""), size=size,
+                                    geometry=_geo)
+                prog.log(f"[ok] saved {path} (scene-linear; 1.0 = the corona's 99.99th "
+                         f"luminance percentile, {_ref:.4g} in the stack's units)", 1.0)
+                prog.done = True
+            except Exception as e:
+                prog.error = str(e)
+                prog.done = True
+            return
+        if polar_only and view == "composite":
+            # ONLY THE POLAR MAP (2026-11-08): the picture is rendered at full
+            # resolution as for an export but not written; the map pair gets
+            # its own number so it never overwrites an earlier one
+            try:
+                from . import polarmap as _pm
+                prog.log("rendering the picture for the polar map ...", 0.3)
+                _rgb = render(ly, params, preview=False, view="composite")
+                # ONE FILE, in the format chosen (2026-11-08: the polar-only
+                # export wrote a TIFF beside the JPG). TIFF: the clean map,
+                # data only; JPG / PNG: the annotated map with axes and labels.
+                _tail = {"tif16": "_polar_16bit.tif", "tif8": "_polar_8bit.tif",
+                         "png": "_polar.png", "jpg": "_polar.jpg"}[fmt]
+                _k, _out = 0, base + _tail
+                while os.path.exists(_out):
+                    _k += 1
+                    _out = base + _tail.replace(".", f"_{_k}.", 1)
+                _pt = _out if fmt in ("tif16", "tif8") else None
+                _pj = None if _pt else _out
+                prog.log("writing polar map ...", 0.8)
+                _gcy, _gcx, _gR = ly.geometry(1)
+                _line = _pm.export(_rgb, _gcy, _gcx, _gR, workdir(STATE["folder"]),
+                                   STATE["folder"], _pt, _pj, north=polar_north,
+                                   outer=polar_outer, grid=polar_grid, earth=polar_earth,
+                                   radial=polar_radial, centre=polar_centre, mirrored=polar_mirror, manual_cw=polar_manual, offset_deg=polar_offset,
+                                   step=2.0 if size == "half" else 1.0,
+                                   gray=int(params.get("colourMode", 0) or 0) == 1,
+                                   tif_bits=8 if fmt == "tif8" else 16, tiles=polar_tiles)
+                json.dump(params, open(_out + ".params.json", "w"), indent=1)
+                prog.log(f"[ok] saved {_out} ({_line})", 1.0)
+                prog.done = True
+            except Exception as e:
+                prog.error = f"polar map: {e}"
+                prog.done = True
+            return
         try:
             _notes = []
             # the rendered composite is kept for the prominence layer and the quality grading
@@ -2052,6 +3037,38 @@ def do_export():
                     prog.log(f"[ok] saved {_mp}", 0.95)
                 except Exception as _e:
                     _notes.append(f"[warn] Moon layer not written ({_e})")
+            # the picture unwrapped around the Sun: position angle x radius (0.30.0)
+            if polar and view == "composite" and _keep.get("rgb") is not None:
+                try:
+                    from . import polarmap as _pm
+                    # ONE FILE BESIDE THE PICTURE, in the picture's format
+                    # (2026-11-08): TIFF = the clean map, JPG / PNG = the
+                    # annotated map. Named after the picture; numbered on if
+                    # a polar-only export already took the name.
+                    _st = os.path.splitext(path)[0]
+                    if fmt == "tif16" and "_16bit" in os.path.basename(_st):
+                        _o0 = "_polar_16bit".join(_st.rsplit("_16bit", 1)) + ".tif"
+                    else:
+                        _o0 = _st + {"tif16": "_polar_16bit.tif", "tif8": "_polar_8bit.tif",
+                                     "png": "_polar.png", "jpg": "_polar.jpg"}[fmt]
+                    _out, _k = _o0, 0
+                    while os.path.exists(_out):
+                        _k += 1
+                        _out = os.path.splitext(_o0)[0] + f"_{_k}" + os.path.splitext(_o0)[1]
+                    _pt = _out if fmt in ("tif16", "tif8") else None
+                    _pj = None if _pt else _out
+                    prog.log("writing polar map ...", 0.92)
+                    _gcy, _gcx, _gR = ly.geometry(1)
+                    _line = _pm.export(_keep["rgb"], _gcy, _gcx, _gR, workdir(STATE["folder"]),
+                                       STATE["folder"], _pt, _pj, north=polar_north,
+                                       outer=polar_outer, grid=polar_grid, earth=polar_earth, radial=polar_radial, centre=polar_centre,
+                                       mirrored=polar_mirror, manual_cw=polar_manual, offset_deg=polar_offset,
+                                       step=2.0 if size == "half" else 1.0,
+                                       gray=int(params.get("colourMode", 0) or 0) == 1,
+                                       tif_bits=8 if fmt == "tif8" else 16, tiles=polar_tiles)
+                    prog.log(f"[ok] saved {os.path.basename(_out)} ({_line})", 0.96)
+                except Exception as _e:
+                    _notes.append(f"[warn] polar map not written ({_e})")
             try:
                 from . import report as _report
                 rp = os.path.join(workdir(STATE["folder"]), "report.json")
@@ -2087,7 +3104,150 @@ def do_export():
     t = threading.Thread(target=work, daemon=True, name="the export")
     STATE["busy"] = t
     t.start()
-    return jsonify({"ok": True, "path": path})
+    return jsonify({"ok": True, "path": (base + "_polar." + ("tif" if fmt in ("tif16", "tif8") else fmt)
+                                         + " (polar map only)")
+                    if (polar_only and view == "composite") else path})
+
+
+# EXTRAS (tab 5, 0.30.0): products drawn from the finished picture and its
+# geometry -- see extras.py. The page builds its cards from /api/extras; a
+# preview is the product made on the preview layers (1/4), a generate is the
+# same on the full render, written to eclipseforge_output/extras/.
+_XPREV = {}
+
+
+def _extra_angles(data):
+    po = data.get("polar") or {}
+    m, off = _polar_angles(po)
+    return ("celestial" if po.get("north") == "celestial" else "solar"), m, off
+
+
+@app.get("/api/extras")
+def extras_list():
+    from . import extras as _ex
+    if not STATE.get("folder"):
+        return jsonify({"ok": True, "items": _ex.catalogue("", "", False)})
+    wd = workdir(STATE["folder"])
+    return jsonify({"ok": True, "items": _ex.catalogue(wd, STATE["folder"], STATE["layers"] is not None)})
+
+
+@app.post("/api/extra/preview")
+def extra_preview():
+    import hashlib
+    from . import extras as _ex
+    ly = STATE["layers"]
+    if ly is None:
+        return jsonify({"ok": False, "error": "no result yet"}), 400
+    data = request.json if request.is_json else {}
+    kind = str(data.get("kind") or "")
+    opts = dict(data.get("opts") or {})
+    params = dict(data.get("params") or {})
+    if kind == "activity":
+        opts["_look"] = params            # corona in motion: the look's partial-convolution settings
+    # the poster's map in a second look (the standard variant of a soft look)
+    map_params = dict(data.get("mapParams") or {}) if kind == "poster" else {}
+    north, man, off = _extra_angles(data)
+    key = hashlib.sha1(json.dumps([STATE.get("folder"), id(ly), kind, opts, params, map_params, north, man, off],
+                                  sort_keys=True, default=str).encode()).hexdigest()
+    if key in _XPREV:
+        return send_file(io.BytesIO(_XPREV[key]), mimetype="image/jpeg", max_age=0)
+    try:
+        wd = workdir(STATE["folder"])
+        q = ly.prev_decim
+        geo = json.load(open(os.path.join(wd, "geometry.json")))
+        rgb = render(ly, params, preview=True, view="composite")
+        rgb_m = render(ly, map_params, preview=True, view="composite") if map_params else None
+        res = _ex.make(kind, rgb, geo, wd, STATE["folder"], opts, scale=float(q), north=north,
+                       manual_cw=man, offset_deg=off, preview=True, rgb_map=rgb_m)
+        im = res["image"]
+        if im.width > 1600:
+            im = im.resize((1600, max(1, int(round(im.height * 1600 / im.width)))), Image.LANCZOS)
+        b = io.BytesIO()
+        im.save(b, "JPEG", quality=86)
+        jpg = b.getvalue()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"preview: {e}"}), 500
+    if len(_XPREV) > 30:
+        _XPREV.pop(next(iter(_XPREV)))
+    _XPREV[key] = jpg
+    return send_file(io.BytesIO(jpg), mimetype="image/jpeg", max_age=0)
+
+
+@app.post("/api/extra/generate")
+def extra_generate():
+    from . import extras as _ex
+    _b = _busy()
+    if _b:
+        return jsonify({"ok": False, "error": f"{_b} is still running — wait for it to finish"}), 400
+    ly = STATE["layers"]
+    if ly is None:
+        return jsonify({"ok": False, "error": "run the pipeline first"}), 400
+    data = request.json if request.is_json else {}
+    kind = str(data.get("kind") or "")
+    if _ex.entry(kind) is None:
+        return jsonify({"ok": False, "error": f"unknown product {kind!r}"}), 400
+    opts = dict(data.get("opts") or {})
+    params = dict(data.get("params") or {})
+    if kind == "activity":
+        opts["_look"] = params            # corona in motion: the look's partial-convolution settings
+    map_params = dict(data.get("mapParams") or {}) if kind == "poster" else {}
+    north, man, off = _extra_angles(data)
+    opts["_angles"] = [north, man, off]          # film and sound build their own sky context
+    name = os.path.basename(str(data.get("name") or "").strip()) or "eclipseforge_render"
+    outdir = os.path.join(STATE["folder"], "eclipseforge_output", "extras")
+    os.makedirs(outdir, exist_ok=True)
+    base = os.path.join(outdir, f"{name}_{kind}")
+    prog = Progress()
+    STATE["progress"] = prog
+    prog.log(f"{kind}: rendering the picture at full size ...", 0.1)
+
+    def work():
+        try:
+            wd = workdir(STATE["folder"])
+            if kind == "film":
+                from . import film as _film
+                from .render import plain_stack
+                path, secs, vk = _film.make(ly, params, wd, STATE["folder"], opts, base, prog=prog,
+                                            render=render, plain_stack=plain_stack)
+                json.dump({"product": kind, "options": opts, "params": params},
+                          open(path + ".params.json", "w"), indent=1)
+                prog.log(f"[ok] saved {path} ({secs:.0f} s" + (", animated GIF: no ffmpeg found" if vk == "gif" else "") + ")", 1.0)
+                prog.done = True
+                return
+            geo = json.load(open(os.path.join(wd, "geometry.json")))
+            rgb = render(ly, params, preview=False, view="composite")
+            if kind == "sound":
+                from . import sound as _sound
+                paths, info = _sound.make(rgb, geo, wd, STATE["folder"], opts, base, prog=prog)
+                json.dump({"product": kind, "options": opts, "params": params, "info": info},
+                          open(paths[0] + ".params.json", "w"), indent=1)
+                more = (" and " + ", ".join(os.path.basename(p) for p in paths[1:])) if len(paths) > 1 else ""
+                prog.log(f"[ok] saved {paths[0]}{more} ({info})", 1.0)
+                prog.done = True
+                return
+            rgb_m = None
+            if map_params:
+                prog.log(f"{kind}: rendering the map's look at full size ...", 0.4)
+                rgb_m = render(ly, map_params, preview=False, view="composite")
+            prog.log(f"{kind}: drawing ...", 0.55)
+            res = _ex.make(kind, rgb, geo, wd, STATE["folder"], opts, scale=1.0, north=north,
+                           manual_cw=man, offset_deg=off, prog=prog, out_base=base, rgb_map=rgb_m)
+            del rgb, rgb_m
+            prog.log(f"{kind}: writing ...", 0.85)
+            paths = _ex.write(res, base) + list(res.get("extra_paths") or [])
+            json.dump(dict({"product": kind, "options": opts, "params": params, "info": res.get("info", "")},
+                           **({"map_params": map_params} if map_params else {})),
+                      open(paths[0] + ".params.json", "w"), indent=1)
+            more = (" and " + ", ".join(os.path.basename(p) for p in paths[1:])) if len(paths) > 1 else ""
+            prog.log(f"[ok] saved {paths[0]}{more} ({res.get('info', '')})", 1.0)
+        except Exception as e:
+            prog.error = f"{kind}: {e}"
+        prog.done = True
+
+    t = threading.Thread(target=work, daemon=True, name="the extras")
+    STATE["busy"] = t
+    t.start()
+    return jsonify({"ok": True, "base": base})
 
 
 def main(folder=None, port=None, open_browser=True):

@@ -44,6 +44,13 @@ def input_fingerprint(folder):
             out.append([os.path.basename(p), int(st.st_size), int(st.st_mtime)])
         except OSError:
             out.append([os.path.basename(p), -1, -1])
+    # frames forced in past the automatic checks change the stack as much as
+    # an added file does (switched-off ones are already missing from the list)
+    try:
+        from .frameselect import fingerprint_extra
+        out += fingerprint_extra(folder)
+    except Exception:
+        pass
     return out
 
 
@@ -744,7 +751,7 @@ def pc_shift(ref, mov, upsample=20):
 # of a shallow bracket -- falls back to the old Moon lock, and says so.
 #
 # ECLIPSEFORGE_INTRA_LOCK=moon restores the old estimator for an A/B.
-# lab 0.25.1 (2026-10-10): frames within a tier are added at their measured
+# 0.25.1 (2026-10-10): frames within a tier are added at their measured
 # sub-pixel position (shift_bayer_subpixel), not rounded to 2 px. Set
 # ECLIPSEFORGE_INTRA_EVEN=1 to stack the old way for an A/B.
 INTRA_SUBPIXEL = os.environ.get("ECLIPSEFORGE_INTRA_EVEN", "") in ("", "0")
@@ -1011,7 +1018,7 @@ def _moon_track(tier_moon, tier_time, progress, same_instant=False, rate_r=None)
                 float(np.polyval(cr, t[i]))) for i, x in enumerate(ss)}, info
 
 
-# PER-FRAME MOON (lab, 2026-10-14). With repeated brackets the frames of ONE
+# PER-FRAME MOON (2026-10-14). With repeated brackets the frames of ONE
 # tier are spread over the whole of totality -- up to six minutes on a long eclipse -- and in
 # the corona-aligned stack the Moon is in a different place in every one of
 # them: 0.18 px/s half-res on one test set, 14 px over 79 s, about a
@@ -1064,8 +1071,13 @@ def _moonfree_log(c):
     return x, _pgauss(c, 3) > dark + 5.0 * sig
 
 
+#: Nothing finer than this (half-res px, Gaussian sigma) enters the moon-free
+#: correlation. See corona_shift_moonfree: THE SENSOR'S OWN PATTERN.
+MOONFREE_LOWCUT = 1.5
+
+
 def corona_shift_moonfree(ref, mov, sat_ref, sat_mov, mref, mmov, R,
-                          hp=6.0, rin=1.15, upsample=20, with_q=False):
+                          hp=6.0, rin=1.15, upsample=20, with_q=False, lo=None):
     """Shift registering `mov` to `ref` on the corona, for frames whose Moons
     are in DIFFERENT places on the corona (repeated brackets). Returns the
     shift, or None when too little corona is left.
@@ -1088,7 +1100,27 @@ def corona_shift_moonfree(ref, mov, sat_ref, sat_mov, mref, mmov, R,
     of the masked disc 2 sigma out, past the 1.15 R margin, and the rate
     depended on which frame was the reference (0.24 vs 0.35 px/s on the
     same seven 1/1000 s frames); at 6 px all three choices of reference give
-    0.35 on the 1/8 s tier, 0.31-0.36 on 1/1000 s."""
+    0.35 on the 1/8 s tier, 0.31-0.36 on 1/1000 s.
+
+    THE SENSOR'S OWN PATTERN (2026-11-10). A high-pass alone keeps the
+    scale of one pixel, and at that scale two frames of one camera share what
+    is not sky: the photosites' own response and offsets, the same in every
+    frame and at the same place. With no flat it is the sharpest thing in the
+    correlation, and it sits at zero shift. On a tracked repeated-bracket set
+    the sky drifted 0.1 px/s across the sensor (a star: 6.9 px in 66 s, read
+    on the bare frames) and this function returned 0.00 px for every pair,
+    within a tier and across tiers, with a clear peak (q 160-230): the frames
+    were stacked on the sensor, the corona and the stars smeared along 8 px,
+    and the Moon's rate against the corona came out at 0.369 px/s where the
+    eclipse elements give 0.274. (The rates quoted above, 0.35 "from the
+    star field" included, were read on that set in that state.) With the
+    band closed below at 1.5 px the same frames give the star's drift to
+    0.005 px/s and the rate 0.287-0.299 px/s whichever frame is the
+    reference; 1.5, 2 and 2.5 px agree, so nothing of the pattern is left
+    to pull. The band's upper end stays at 6 px: at 8 and 10 px the pairs
+    of a mid and a long tier lost their peak (q 15-19 and 5-9 against
+    36-41), and that peak had been the pattern's (q 84-100 before)."""
+    lo = MOONFREE_LOWCUT if lo is None else float(lo)
     a, oa = _moonfree_log(ref)
     b, ob = _moonfree_log(mov)
     H, W = a.shape
@@ -1099,8 +1131,12 @@ def corona_shift_moonfree(ref, mov, sat_ref, sat_mov, mref, mmov, R,
     sm = sat_mov if (sat_mov is not None and sat_mov.shape == a.shape) else np.zeros(a.shape, bool)
     ga = (oa & (ra > 1.1 * R) & ~ndimage.binary_dilation(sr, iterations=4)).astype(np.float32)
     gb = (ob & (rb > 1.1 * R) & ~ndimage.binary_dilation(sm, iterations=4)).astype(np.float32)
-    a = (a - _pgauss(a * ga, hp) / np.maximum(_pgauss(ga, hp), 1e-3)) * ga
-    b = (b - _pgauss(b * gb, hp) / np.maximum(_pgauss(gb, hp), 1e-3)) * gb
+    def _nb(x, g, s_):
+        return _pgauss(x * g, s_) / np.maximum(_pgauss(g, s_), 1e-3)
+    # the band: below `hp`, and (the lower end, by the same normalized
+    # convolution) nothing finer than `lo`
+    a = ((_nb(a, ga, lo) if lo > 0 else a) - _nb(a, ga, hp)) * ga
+    b = ((_nb(b, gb, lo) if lo > 0 else b) - _nb(b, gb, hp)) * gb
     common = (ga * gb) * ((ra > rin * R) & (rb > rin * R))
     if float(common.mean()) < 0.02:
         return None
@@ -1270,7 +1306,7 @@ def _pfm_weight(shape, cy, cx, ty, tx, R, margin, soft=1.0):
     return w
 
 
-# ONE MOON FOR A SINGLE PASS (lab, 2026-10-15). With the tiers placed on the
+# ONE MOON FOR A SINGLE PASS (2026-10-15). With the tiers placed on the
 # corona (moon-free links), a bracket shot once through takes every tier's
 # Moon from the moment that tier was shot: on the reference test set 27 px apart
 # from 1/500 s to 1.6 s over 60 s. Each tier masked to its OWN disc then
@@ -4315,7 +4351,7 @@ def shift_bayer_even(a, dy, dx):
 
 
 def shift_bayer_subpixel(a, dy, dx, keep=None):
-    """Shift a Bayer mosaic by a FRACTIONAL number of pixels (lab 0.25.1).
+    """Shift a Bayer mosaic by a FRACTIONAL number of pixels (0.25.1).
 
     shift_bayer_even() rounds every shift to 2 px so the colour pattern stays
     put. That threw away up to 1 px per axis of each frame's measured
@@ -4491,7 +4527,17 @@ def holds_lights(folder, d):
 def find_short_dir(folder):
     """A subfolder of short exposures kept apart from the bracket (0.24 lab):
     the first one whose name has "short" or "prom" in it and holds frames. Its
-    frames feed the prominence layer and nothing else."""
+    frames feed the prominence layer and nothing else. A folder chosen by
+    hand in tab 1 (frameselect.dir_override) comes first; "off" means none."""
+    try:
+        from .frameselect import dir_override
+        _st, _p = dir_override(folder, "short")
+        if _st == "off":
+            return None
+        if _st == "path":
+            return _p
+    except Exception:
+        pass
     try:
         for name in sorted(os.listdir(folder)):
             p = os.path.join(folder, name)
@@ -4806,6 +4852,18 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         wd = workdir(folder)
         _mwd = wd
         paths = list_raws(folder)
+    # FRAMES FORCED IN by the user (Frames panel, frameselect.py): they pass
+    # the not-totality test, the sharpness choice and the brightness test,
+    # and the log says so each time
+    try:
+        from .frameselect import forced as _fs_forced, key as _fs_key
+        _fk = _fs_forced(folder)
+        _forced = {p for p in paths if _fs_key(p, folder) in _fk}
+    except Exception:
+        _forced = set()
+    if _forced:
+        progress.log(f"{len(_forced)} frame(s) forced in by you: "
+                     + ", ".join(sorted(os.path.basename(p) for p in _forced)), None)
     if len(paths) < 3:
         raise RuntimeError(f"only {len(paths)} raw files found in {folder}")
     progress.log(f"{len(paths)} raw files found", 0.01)
@@ -5024,7 +5082,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     # once, which is why it is a choice: the peak working set goes up by roughly
     # (frames - 1) x one tier's worth of arrays.
     _clip_stack = str(stack_combine or "mean").strip().lower() == "clip"
-    # PER-FRAME MOON (lab 2026-10-14): on by itself for repeated brackets,
+    # PER-FRAME MOON (2026-10-14): on by itself for repeated brackets,
     # ECLIPSEFORGE_PERFRAME_MOON=0 switches it off, =1 forces it on any set.
     _pfm_env = os.environ.get("ECLIPSEFORGE_PERFRAME_MOON", "").strip()
     _pfm_on = (_pfm_env == "1" or (_pfm_env == ""
@@ -5459,6 +5517,41 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     hot = np.zeros_like(hot)
                     nhot = 0
                 stats["hot_pixels"] = nhot
+        # PER-TIER CALIBRATION (2026-10-28): what this tier gets, said once
+        # per tier, and how far the dark is scaled to reach it. Scaling down
+        # is safe; scaling up multiplies the master's own noise too, so beyond
+        # DARK_EXTRAP_MAX times the darks' exposure the tier gets the bias only.
+        _dk_use = dark_rate is not None
+        if bias_master is not None or dark_rate is not None:
+            _dci = (stats["calib"].get("dark") or {}) if isinstance(stats.get("calib"), dict) else {}
+            _dref = float(_dci.get("seconds_max") or _dci.get("seconds") or 0.0)
+            _tn = _exp_name(s)
+            if dark_rate is None:
+                _msg = f"calibration {_tn}: bias only (no dark frames)"
+            elif _dref <= 0:
+                _msg = f"calibration {_tn}: bias + dark"
+            else:
+                _fx = float(s) / _dref
+                _src = (f"fitted over {', '.join(f'{x:g}' for x in _dci.get('exposures', []))} s"
+                        if _dci.get("fitted") else f"from {_dref:g} s")
+                _bp = "bias + " if bias_master is not None else ""
+                if _fx > _dark.DARK_EXTRAP_MAX:
+                    _dk_use = False
+                    _msg = (f"[warn] calibration {_tn}: "
+                            + ("bias only" if bias_master is not None else "no dark")
+                            + f" -- the dark ({_src}) would be scaled up {_fx:.1f}x, "
+                            f"more than {_dark.DARK_EXTRAP_MAX:g}x")
+                elif _fx > _dark.DARK_EXTRAP_WARN:
+                    _msg = (f"[warn] calibration {_tn}: {_bp}dark scaled up {_fx:.1f}x "
+                            f"({_src}) -- its noise is scaled with it")
+                else:
+                    _msg = (f"calibration {_tn}: {_bp}dark {_src} (x{_fx:.3g})"
+                            + (" -- negligible at this exposure" if _fx < 0.01 else ""))
+            progress.log(_msg, None)
+            if isinstance(stats.get("calib"), dict):
+                stats["calib"].setdefault("tiers", {})[_tn] = {
+                    "bias": bias_master is not None, "dark": bool(_dk_use),
+                    "dark_scale": (round(float(s) / _dref, 6) if (_dref > 0 and dark_rate is not None) else None)}
         for p, bay, sat_level in raw_bayers:
             if hot is not None:
                 repair_hot(bay, hot)
@@ -5483,7 +5576,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             # ADU and does nothing; on the long ones it is the whole point.
             if bias_master is not None:
                 bay -= bias_master
-            if dark_rate is not None:
+            if _dk_use:
                 # the frame's own header time: with tiers by measured
                 # brightness the tier key is a measured, not a stated, time
                 bay -= dark_rate * np.float32(meta[p]["sec"] if (meta.get(p, {}).get("sec") or 0) > 0 else s)
@@ -5592,6 +5685,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         _med = float(np.median(list(_sf.values())))
         _lim = max(3.0 * _med, _med + 0.002)
         _drop = [p for p in files if _sf[p] > _lim]
+        for p in [q for q in _drop if q in _forced]:
+            progress.log(f"{_exp_name(s)}: {os.path.basename(p)} kept, forced in by you "
+                         f"({100 * _sf[p]:.2f}% saturated vs {100 * _med:.2f}% tier median)", None)
+        _drop = [p for p in _drop if p not in _forced]
         if _drop and len(_drop) < len(files):
             for p in _drop:
                 progress.log(f"[warn] {_exp_name(s)}: {os.path.basename(p)} dropped, "
@@ -5611,11 +5708,14 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             use = ranked[:max(1, (len(ranked) + 1) // 2)]
         else:
             use = ranked
+        use = use + [q for q in ranked if q in _forced and q not in use]
         sc = [scores[q] for q in ranked]
         quality[s] = {"scores": {os.path.basename(k): v for k, v in scores.items()},
                       "best": os.path.basename(best),
                       "used": [os.path.basename(q) for q in use],
                       "spread": float(sc[0] / max(sc[-1], 1e-9))}
+        if any(q in _forced for q in files):
+            quality[s]["forced"] = sorted(os.path.basename(q) for q in files if q in _forced)
         # intra-tier align to best (half-res), stack half & full-res bayer (even shifts)
         # Crop each frame around ITS OWN disc, not around the best frame's.
         #
@@ -5839,6 +5939,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     # a frame is left out only on a measurement with enough
                     # signal pixels behind it (never the reference: its gain
                     # is the median's complement, not a measurement of its own)
+                    if (p in _forced and p != best and _nok.get(p, 0) >= 50000
+                            and abs(np.log(_gain[p])) > np.log(1.15)):
+                        progress.log(f"{_exp_name(s)}: {os.path.basename(p)} "
+                                     f"{100 * (_gain[p] - 1):+.0f}% brightness vs tier median, "
+                                     f"kept, forced in by you (brightness corrected)", None)
+                        continue
                     if (p != best and _nok.get(p, 0) >= 50000
                             and abs(np.log(_gain[p])) > np.log(1.15) and len(use) - len(_drop) - 1 >= 2):
                         _drop.add(p)
@@ -6443,7 +6549,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         # a set with a long bracket, where the lock error is larger than this.
         _pc_on = (not _tangential and not _pair_old
                   and os.environ.get("ECLIPSEFORGE_PAIR_CORONA", "") not in ("", "0"))
-        # THE MOON-FREE LINK (lab, 2026-10-15). On the reference test set -- one
+        # THE MOON-FREE LINK (2026-10-15). On the reference test set -- one
         # pass, twelve tiers over 62 s -- the network followed the Moon: the
         # lunar track came out at 0.11 px/s where the corona says 0.42-0.44
         # (and a reference render measured 0.45 on the same frames), and matched directly
@@ -6676,7 +6782,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     # align_on_prominences(ref, tgt) has the same sense as
                     # phase_cross_correlation(ref, tgt), so the link reads
                     # shift[tgt] - shift[ref], exactly like the correlation pairs.
-                    # PROMINENCE LINKS FOLLOW THE MOON (lab, 2026-10-15). On the
+                    # PROMINENCE LINKS FOLLOW THE MOON (2026-10-15). On the
                     # reference full run, with the tiers placed by moon-free corona
                     # links, every prominence link disagreed with that placement
                     # in proportion to the time between the two tiers: 0.39
@@ -9183,7 +9289,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                "prealigned": bool(_keep_reg),
                # changes the merged data, like everything above
                "colour_planes": str(colour_planes),
-               # lab 0.25.1: sub-pixel intra-tier stacking changes every tier
+               # 0.25.1: sub-pixel intra-tier stacking changes every tier
                "intra_subpixel": bool(INTRA_SUBPIXEL),
                "switches": env_switches(),
                "build": __version__},

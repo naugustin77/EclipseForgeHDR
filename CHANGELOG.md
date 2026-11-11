@@ -5,6 +5,124 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.30.0
+
+**Re-stack once:** no 0.29.x cache is reused (new cache family). The stack
+changes in three places: the moon-free links between exposures, darks at
+several exposures, and frames switched off in the Frames panel.
+
+**Workflow**
+- Five tabs: 1 Images, 2 Processing, 3 Result, 4 Export, 5 Extras, with a thin
+  top bar (folder, status, run progress) on every tab. A run that finishes
+  opens tab 3; Import HDR skips tabs 1 and 2.
+- **Frames panel** (tab 1): every frame found, grouped by role (corona
+  brackets, short exposures, contact frames, flats, darks, bias), each with a
+  preview from the raw data (strong / gentle stretch / as exposed), its
+  exposure, time, last-run status and sharpness.
+  - Auto / Off / Force per frame. Off frames are left out of every reader
+    (lights, short exposures, flats, darks, bias), so switching one off
+    re-stacks as if the file were gone. Force (bracket frames only) passes the
+    saturation test, the best-frame choice and the brightness test; each
+    override is logged. Stored in `eclipseforge_frames.json` in the image
+    folder, which survives Clear cache.
+  - Darks, bias, short-exposure, contact and phases folders can be chosen by
+    hand (a path, empty for automatic, `off` for none).
+- **Checklist** (tab 1) of what the folder holds and what is missing.
+- **Recipe check** (tab 2): the stacking options against the loaded data —
+  simple stack with several exposures, Moon Align with the Moon drifting more
+  than 1 px within an exposure, colour planes as recorded with a low Sun, no
+  darks with hot-pixel repair off, a recipe saved for another camera, and
+  more. Warnings and notes, a Fix button where one applies; Start is never
+  blocked.
+- **Site picker on an OpenStreetMap map**, with the path of totality drawn from
+  the eclipse's Besselian elements and the duration and contacts for a clicked
+  point. 14 total or hybrid eclipses from 2017 to 2037 (elements from NASA's
+  eclipse pages, checked against the published central durations and times),
+  with city lists. Tiles are cached on disk.
+- Tab 3 says when the result comes from settings that tab 2 has changed since.
+- **Export cards** (tab 4), each with a thumbnail from the preview layers and
+  its own button, or all ticked ones in a queue: the picture (with the
+  prominence pair and the Moon layer), the plain HDR stack (one log stretch,
+  no detail layers, no look), the linear HDR merge, the polar map, the polar
+  map in layers, and every detail view.
+
+**Stack**
+- **Moon-free links above the sensor's pattern:** the links between exposures
+  are measured on a band that leaves out the finest, pixel-scale structure,
+  where the camera's fixed pattern held the registration in place. On a
+  repeated-bracket test set the Moon-to-corona drift rate came out 0.36 →
+  0.31 px/s, a star 5.5 × 3.8 → 4.0 × 3.7 px, and the pixel-scale grain 39 %
+  lower.
+- **Darks at several exposures** are stacked per exposure and fitted per
+  photosite (with a bias: rate × time; without: offset + rate × time). A dark
+  is never scaled up more than 10× its own exposure (a warning above 4×); the
+  log says per exposure what calibration it gets.
+- **Earthshine strength from the data:** the long frames are split into two
+  halves; the agreement of the two Moon layers decides how much of the
+  structure is shown (left smooth below 0.10). The Moon layer is rebuilt once.
+
+**Rendering**
+- **Inner softening** (`limbSoft`, `limbSoftR`, inner corona group): eases the
+  partial convolution, the inner and filament detail, Structure and the final
+  sharpening next to the Moon's edge, full from the chosen radius. Brightness
+  and colour untouched; 0 = off and bit-identical.
+
+**Exports**
+- **Linear HDR merge:** `hdr_rgb` as a 32-bit float TIFF, scene-linear, with a
+  linear ICC profile; 1.0 at the 99.99th percentile of the corona, nothing
+  clipped.
+- **Plain HDR stack:** the merge with one log stretch on luminance, colour
+  kept by ratio.
+- **Polar map:** position angle across (falling to the right, as on the sky at
+  the limb), distance up, in solar radii with a star match.
+  - Angle from solar or celestial north, or a north entered by hand (degrees
+    clockwise from the top of the picture) plus a fine turn. North by hand
+    counts like a star match everywhere in the app, celestial north following
+    from it through the P angle of the date.
+  - Radius linear or shape-true (log); N, E, S or W in the middle; mirrored
+    view; grid; the Earth for scale.
+  - As layers: the map without lettering (16-bit TIFF) and the lettering on
+    transparency, on the same canvas.
+  - Carousel tiles: the map cut into 3–10 seamless tiles of 3:4, 4:5, 1:1 or
+    9:16.
+
+**Extras** (tab 5, new). Every product is drawn from the run's own data; the
+lettering uses the bundled Inter and Lora typefaces (SIL Open Font License).
+- **Sky & Sun overlay:** radius rings, the position-angle ring, the solar axis
+  and equator, prominences with their height, catalogue stars by name, a
+  compass, a scale bar with the Earth to scale and the facts of the shot.
+  Turn, frame and social sizes; also as the picture, the lettering on
+  transparency and an SVG with the lettering as vectors.
+- **Poster:** the round picture over its unrolled map; with a soft look the map
+  can use the look's standard variant.
+- **Limb panorama:** the inner corona unwrapped along the Moon's edge at the
+  picture's resolution, prominences marked with their height.
+- **Corona in motion:** for repeated brackets stacked with HDR per bracket — the
+  brackets placed on the corona, each through the same partial convolution,
+  as a GIF and MP4 loop.
+- **Film:** the single frames, the merged stack, the stack stretched to the
+  picture's tones, the finished picture, then the picture unrolling into its
+  polar map. Picture-up option (as captured, solar or celestial north, zenith,
+  90°/180° turns); without a north, nothing is turned to north. MP4 through
+  ffmpeg (the system's, or the one bundled with `imageio-ffmpeg`), else a GIF.
+- **Corona sound:** a line sweeps around the Sun; the brightness along it is
+  the loudness of one note per distance. Prominences ring bells — tall, thin
+  ones high and bright, broad ones deep and long, louder the bigger. WAV, and
+  an MP4 with the picture and the sweeping line.
+- **Social formats:** 16:9, 1:1 post, 4:5 post, 3:4 post, 9:16 reel/story at
+  the sizes the apps show, with safe zones for reels, stories and posts that
+  keep the lettering clear of the apps' own buttons.
+- **Prominences found on the linear stack,** not on the rendered look, so the
+  same prominences are marked and rung in every look.
+
+**Fixes**
+- Frame previews and the film's frames are decoded as the sensor recorded
+  them; the decoder no longer turns a frame the camera flagged as portrait.
+
+**Requirements**
+- New: `certifi` (CA certificates for the map tiles) and `imageio-ffmpeg` (an
+  ffmpeg for the clips). Both are installed with the app.
+
 ## 0.29.2
 
 **Caches from 0.28.0 to 0.29.1 stay valid**; nothing in the stack or the

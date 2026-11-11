@@ -1,4 +1,4 @@
-"""HDR PER BRACKET (lab, 2026-10-16).
+"""HDR PER BRACKET (2026-10-16).
 
 The default for repeated brackets stacks every exposure across all brackets
 (frame gains and the Moon placed per frame), then merges the stacked tiers
@@ -29,7 +29,7 @@ built from the tier stacks after the merge (the inner short stack, the
 prominence stack). Only the merged HDR itself is replaced.
 """
 from __future__ import annotations
-import os, time, shutil
+import json, math, os, time, shutil
 import numpy as np
 
 BRACKET_KAPPA = 3.0        # rejection threshold across brackets, in noise sigma
@@ -464,6 +464,61 @@ def hdr_per_bracket(folder, wd, hdr, bracket_of, sec_of, epoch, run_kw, ref,
                  f"(> {cut:.1f} sigma from the median of the brackets, outside the limb band); "
                  f"{time.time() - t_start:.0f} s", None)
     del hm, wm
+    # FOR THE EXTRAS TAB (corona activity, 0.30.0): every bracket's own
+    # merge kept as reduced luminance (at most 1600 px wide, float32) with its
+    # weight map, a few MB each, in brackets_lum/. The full-size merges go.
+    try:
+        ldir = os.path.join(wd, "brackets_lum")
+        shutil.rmtree(ldir, ignore_errors=True)
+        os.makedirs(ldir, exist_ok=True)
+        for it in items:
+            hb = np.load(it["h"], mmap_mode="r")
+            wb = np.load(it["w"], mmap_mode="r")
+            st = max(1, int(math.ceil(hb.shape[1] / 1600.0)))
+            if hb.ndim == 3:
+                lum = (0.2126 * np.asarray(hb[::st, ::st, 0], np.float32) + 0.7152 * np.asarray(hb[::st, ::st, 1], np.float32)
+                       + 0.0722 * np.asarray(hb[::st, ::st, 2], np.float32))
+            else:
+                lum = np.asarray(hb[::st, ::st], np.float32)
+            np.save(os.path.join(ldir, f"hdr_{it['b']}.npy"), lum)
+            np.save(os.path.join(ldir, f"w_{it['b']}.npy"), np.asarray(wb[::st, ::st], np.float32))
+            del hb, wb, lum
+        # and, for "corona in motion", every bracket's luminance at FULL size
+        # in a box around the Sun (3.2 radii, inside the frame), its level and
+        # transparency matched to the merge, as float16 in units of the inner
+        # corona (the merge's median luminance 1.05-1.3 radii)
+        box = None
+        if tgt is not None:
+            Rt_ = float(tgt[2])
+            half_ = 3.2 * Rt_
+            y0b, y1b = int(max(0, tgt[0] - half_)), int(min(kh, tgt[0] + half_))
+            x0b, x1b = int(max(0, tgt[1] - half_)), int(min(kw, tgt[1] + half_))
+            yy_, xx_ = np.ogrid[0:Lm.shape[0], 0:Lm.shape[1]]
+            rr_ = np.hypot(yy_ - tgt[0] / 2, xx_ - tgt[1] / 2) / (tgt[2] / 2)
+            ring_ = Lm[(rr_ > 1.05) & (rr_ < 1.3)]
+            norm = float(np.median(ring_)) if ring_.size else 1.0
+            norm = norm if np.isfinite(norm) and norm > 0 else 1.0
+            box = [y0b, y1b, x0b, x1b]
+            for it in items:
+                hb = np.load(it["h"], mmap_mode="r")
+                if hb.ndim == 3:
+                    a_ = (np.asarray(hb[y0b:y1b, x0b:x1b, :3], np.float32) - it["offset"][None, None, :]) / it["gain"]
+                    lum = 0.2126 * a_[..., 0] + 0.7152 * a_[..., 1] + 0.0722 * a_[..., 2]
+                else:
+                    a_ = None
+                    ol_ = float(0.2126 * it["offset"][0] + 0.7152 * it["offset"][1] + 0.0722 * it["offset"][2])
+                    lum = (np.asarray(hb[y0b:y1b, x0b:x1b], np.float32) - ol_) / it["gain"]
+                wbx = np.asarray(np.load(it["w"], mmap_mode="r")[y0b:y1b, x0b:x1b], np.float32)
+                lum[wbx <= 0] = np.nan
+                np.save(os.path.join(ldir, f"win_{it['b']}.npy"), np.clip(lum / norm, -6e4, 6e4).astype(np.float16))
+                if it.get("moon") is not None:
+                    it["rec"]["moon_px"] = [round(float(v), 2) for v in it["moon"]]
+                del hb, a_, lum, wbx
+        json.dump({"step": st, "brackets": [it["rec"] for it in items], "win_box": box,
+                   "win_norm": (norm if box else None), "target_moon": ([float(v) for v in tgt] if tgt else None)},
+                  open(os.path.join(ldir, "index.json"), "w"), indent=1)
+    except Exception as e:
+        progress.log(f"[warn] the brackets' reduced merges were not kept ({e})", None)
     if _dbg:
         np.save(os.path.join(wd, "bracket_rej.npy"), rejmap)
         np.save(os.path.join(wd, "bracket_tmax.npy"), tmap)
