@@ -4971,7 +4971,10 @@ function syncSteps(){
   const imp = document.body.classList.contains("srcimport");
   const hasFolder = imp ? !!$("importPath").value.trim() : (!!$("folder").value.trim() && (!!TL || $("cksec").style.display !== "none"));
   const running = $("pbarwrap").classList.contains("run");
-  document.body.classList.toggle("nofolder", !hasFolder && !imp);
+  // the welcome stays until there is something to work on, in either source
+  // mode (a remembered Import HDR with no file chosen used to hide it a moment
+  // after the page loaded)
+  document.body.classList.toggle("nofolder", !hasFolder);
   const sub = (n, t) => { const e = $("tsub" + n); if (e && e.textContent !== t) e.textContent = t; };
   const done = (n, d) => { const b = document.querySelector(`.tabbtn[data-tab="${n}"]`); if (b) b.classList.toggle("done", !!d); };
   sub(1, imp ? "finished HDR image" : (TL && TL.n ? `${TL.n} frames · ${(TL.exposures || []).length} exp.` : (hasFolder ? "folder loaded" : "choose a folder")));
@@ -4996,7 +4999,10 @@ document.addEventListener("keydown", e => {
 setInterval(syncSteps, 700);
 syncSteps();
 document.querySelectorAll(".nextbtn").forEach(b => b.addEventListener("click", () => setTab(+b.dataset.goto)));
-$("p1browse").addEventListener("click", () => $("brwFolder").click());
+$("p1browse").addEventListener("click", () => {
+  if (document.body.classList.contains("srcimport")) setSrcMode("raw");    // a folder means the raw bracket
+  $("brwFolder").click();
+});
 $("p1import").addEventListener("click", () => { const b = document.querySelector('#srcmode [data-mode="import"]'); if (b) b.click(); });
 
 // TAB 4, EXPORT (2026-11-08): one card per product, each with a small
