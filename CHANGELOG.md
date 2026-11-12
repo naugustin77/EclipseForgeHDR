@@ -115,7 +115,21 @@ lettering uses the bundled Inter and Lora typefaces (SIL Open Font License).
 - **Prominences found on the linear stack,** not on the rendered look, so the
   same prominences are marked and rung in every look.
 
+**Site and time**
+- **Camera GPS:** when the frames carry a GPS fix, its position and height are
+  offered in the site form (filled where the saved site has none, never saved
+  by themselves).
+- **Height lookup:** a "Look up" button next to Height asks the Open-Meteo
+  elevation service for the height of the typed position (Copernicus DEM
+  GLO-90, 90 m), on request. The height sets the air pressure for refraction
+  and enters the local eclipse circumstances.
+
 **Fixes**
+- **Canon CR3:** exposure time, ISO and the time of the shot are read from the
+  EXIF the camera writes inside the file (the CMT1/CMT2 boxes of the Canon
+  box in the movie header); the EXIF reader found none in a CR3, so a folder
+  of CR3 frames came out with no exposure groups. Camera, lens, focal length
+  and f-number for the report come from the same place.
 - Frame previews and the film's frames are decoded as the sensor recorded
   them; the decoder no longer turns a frame the camera flagged as portrait.
 

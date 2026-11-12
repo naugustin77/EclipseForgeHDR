@@ -60,6 +60,178 @@ def _exif_via_tifffile(path):
     return sec, int(iso), str(tags.get("DateTime", ""))
 
 
+# CANON CR3 (2026-11-11). A CR3 is an ISO base-media file, not a TIFF, and the
+# EXIF reader finds no tags in it -- every frame then came back without an
+# exposure time, and a folder of CR3 brackets had no exposure groups at all.
+# The camera writes its EXIF as small TIFF streams inside the Canon box of
+# the movie header: moov / uuid 85c0b687-820f-11e0-8111-f4ce462b6a48 / CMT1
+# (the main IFD: make, model, date) and CMT2 (the Exif IFD: exposure time,
+# f-number, ISO, the moment of the shot, lens). Read here directly, with no
+# extra library.
+_CANON_UUID = bytes.fromhex("85c0b687820f11e08111f4ce462b6a48")
+
+
+def _bmff_boxes(f, start, end):
+    """(type, payload_start, box_end) of the boxes between start and end."""
+    import struct
+    pos = start
+    while pos + 8 <= end:
+        f.seek(pos)
+        hdr = f.read(8)
+        if len(hdr) < 8:
+            return
+        size, typ = struct.unpack(">I4s", hdr)
+        head = 8
+        if size == 1:
+            size = struct.unpack(">Q", f.read(8))[0]
+            head = 16
+        elif size == 0:
+            size = end - pos
+        if size < head or pos + size > end:
+            return
+        yield typ.decode("latin-1"), pos + head, pos + size
+        pos += size
+
+
+def _tiff_ifd0(buf):
+    """Tag -> value of the first IFD of a TIFF stream (rationals as (num,
+    den), single values unwrapped)."""
+    import struct
+    if len(buf) < 8 or buf[:2] not in (b"II", b"MM"):
+        return {}
+    e = "<" if buf[:2] == b"II" else ">"
+    off = struct.unpack(e + "I", buf[4:8])[0]
+    if off + 2 > len(buf):
+        return {}
+    n = struct.unpack(e + "H", buf[off:off + 2])[0]
+    size = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
+    out = {}
+    for k in range(n):
+        q = off + 2 + 12 * k
+        if q + 12 > len(buf):
+            break
+        tag, typ, cnt = struct.unpack(e + "HHI", buf[q:q + 8])
+        if typ not in size:
+            continue
+        nb = size[typ] * cnt
+        if nb <= 4:
+            data = buf[q + 8:q + 8 + nb]
+        else:
+            vo = struct.unpack(e + "I", buf[q + 8:q + 12])[0]
+            if vo + nb > len(buf):
+                continue
+            data = buf[vo:vo + nb]
+        if typ == 2:
+            val = data.split(b"\0", 1)[0].decode("latin-1", "replace").strip()
+        elif typ in (5, 10):
+            fmt = e + ("I" if typ == 5 else "i") * (2 * cnt)
+            v = struct.unpack(fmt, data)
+            val = [(v[2 * i], v[2 * i + 1]) for i in range(cnt)]
+        elif typ in (1, 7):
+            val = data
+        else:
+            fmt = e + {3: "H", 4: "I", 9: "i"}[typ] * cnt
+            val = list(struct.unpack(fmt, data))
+        if isinstance(val, list) and len(val) == 1:
+            val = val[0]
+        out[tag] = val
+    return out
+
+
+def _cr3_tags(path):
+    """{"CMT1": {...}, "CMT2": {...}, "CMT4": {...}} from a Canon CR3 (CMT4:
+    the GPS IFD, when the camera recorded one); {} when not found."""
+    import os as _os
+    out = {}
+    try:
+        with open(path, "rb") as f:
+            end = _os.path.getsize(path)
+            for typ, a, b in _bmff_boxes(f, 0, end):
+                if typ != "moov":
+                    continue
+                for t2, a2, b2 in _bmff_boxes(f, a, b):
+                    if t2 != "uuid":
+                        continue
+                    f.seek(a2)
+                    if f.read(16) != _CANON_UUID:
+                        continue
+                    for t3, a3, b3 in _bmff_boxes(f, a2 + 16, b2):
+                        if t3 in ("CMT1", "CMT2", "CMT4"):
+                            f.seek(a3)
+                            out[t3] = _tiff_ifd0(f.read(b3 - a3))
+                break
+    except Exception:
+        return {}
+    return out
+
+
+def _cr3_exif(path):
+    """(exposure_seconds, iso, timestamp) from a CR3's own EXIF, or None."""
+    t = _cr3_tags(path)
+    ex = t.get("CMT2") or {}
+    exp = ex.get(0x829A)
+    if not exp:
+        return None
+    num, den = exp
+    if not den:
+        return None
+    iso = ex.get(0x8827) or ex.get(0x8833) or 0
+    if isinstance(iso, (list, tuple)):
+        iso = iso[0] if iso else 0
+    ts = ex.get(0x9003) or (t.get("CMT1") or {}).get(0x0132) or ""
+    return float(num) / float(den), int(iso), str(ts)
+
+
+def _dms(v, ref):
+    """Degrees from an EXIF (deg, min, sec) of rationals and its N/S/E/W."""
+    try:
+        d = [float(a) / float(b) if b else 0.0 for a, b in v]
+    except TypeError:
+        return None
+    x = d[0] + (d[1] if len(d) > 1 else 0.0) / 60.0 + (d[2] if len(d) > 2 else 0.0) / 3600.0
+    return -x if str(ref).strip().upper()[:1] in ("S", "W") else x
+
+
+def read_gps(path):
+    """The camera's GPS fix in a frame: dict(lat, lon, alt) with alt in metres
+    above sea level or None, or None when the frame carries no position.
+    Never raises (GPS-tagged frames: cameras with GPS, or a phone app that
+    writes the position into the files)."""
+    try:
+        if os.path.splitext(path)[1].lower() == ".cr3":
+            g = _cr3_tags(path).get("CMT4") or {}
+            lat_v, lat_r, lon_v, lon_r = g.get(2), g.get(1), g.get(4), g.get(3)
+            alt_v, alt_r = g.get(6), g.get(5)
+            if isinstance(alt_r, (bytes, bytearray)):
+                alt_r = alt_r[0] if alt_r else 0
+        else:
+            import exifread
+            with open(path, "rb") as f:
+                t = exifread.process_file(f, details=False)
+            def rat(tag):
+                x = t.get(tag)
+                return None if x is None else [(int(r.num), int(r.den)) for r in x.values]
+            lat_v, lon_v, alt_v = rat("GPS GPSLatitude"), rat("GPS GPSLongitude"), rat("GPS GPSAltitude")
+            lat_r, lon_r = str(t.get("GPS GPSLatitudeRef", "N")), str(t.get("GPS GPSLongitudeRef", "E"))
+            ar = t.get("GPS GPSAltitudeRef")
+            alt_r = int(ar.values[0]) if ar is not None and ar.values else 0
+            if alt_v:
+                alt_v = alt_v[0]
+        if not lat_v or not lon_v:
+            return None
+        lat, lon = _dms(lat_v, lat_r), _dms(lon_v, lon_r)
+        if lat is None or lon is None or (lat == 0.0 and lon == 0.0) or abs(lat) > 90 or abs(lon) > 180:
+            return None
+        alt = None
+        if alt_v and alt_v[1]:
+            alt = float(alt_v[0]) / float(alt_v[1]) * (-1.0 if int(alt_r or 0) == 1 else 1.0)
+            if not -500.0 <= alt <= 9000.0:
+                alt = None
+        return dict(lat=lat, lon=lon, alt=alt)
+    except Exception:
+        return None
+
+
 def read_camera_info(path):
     """Best-effort camera/lens strings for the run report. Never raises."""
     info = {}
@@ -84,6 +256,18 @@ def read_camera_info(path):
             info["f_number"] = float(v.num) / float(v.den)
     except Exception:
         pass
+    if not info.get("camera") and os.path.splitext(path)[1].lower() == ".cr3":
+        try:
+            t = _cr3_tags(path)
+            c1, c2 = t.get("CMT1") or {}, t.get("CMT2") or {}
+            info["camera"] = " ".join(str(x) for x in (c1.get(0x010F), c1.get(0x0110)) if x) or None
+            info["lens"] = info.get("lens") or c2.get(0xA434)
+            for key, tag in (("focal_mm", 0x920A), ("f_number", 0x829D)):
+                v = c2.get(tag)
+                if v and v[1]:
+                    info[key] = float(v[0]) / float(v[1])
+        except Exception:
+            pass
     return {k: v for k, v in info.items() if v}
 
 
@@ -92,6 +276,10 @@ def read_exif(path):
     from .fits import is_fits, fits_exif
     if is_fits(path):
         return fits_exif(path)
+    if os.path.splitext(path)[1].lower() == ".cr3":
+        r = _cr3_exif(path)
+        if r is not None:
+            return r
     try:
         import exifread
     except ImportError:

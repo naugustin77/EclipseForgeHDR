@@ -910,7 +910,7 @@ label.optchk.nondef{color:var(--gold2)}
           <label class="opt" title="Fills in position, height, date, local time of mid-totality and UTC offset for that place, computed for this eclipse."><span class="optname">Place in the path</span><div class="inrow"><select id="siteCity" class="sel" disabled><option value="">(choose the eclipse first)</option></select></div></label>
           <label class="opt"><span class="optname">Latitude</span><div class="inrow"><input type="text" id="siteLat" placeholder="41.864906 or 41 51 53.7 N" spellcheck="false"></div></label>
           <label class="opt"><span class="optname">Longitude</span><div class="inrow"><input type="text" id="siteLon" placeholder="-1.978736 or 1 58 43.4 W" spellcheck="false"></div></label>
-          <label class="opt"><span class="optname">Height (m, optional)</span><div class="inrow"><input type="text" id="siteH" placeholder="1000" spellcheck="false"></div></label>
+          <label class="opt"><span class="optname">Height (m, optional)</span><div class="inrow"><input type="text" id="siteH" placeholder="1000" spellcheck="false"><button id="siteHLook" class="mini" title="The height of the position above, from the Copernicus 90 m terrain model (Open-Meteo elevation service, online). Then Save.">Look up</button></div></label>
           <label class="opt"><span class="optname">Date of totality</span><div class="inrow"><input type="text" id="siteDate" placeholder="2026-08-12" spellcheck="false"></div></label>
           <label class="opt"><span class="optname">Local time (mid-totality)</span><div class="inrow"><input type="text" id="siteTime" placeholder="20:29:30" spellcheck="false"></div></label>
           <label class="opt"><span class="optname">UTC offset (h)</span><div class="inrow"><input type="text" id="siteTz" placeholder="+2" spellcheck="false"></div></label>
@@ -3739,9 +3739,37 @@ function _siteShow(j){
     $("siteDate").placeholder = c[0] || "2026-08-12"; $("siteTime").placeholder = (c[1] || "").slice(0, 8);
     m += (m ? " " : "") + `The camera clock says ${j.camera_time}; check its time zone.`;
   }
+  // the camera's own GPS fix, when the frames carry one: offered in the form
+  // (never saved by itself) where the saved site has no position or height
+  const g = j.camera_gps;
+  if (g){
+    const fmt = v => (Math.round(v * 1e5) / 1e5).toFixed(5);
+    const parts = [];
+    if (!s.lat_text && !$("siteLat").value.trim()){ $("siteLat").value = fmt(g.lat); $("siteLon").value = fmt(g.lon); parts.push("position"); }
+    if ((s.height_m == null || s.height_m === "") && !$("siteH").value.trim() && g.alt != null){ $("siteH").value = String(g.alt); parts.push("height"); }
+    if (parts.length) m += (m ? " " : "") + `The ${parts.join(" and ")} came from the camera's GPS; check and Save.`;
+  }
   $("siteMsg").textContent = m;
-  if (s.lat_text || s.date) $("siteBox").open = true;
+  if (s.lat_text || s.date || (g && !s.lat_text)) $("siteBox").open = true;
 }
+// the height of the typed position from a terrain model (server /api/elevation;
+// only on this click, as it sends the position to the elevation service)
+$("siteHLook").addEventListener("click", async e => {
+  e.preventDefault();
+  const b = $("siteHLook"); b.disabled = true;
+  $("siteMsg").textContent = "Looking up the height\u2026";
+  try {
+    const r = await fetch("/api/elevation", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({lat: $("siteLat").value, lon: $("siteLon").value})});
+    const j = await r.json();
+    if (!j.ok) $("siteMsg").textContent = j.error;
+    else {
+      $("siteH").value = String(j.height_m);
+      $("siteMsg").textContent = `Height ${j.height_m} m at ${j.lat.toFixed(4)}, ${j.lon.toFixed(4)}, from the Copernicus 90 m terrain model (via Open-Meteo); Save to apply.`;
+    }
+  } catch (err) { $("siteMsg").textContent = "The elevation service could not be reached."; }
+  b.disabled = false;
+});
 async function loadSite(){
   try { const r = await fetch("/api/site"); if (r.ok) _siteShow(await r.json()); } catch (e) {}
 }
@@ -4004,7 +4032,7 @@ $("mapUse").addEventListener("click", () => {
   $("siteDate").value = j.date; $("siteTime").value = j.mid_local; $("siteTz").value = _fmtOff(j.utc_offset);
   if ($("siteEcl").value !== j.date){ $("siteEcl").value = j.date; $("siteEcl").dispatchEvent(new Event("change")); }
   mapClose();
-  $("siteMsg").textContent = (j.total ? "" : "Not total at this place. ") + "Filled in from the map; add the height if you know it, then Save.";
+  $("siteMsg").textContent = (j.total ? "" : "Not total at this place. ") + "Filled in from the map; add the height (or Look up next to Height), then Save.";
 });
 (() => {
   const cv = $("mapCv");

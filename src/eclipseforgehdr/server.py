@@ -780,7 +780,33 @@ def _site_reply(folder):
     except Exception:
         path = None
     return {"ok": True, "site": {k: s.get(k) for k in keep if k in s}, "camera_time": cam,
-            "sun": sun, "path": path, "file": _ob.SITE_FILE}
+            "sun": sun, "path": path, "file": _ob.SITE_FILE, "camera_gps": _camera_gps(folder)}
+
+
+# THE CAMERA'S OWN POSITION (2026-11-12). A frame that carries a GPS fix (a
+# camera with GPS, or a phone app writing it into the files) gives the site
+# and its height without any typing; read once per folder from the middle
+# light frame, offered to the site form, never saved by itself.
+_GPS_CACHE = {}
+
+
+def _camera_gps(folder):
+    if folder in _GPS_CACHE:
+        return _GPS_CACHE[folder]
+    out = None
+    try:
+        from .raw import list_raws, read_gps
+        lights = list_raws(folder)
+        for p in (lights[len(lights) // 2:] + lights[:len(lights) // 2])[:3]:
+            out = read_gps(p)
+            if out:
+                out = {k: (round(v, 6) if k != "alt" else (round(v) if v is not None else None))
+                       for k, v in out.items()}
+                break
+    except Exception:
+        out = None
+    _GPS_CACHE[folder] = out
+    return out
 
 
 @app.get("/api/eclipses")
@@ -1022,6 +1048,44 @@ def _tile_ssl():
         except Exception:
             _TILE_SSL = ssl.create_default_context()
     return _TILE_SSL
+
+
+# THE HEIGHT OF A PLACE (2026-11-12), on request only: the "Look up" button
+# next to Height asks the Open-Meteo elevation service (Copernicus DEM GLO-90,
+# 90 m terrain model) for the height at the position typed in the site form;
+# one request per click, kept in memory.
+_ELEV = {}
+ELEV_URL = "https://api.open-meteo.com/v1/elevation?latitude={lat:.5f}&longitude={lon:.5f}"
+
+
+@app.post("/api/elevation")
+def elevation():
+    import urllib.request
+    from . import observer as _ob
+    from . import __version__
+    data = request.json if request.is_json else {}
+    try:
+        lat = _ob.parse_angle(data.get("lat"), "lat")
+        lon = _ob.parse_angle(data.get("lon"), "lon")
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    key = (round(lat, 5), round(lon, 5))
+    if key in _ELEV:
+        return jsonify({"ok": True, "height_m": _ELEV[key], "lat": lat, "lon": lon})
+    req = urllib.request.Request(ELEV_URL.format(lat=lat, lon=lon), headers={
+        "User-Agent": f"EclipseForgeHDR/{__version__} (eclipse image processing; site height)"})
+    try:
+        with urllib.request.urlopen(req, timeout=10, context=_tile_ssl()) as r:
+            j = json.loads(r.read().decode("utf-8"))
+        h = (j.get("elevation") or [None])[0]
+        if h is None:
+            raise ValueError("no height in the answer")
+        h = float(h)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"the elevation service could not be reached ({e})"}), 502
+    h = round(h)
+    _ELEV[key] = h
+    return jsonify({"ok": True, "height_m": h, "lat": lat, "lon": lon})
 
 
 @app.get("/api/tile/<src>/<int:z>/<int:x>/<int:y>.png")

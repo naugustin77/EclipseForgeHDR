@@ -14,9 +14,9 @@ a few minutes, then adjust the result on a live preview and export it.
 
 Everything runs on your own machine. No cloud, no account, no telemetry: the
 interface is a small web server on `127.0.0.1` that only your browser talks to.
-The one connection out is the map of the site picker, which downloads map
-tiles (OpenStreetMap / CARTO) and keeps them for offline use; nothing of your
-images leaves the computer.
+The site form can optionally use two open online services: map tiles for the
+site picker (OpenStreetMap), and a height lookup for the chosen position
+(Open-Meteo).
 
 | | |
 |:---:|:---:|
@@ -72,6 +72,11 @@ re-renders live, with no re-processing.*
   the earthshine strength is decided from the data.
 - **Inner softening** (inner corona group): eases detail and sharpening next to
   the Moon's edge, full from a chosen radius.
+- **Canon CR3 exposure times** are read from the camera's own EXIF block
+  inside the file; before, a folder of CR3 frames had no exposure groups.
+- **Site height:** taken from the camera's GPS when the frames carry a
+  position, or looked up on request from the Copernicus 90 m terrain model
+  (via Open-Meteo) with the new "Look up" button next to Height.
 - **Re-stack once:** caches from 0.29.x are not reused.
 - **New requirements** (installed automatically): `certifi` for the map tiles
   and `imageio-ffmpeg` for the video clips.
@@ -1197,6 +1202,13 @@ that nobody should be able to sell it or close it off, and that improvements
 stay available on the same terms. No widely used licence expresses exactly that,
 so it stays unlicensed while the question is open rather than taking a poor fit
 in a hurry. Suggestions are welcome in an issue.
+
+**Data used by the site form:** map tiles © OpenStreetMap contributors (and
+© CARTO for the dark style); heights from the Copernicus DEM GLO-90
+(© DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided
+under COPERNICUS by the European Union and ESA), served by the Open-Meteo
+elevation API; eclipse elements from NASA's eclipse web site; city lists from
+GeoNames. The typefaces Inter and Lora ship under the SIL Open Font License.
 
 ## Methods and references
 
