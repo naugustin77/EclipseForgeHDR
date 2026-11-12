@@ -227,11 +227,6 @@ def set_folder():
     except Exception:
         _cd = None
     try:
-        from .frameprod import find_phases_dir as _fpd
-        _pd = _fpd(folder)
-    except Exception:
-        _pd = None
-    try:
         from .frameselect import load as _sel_load2
         _dirs_set = dict(_sel_load2(folder).get("dirs") or {})
     except Exception:
@@ -257,7 +252,6 @@ def set_folder():
                     "short_count": len(list_raws(sd)) if sd else 0,
                     "frames_off": _sel_n["off"], "frames_forced": _sel_n["force"],
                     "contact_dir": _cd, "contact_count": len(list_raws(_cd)) if _cd else 0,
-                    "phases_dir": _pd, "phases_count": len(list_raws(_pd)) if _pd else 0,
                     "dirs_set": _dirs_set,
                     "tiffs": cand[:24]})
 

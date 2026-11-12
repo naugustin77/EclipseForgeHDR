@@ -25,8 +25,8 @@ several exposures, and frames switched off in the Frames panel.
     saturation test, the best-frame choice and the brightness test; each
     override is logged. Stored in `eclipseforge_frames.json` in the image
     folder, which survives Clear cache.
-  - Darks, bias, short-exposure, contact and phases folders can be chosen by
-    hand (a path, empty for automatic, `off` for none).
+  - Darks, bias, short-exposure and contact folders can be chosen by hand (a
+    path, empty for automatic, `off` for none).
 - **Checklist** (tab 1) of what the folder holds and what is missing.
 - **Recipe check** (tab 2): the stacking options against the loaded data —
   simple stack with several exposures, Moon Align with the Moon drifting more

@@ -700,11 +700,6 @@ label.optchk.nondef{color:var(--gold2)}
       <input type="text" id="dir_contact" class="dirpick" data-role="contact" spellcheck="false" placeholder="auto" title="Diamond ring / Baily's beads frames for the camera clock. Empty: a subfolder with 'diamond', 'ring', 'bead' or 'contact' in its name is used if found. 'off': none.">
       <button class="brw" data-dirrole="contact" title="Pick the folder">Browse…</button>
             </div></div>
-          <div class="opt optflat"><span class="optname">Partial phases folder</span>
-            <div class="inrow">
-      <input type="text" id="dir_phases" class="dirpick" data-role="phases" spellcheck="false" placeholder="auto" title="Frames of the partial phases; they take no part in the stack and are listed in the Frames panel. Empty: a subfolder with 'phase', 'partial' or 'sequence' in its name is used if found. 'off': none.">
-      <button class="brw" data-dirrole="phases" title="Pick the folder">Browse…</button>
-            </div></div>
     </div>
   </section>
   <section class="psec rawonly p1split">
@@ -1831,8 +1826,7 @@ async function loadFolder(){
     ? `flats: auto (${j.flat_count})` : "flats: none found";
   // the other frame folders: what was chosen by hand, else what was found
   for (const [role, dk, ck] of [["darks", "dark_dir", "dark_count"], ["bias", "bias_dir", "bias_count"],
-                                ["short", "short_dir", "short_count"], ["contact", "contact_dir", "contact_count"],
-                                ["phases", "phases_dir", "phases_count"]]){
+                                ["short", "short_dir", "short_count"], ["contact", "contact_dir", "contact_count"]]){
     const el = $("dir_" + role); if (!el) continue;
     const set = (j.dirs_set || {})[role] || "";
     el.value = set;

@@ -47,8 +47,8 @@ re-renders live, with no re-processing.*
 - **Frames panel** (tab 1): every frame found — brackets, short exposures,
   contact frames, flats, darks, bias — with a preview from the raw data. Switch
   a frame off, or force a bracket frame in past the automatic checks (forced
-  frames are marked). The darks, bias, short-exposure, contact and phases
-  folders can also be chosen by hand.
+  frames are marked). The darks, bias, short-exposure and contact folders can
+  also be chosen by hand.
 - **Recipe check** (tab 2): before Start, the chosen stacking options are
   checked against the loaded data, with a one-click fix where one applies.
   Start is never blocked.

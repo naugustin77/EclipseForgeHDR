@@ -83,7 +83,7 @@ def save(folder, off, force, dirs=None):
 # wrong one, the user names the folder in tab 1. Stored in the same file under
 # "dirs": {"darks": "path", "short": "off", ...}; a path inside the image
 # folder is kept relative. "off": use none even if one would be found.
-DIR_ROLES = ("darks", "bias", "short", "contact", "phases")
+DIR_ROLES = ("darks", "bias", "short", "contact")
 
 
 def dir_override(folder, role):
@@ -152,7 +152,7 @@ def fingerprint_extra(folder):
 # ------------------------------------------------------------------ the groups
 
 ROLES = (("lights", "Corona brackets", True), ("short", "Short exposures (prominences)", False),
-         ("contact", "Contact frames", False), ("phases", "Partial phases (Extras)", False),
+         ("contact", "Contact frames", False),
          ("flats", "Flats", False), ("darks", "Darks", False), ("bias", "Bias", False))
 
 
@@ -190,10 +190,8 @@ def groups(folder, flat_dir=None, bias_dir=None, dark_dir=None):
 def _find_dirs(folder, flat_dir, bias_dir, dark_dir, find_short_dir, find_contact_dir,
                resolve_flat_dir, resolve_calib_dir):
     dirs = {}
-    from .frameprod import find_phases_dir
     for role, fn in (("short", lambda: find_short_dir(folder)),
                      ("contact", lambda: find_contact_dir(folder)),
-                     ("phases", lambda: find_phases_dir(folder)),
                      ("flats", lambda: resolve_flat_dir(folder, flat_dir)),
                      ("darks", lambda: resolve_calib_dir(folder, "dark", dark_dir)),
                      ("bias", lambda: resolve_calib_dir(folder, "bias", bias_dir))):
