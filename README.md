@@ -29,12 +29,38 @@ Sun low in the sky the atmosphere takes the blue out of the corona's
 light, which is the warm cast. Right: the same layers after the colour and tone
 adjustments of the "Night navy" preset and the Moon layer.*
 
-![The EclipseForgeHDR interface](docs/images/eclipseforge_gui.jpg)
+![Tab 3, Result: the live preview with the look controls](docs/images/EclipseForgeHDR_GUI_Tab3.jpg)
 
-*The interface before 0.30.0. Since 0.30.0 the same controls sit in five tabs
-(Images, Processing, Result, Export, Extras); the row of buttons still switches
-the preview between the composite and each individual layer, and every slider
-re-renders live, with no re-processing.*
+*Tab 3, Result: the live preview with the look controls. The row of buttons
+under the preview switches between the composite and each individual layer;
+every slider re-renders live, with no re-processing.*
+
+<details>
+<summary><b>The other four tabs</b> (click to open)</summary>
+
+**1 · Images:** the folder, the calibration folders, a checklist of what was
+found, the shooting timeline and the Frames panel, where every frame can be
+switched off or forced in.
+
+![Tab 1, Images](docs/images/EclipseForgeHDR_GUI_Tab1.jpg)
+
+**2 · Processing:** the stacking options, the recipe check, the observing site
+and time, Start and the log.
+
+![Tab 2, Processing](docs/images/EclipseForgeHDR_GUI_Tab2.jpg)
+
+**4 · Export:** one card per product, each with a small preview: the picture,
+the plain HDR stack, the linear HDR merge, the polar map (also in layers) and
+the detail views.
+
+![Tab 4, Export](docs/images/EclipseForgeHDR_GUI_Tab4.jpg)
+
+**5 · Extras:** the Sky & Sun overlay, poster, limb panorama, corona in
+motion, film and corona sound.
+
+![Tab 5, Extras](docs/images/EclipseForgeHDR_GUI_Tab5.jpg)
+
+</details>
 
 ---
 
