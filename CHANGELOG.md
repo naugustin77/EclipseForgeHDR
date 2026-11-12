@@ -5,6 +5,29 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.30.1
+
+**No re-stack:** 0.30.0 caches stay valid. The star list and the detail
+layers are rebuilt on the next run.
+
+**Stars against the catalogue**
+- A false "the position given fits the stars worse than the time alone"
+  warning is fixed. A match on a faint candidate (below the star search's own
+  detection floor) lowered the magnitude limit the missing-star test asks of
+  the rest of the sky, so a brighter catalogue star with no signal could throw
+  out a good fit made with the site and time. The time-only fit, which does
+  not correct for refraction, then won because its misplaced prediction fell
+  on a noise bump. Faint candidates no longer raise that bar: when the test
+  fails only through faint matches, those are dropped (not marked) and the fit
+  must pass on the stars the search found on its own, three at least.
+  Measured: on a test stack the fit with the site now holds, with residuals of
+  0.4-4 px against 5-19 px without it, and the zenith direction and
+  refraction correction are kept. Chance alignments in 300 trials with
+  scrambled candidates on three test stacks: unchanged. A wrong longitude
+  sign is still caught on all three.
+- The warning now says what the fit with the position found (for example
+  "with it 4 stars but no clear-cut fit, without it 4") instead of "0".
+
 ## 0.30.0
 
 **Re-stack once:** no 0.29.x cache is reused (new cache family). The stack

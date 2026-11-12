@@ -364,6 +364,21 @@ def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
         if mir and len(pr) < 4:
             continue
         miss = missed(a, b, mir, pr)
+        # A FAINT CANDIDATE DOES NOT RAISE THE BAR (0.30.1, 2026-11-12): a
+        # match on a candidate below the search's own floor ("faint") lowers
+        # the faintest matched magnitude, and with it the limit the
+        # missing-star test asks of the rest of the sky. On one test stack a
+        # faint candidate on a mag-8.0 star made a mag-7.7 star with no signal
+        # count against a four-star solution with the site (residuals 0.4-4 px),
+        # and the time-only fit (5-19 px) won because its misplaced prediction
+        # fell on a noise bump. When the test fails only through faint
+        # matches, those are dropped -- not marked, the solution stands on the
+        # stars the search found on its own (three at least) and must pass
+        # the test with them.
+        if miss > 0:
+            pr_s = {i: c for i, c in pr.items() if not dets[i].get("faint")}
+            if max(3, min_match) <= len(pr_s) < len(pr) and missed(a, b, mir, pr_s) == 0:
+                pr, miss = pr_s, 0
         sc = len(pr) - 1.5 * miss - (1.0 if mir else 0.0)
         if len(pr) == 2:
             # TWO STARS (audit 2026-10-10): every pair scored exactly 2.0, so

@@ -1,4 +1,4 @@
-__version__ = "0.30.0"
+__version__ = "0.30.1"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -358,7 +358,10 @@ CACHE_FAMILIES = (
     # several exposures fitted per pixel and never scaled up past their own
     # range, and frames switched off in the Frames panel left out. No 0.29.x
     # cache is the same data: its own family, one re-stack per folder.
-    frozenset({"0.30.0"}),
+    # 0.30.1 changes only the star check against the catalogue (stars.json and
+    # the detail layers are rebuilt on their own build numbers): the stack is
+    # the same data.
+    frozenset({"0.30.0", "0.30.1"}),
 
 )
 

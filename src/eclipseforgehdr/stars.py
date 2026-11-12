@@ -42,7 +42,7 @@ from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 STARS_FILE = "stars.json"
 # A change here that alters WHICH stars are found must also bump detail.LAYER_BUILD:
 # the stars are lifted out of the corona while the layers are built (detail.py).
-STARS_BUILD = 8                # 8: catalogue to mag 10, faint candidates confirmed only down to the depth the picture reaches (2026-10-18). 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
+STARS_BUILD = 9                # 9: a faint candidate no longer raises the missing-star bar of a solution; such matches are dropped instead (2026-11-12). 8: catalogue to mag 10, faint candidates confirmed only down to the depth the picture reaches (2026-10-18). 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
 SIGMAS = (0.6, 1.0, 1.5, 2.25)        # band-pass widths, binned px (R ~ 300 px)
 RMIN = 1.4                             # inner limit, lunar radii
 Z_FLOOR = 6.0
@@ -420,11 +420,20 @@ def _catalogue_check(wd, g, out, Zpos, f, shape, sky_ok, progress=None):
         site_warning = None
         if site and site.get("ut") and site.get("lat") is not None:
             _nm = lambda s_: 0 if (not s_ or s_.get("ambiguous")) else int(s_.get("matches", 0))
+            # stars the fit with the place found, whether or not it was then
+            # judged clear-cut (0.30.1): the message says so instead of "0"
+            _nf = lambda s_: int(s_.get("matches", 0)) if s_ else 0
             st_t = {k: v for k, v in site.items() if k not in ("lat", "lon", "lat_text", "lon_text", "height_m")}
             sol_t = _sc.match(dets, g, ts, shape, zfun=zfun, progress=progress, site=st_t)
             if _nm(sol_t) >= _nm(sol) + 2:
+                if _nm(sol):
+                    _cmp = f"{_nm(sol)} vs {_nm(sol_t)} matches"
+                elif _nf(sol):
+                    _cmp = f"with it {_nf(sol)} stars but no clear-cut fit, without it {_nm(sol_t)}"
+                else:
+                    _cmp = f"no fit with it, {_nm(sol_t)} stars without it"
                 site_warning = (f"the position given fits the stars worse than the time alone "
-                                f"({_nm(sol)} vs {_nm(sol_t)} matches); position not used - check it, "
+                                f"({_cmp}); position not used - check it, "
                                 f"west longitudes and south latitudes are negative")
                 _log(progress, "stars: " + site_warning, None)
                 sol = sol_t
