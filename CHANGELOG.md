@@ -5,6 +5,139 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.31.0
+
+**Re-stack once:** 0.30.x caches are not reused (the stack changed: rejection,
+grouping, links between brackets, frame roles).
+
+**Tab 1: "How this was shot"**
+- New module survey.py. Before anything is stacked it reads the frames' own
+  data (exposure, time, ISO, aperture, focal length) and the camera's small
+  preview inside each raw file; no raw data are decoded. Rows from the
+  metadata show at once, those from the previews fill in as a background job
+  (seconds). Results are kept in the work folder (survey.json);
+  `python -m eclipseforgehdr.survey FOLDER` prints the report as text.
+- What it finds: the shooting pattern (one pass, exposure by exposure, a
+  repeated bracket, brackets that hold different exposures), the exposure
+  ladder and its steps, frames per exposure, pauses, ISO, aperture or focal
+  length that change within the set; from the previews, in fractions of the
+  Moon's radius: the Moon's size and the distance to the frame edges, framing
+  that moved between brackets or drifts (masked correlation on the corona with
+  both Moons masked), frames that look like diamond ring or beads, frames whose
+  limb is smeared, and how far each exposure clips.
+- What it says: a verdict on top; "Before you start" with the settings to
+  change for this set (Tier combine, Tiers), each with its reason, the current
+  value and an Apply button, and the single frames to give another role or
+  switch off; "What to expect" (limits first); and "If the result shows a
+  problem": settings that help on some sets and hurt on others, with what to
+  look for and the way back (Merge weight with steps of 2 EV and more). A
+  suggestion can carry an "If it goes wrong" line (Tiers "By measured
+  brightness": which log lines to read, and when to go back).
+- A setting left over from another folder is caught: with camera files and one
+  ISO and aperture, Tiers "By shutter speed" is recommended, so a leftover "By
+  measured brightness" shows as a change to make. The recipe check (tab 2)
+  warns the same, with a fix.
+
+**Frames panel: another role for a frame**
+- A frame lying in the image folder can be a bracket frame, a short exposure
+  (prominence layer only) or a contact frame (camera clock only). Nothing is
+  moved; the choice is kept in eclipseforge_frames.json ("roles"). The frame
+  leaves the bracket and joins the frames of that role wherever they are read
+  (prominence layer, camera clock, timeline, checklist).
+- The survey's proposals ("contact frame?", "smeared?") show on the cards; one
+  click applies one, "Apply survey" applies them all.
+
+**Stops, and "Check your result"**
+- The run stops (with a message that says what is wrong and what to change,
+  shown as "stopped", no traceback) when: the cross-tier alignment contradicts
+  itself beyond its tolerance; it cannot be solved; no exposure links to any
+  other; the per-tier Moon edges spread more than 20 % of the lunar radius
+  after alignment; the exposures disagree on the Moon's size by more than 15 %;
+  or the Moon would move within one exposure group far more than it can in the
+  time the group spans (the frames do not show one scene). Before, these
+  carried on to a ghost or doubled picture with a red log line as the only sign.
+- Red in the log now means the run stopped. Lines that only mention a failure
+  the run has a fallback for are orange.
+- "Check your result", a group at the top of tab 3: the warnings of the run that
+  can show in the picture, worded for the picture (what may show, what to try),
+  with the log line. A run that only rebuilds layers keeps the stacking run's
+  notes.
+
+**Stack**
+- Clipped mean: around every frame pixel more than 5 noise sigmas off the
+  median, the rejection follows the connected pixels of that frame that still
+  deviate by more than 1.5 sigmas and adds 3 px. On a test set where something
+  crossed the field during a run of repeated brackets, the per-pixel cut had
+  kept the faint edge of every copy (5 sd above the sky noise); now the path is
+  at the noise level, with 0.10 % of frame-pixels rejected instead of 0.04 %.
+- Tiers "By measured brightness": each pair of frames is placed on each other
+  before its brightness ratio is measured, and with camera files a shutter
+  speed is only split, never merged with another. On a set of two brackets a
+  minute apart, three pairs of exposures 1/3 EV apart had been merged into one
+  tier each (a doubled Moon); now it gives one tier per exposure. On a set that
+  changes ISO part-way, each shutter speed splits into one tier per ISO (the
+  measured ratio within 4 % of the ISO ratio).
+- Brackets shot more than 10 s apart are linked on the corona at coarse scales
+  (6-30 and 4-20 px band-passes that must agree, hot photosites out, both
+  tiers' Moons masked): the finest band of a faint corona is the sensor's own
+  pattern and tied such pairs at (0, 0). A tier no link reaches takes the shift
+  of the nearest linked tier in time. Prominence links are not used where a
+  patch link holds, nor across more lunar travel than their spread limit.
+  ECLIPSEFORGE_BRACKET_LINKS=0 / ECLIPSEFORGE_PROM_KEEP=1 restore the old ways.
+- Cross-tier links come from patches first, for every pair; the window
+  correlation runs only where the patches do not hold. A pair with nothing
+  usable in the correlation window (a tightly framed set) is linked from 256 px
+  patches over the whole frame. ECLIPSEFORGE_PATCH_LINKS=0 restores the
+  window-first order.
+- Per-channel linear fit: checked before use on each tier's own pixels; if a
+  channel would go below zero on more than 1 % of them (a green ring on a test
+  set), the single scale factor per tier is used and the log says so.
+- HDR per bracket: the Moon's weight in the bracket combine has no floor, and a
+  bracket whose Moon sits more than 3 px from the target's comes in only outside
+  both discs, over 0.06 R: no corona inside the Moon and no sharp ring where the
+  other bracket takes over.
+- A stack build number is part of the cache check, so a change to the stack
+  inside one version re-stacks.
+
+**Moon layer (earthshine)**
+- The structure on the disc is checked against a map of the real Moon (the LRO
+  camera's colour map from NASA's Scientific Visualization Studio, reduced to
+  720 x 360 grayscale, public domain): drawn as the near side in every position
+  angle (3 deg steps), mirrored or not, with librations of -6/0/+6 deg, each
+  drawing and the disc band-passed alike and compared inside 0.85 R, the best
+  match set against the best of 60 random patterns with the disc's own texture.
+  Confirmed (4 sd above them and above every one): the structure goes in at
+  best/0.75 (at least 50 %). At chance level: the disc is left smooth.
+  Otherwise the halves test decides as before. Measured on three test sets:
+  6.9 and 6.3 sd (confirmed; one had been held to 22 % by the halves test) and
+  1.4 sd (rejected; the halves test had let 89 % of it through). THE MAP IS
+  USED FOR THIS CHECK ONLY: nothing from it is drawn into the picture. The log
+  and the run report give the numbers.
+- "Force earthshine" (Moon group): a second Moon layer built beside the checked
+  one, for a match above chance but not confirmed -- from all frames, or from
+  the better half of them (the better of two gets two tries for the random
+  patterns too). A pattern at chance level is never forced in; the box is then
+  greyed out and says why. Switching reloads one layer; it is remembered per
+  folder and noted in the run report.
+
+**Rendering**
+- No ring at the Sun's distance to the frame edge: the filament layer's radial
+  profile past the edge is carried on per sector, and Structure leaves the band
+  near the edge out of its ring means. Detail layers rebuild.
+
+**Stars**
+- A point source is marked and laid back as a star only when the catalogue
+  confirms it; without a clear solution every candidate stays in the picture as
+  stacked. When the normal match finds no solution, a deeper pass (to mag 9.0 /
+  9.5, five stars or more) runs once, for long lenses with only faint stars near
+  the Sun. On a folder's first stack the frames' time now comes from the folder
+  scan when the report is not written yet.
+
+**Interface**
+- The progress bar never goes back and the time left falls steadily (the total
+  follows each new estimate over about 10 s); the stored timing profile is kept
+  apart for HDR per bracket.
+
 ## 0.30.1
 
 **No re-stack:** 0.30.0 caches stay valid. The star list and the detail

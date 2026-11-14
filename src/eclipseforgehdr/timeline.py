@@ -77,10 +77,18 @@ def build(folder, wd):
         from .frameselect import load as _sel_load, key as _sel_key
         _sel = _sel_load(folder)
     except Exception:
-        _sel, _sel_key = {"off": set(), "force": set()}, None
+        _sel, _sel_key = {"off": set(), "force": set(), "roles": {}}, None
     _sk = (lambda p: _sel_key(p, folder)) if _sel_key else (lambda p: os.path.basename(p))
     tab = _exif_table(folder, raws, wd)
-    paths = [p for p in raws if tab.get(os.path.basename(p), (None, None))[0]]
+    # frames of the image folder given another role in the Frames panel are
+    # not part of the bracket: drawn further down with the frames of that role
+    _moved = {}
+    try:
+        from .frameselect import MOVE_ROLES as _MR
+        _moved = {p: _sel["roles"][_sk(p)] for p in raws if (_sel.get("roles") or {}).get(_sk(p)) in _MR}
+    except Exception:
+        _moved = {}
+    paths = [p for p in raws if tab.get(os.path.basename(p), (None, None))[0] and p not in _moved]
     sec = {p: float(tab[os.path.basename(p)][0]) for p in paths}
     ep = {p: epoch_of(tab[os.path.basename(p)][1]) for p in paths}
     have_t = bool(paths) and all(ep[p] is not None for p in paths)
@@ -157,9 +165,15 @@ def build(folder, wd):
         try:
             from .pipeline import find_short_dir
             sd = find_short_dir(folder)
-            if sd:
-                sraws = list_raws(sd, selected=False)
-                stab = _exif_table(sd, sraws, wd)
+            sraws = list(list_raws(sd, selected=False)) if sd else []
+            stab = dict(_exif_table(sd, sraws, wd)) if sraws else {}
+            srole = {p: "short" for p in sraws}
+            for p, r_ in _moved.items():            # the image folder's frames given a role
+                if p not in srole:
+                    sraws.append(p)
+                    srole[p] = r_
+                    stab[os.path.basename(p)] = tab.get(os.path.basename(p), (None, None))
+            if sraws:
                 t0 = min(ep.values())
                 sgrp = {}
                 for p in sraws:
@@ -172,9 +186,9 @@ def build(folder, wd):
                         k = _sk(p)
                         frames.append({"name": os.path.basename(p), "key": k, "sec": sc,
                                        "t": round((e - t0) + (i + 0.5) / len(g), 3),
-                                       "bracket": -1, "status": "off" if k in _sel["off"] else "short",
+                                       "bracket": -1, "status": "off" if k in _sel["off"] else srole[p],
                                        "gain": None, "forced": False})
-                        n_short += 1
+                        n_short += 1 if srole[p] == "short" else 0
                 frames.sort(key=lambda f: f["t"])
         except Exception:
             pass
@@ -193,8 +207,8 @@ def build(folder, wd):
                             "contact_c2": ct.get("contact_c2_s"), "contact_c3": ct.get("contact_c3_s")}
         except Exception:
             contacts = None
-    return {"ok": True, "n": len(frames) - n_short, "frames": frames,
-            "unread": len(raws) - len(paths), "timed": have_t,
+    return {"ok": True, "n": sum(1 for f_ in frames if f_["bracket"] >= 0), "frames": frames,
+            "unread": len(raws) - len(paths) - len(_moved), "timed": have_t,
             "repeated": bool(res["repeated"]), "n_brackets": int(res["n"]),
             "span_s": res["span_s"], "reason": res.get("reason"),
             "exposures": sorted({float(f"{s:.4g}") for s in sec.values()}),

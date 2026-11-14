@@ -1,4 +1,4 @@
-"""WHERE THE SHOOT SITS IN TOTALITY (lab 0.28.1, 2026-10-18).
+"""WHERE THE SHOOT SITS IN TOTALITY (0.28.1, 2026-10-18).
 
 With the observing site known (observer.py), eclipses.local gives second and
 third contact and mid-totality at that place to the second. The frames carry
@@ -62,13 +62,20 @@ def find_contact_dir(folder):
 def contact_stamps(folder, wd):
     """Time stamps of the contact frames, [] when there are none."""
     d = find_contact_dir(folder)
-    if not d:
-        return []
     try:
         from .raw import list_raws
         from .timeline import _exif_table
-        raws = list_raws(d)
-        tab = _exif_table(d, raws, wd)
+        raws = list(list_raws(d)) if d else []
+        tab = dict(_exif_table(d, raws, wd)) if raws else {}
+        # with the frames of the image folder given this role in the Frames panel
+        try:
+            from .frameselect import reassigned
+            ex = [p for p in reassigned(folder, "contact") if p not in raws]
+        except Exception:
+            ex = []
+        if ex:
+            tab.update(_exif_table(folder, ex, wd))
+            raws += ex
         return [tab[os.path.basename(p)][1] for p in raws
                 if tab.get(os.path.basename(p), (None, None))[1]]
     except Exception:

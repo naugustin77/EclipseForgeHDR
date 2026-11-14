@@ -526,7 +526,9 @@ class Layers:
         inner0 = np.load(os.path.join(wd, "inner0.npy"))
         # THE MOON LAYER (moonlayer.py, lab 0.24) when the work directory has
         # one; the old Earthshine-option layer otherwise
-        _mlp = os.path.join(wd, "moon_layer.npy")
+        # (or its Force earthshine variant when that box is ticked)
+        from . import moonlayer as _mlm
+        _mlp = _mlm.layer_path(wd)
         ep = _mlp if os.path.exists(_mlp) else os.path.join(wd, "earth.npy")
         self.has_earth = os.path.exists(ep)
         earth = (np.load(ep).astype(np.float32) if self.has_earth
@@ -1001,6 +1003,20 @@ class Layers:
         self._load_flat(geo)
         self.reload_contact()
 
+    def reload_earth(self):
+        """Swap the Moon layer for the one the Force earthshine box now asks
+        for (moonlayer.layer_path), at full and at preview scale. True when a
+        layer was loaded."""
+        from . import moonlayer as _mlm
+        ep = _mlm.layer_path(self.wd)
+        if not os.path.exists(ep):
+            return False
+        e = np.load(ep).astype(np.float32)
+        if e.shape != self.full["earth"].shape:
+            return False
+        self.full["earth"] = e
+        self.prev["earth"] = _decim(e, self.prev_decim)
+        return True
     def _load_flat(self, geo):
         """The master flat as a QC view.
 
@@ -1669,8 +1685,22 @@ def structure_boost(rgb, cy, cx, R, s, pin=None, soft=None):
         band -= _pp[_ix]
         del _ix
     else:
+        # rings cut by the frame edge (2026-11-12, a ring all round at the
+        # Sun's distance to the nearest edge on a tightly framed test set):
+        # the band is biased within its wide blur of the edge, so those pixels
+        # stay out of the ring means, and each sector that has left the frame
+        # is carried on at its last offset from the mean
+        _e = int(np.ceil(2.0 * s2))
+        if H > 4 * _e and W > 4 * _e:
+            sel = sel.copy()
+            sel[:_e] = False
+            sel[-_e:] = False
+            sel[:, :_e] = False
+            sel[:, -_e:] = False
         n_ = np.bincount(rb[sel], minlength=int(rb.max()) + 1)
         s_ = np.bincount(rb[sel], weights=band[sel].astype(np.float64), minlength=int(rb.max()) + 1)
+        from .detail import sector_balanced_profile
+        s_ = sector_balanced_profile(rb, sel, band, cy, cx, s_, n_, 0.0, R)
         prof = np.where(n_ > 0, s_ / np.maximum(n_, 1), 0.0).astype(np.float32)
         band -= prof[rb]
         if pin is not None:

@@ -9,7 +9,17 @@ eclipseforge_frames.json, so it survives a cleared cache and is the same for
 every build that opens the folder.
 
     {"version": 1, "off": ["frame_0012.raw", "darks/dark_0007.raw"],
-                   "force": ["frame_0058.raw"]}
+                   "force": ["frame_0058.raw"],
+                   "roles": {"frame_0101.raw": "contact", "frame_0102.raw": "short"}}
+
+ANOTHER ROLE FOR A FRAME OF THE IMAGE FOLDER (2026-11-13). A set often comes
+as one folder: the bracket, a few extra short exposures and the last frames
+with a bead in them, all together. "roles" gives such a frame the role of a
+short exposure (prominence layer only) or of a contact frame (camera clock
+only) without moving it: it leaves the bracket (list_raws drops it there, so
+the fingerprint changes and the next Start re-stacks) and joins the frames of
+that role wherever they are read (pipeline.short_frames,
+contacts.contact_stamps, the timeline, the Frames panel).
 
 Keys are paths relative to the image folder, "/"-separated; a calibration
 folder outside it is keyed by its absolute path.
@@ -28,6 +38,7 @@ import json
 import os
 
 SEL_FILE = "eclipseforge_frames.json"
+MOVE_ROLES = ("short", "contact")     # the roles a frame of the image folder can be given
 _CACHE = {}
 _BYPASS = [0]          # > 0: list_raws lists everything (the panel's own scan)
 
@@ -43,27 +54,32 @@ def load(folder):
     try:
         mt = os.stat(p).st_mtime_ns
     except OSError:
-        return {"off": set(), "force": set(), "dirs": {}}
+        return {"off": set(), "force": set(), "dirs": {}, "roles": {}}
     c = _CACHE.get(p)
     if c and c[0] == mt:
         return c[1]
     try:
         j = json.load(open(p))
         v = {"off": set(map(str, j.get("off") or [])), "force": set(map(str, j.get("force") or [])),
-             "dirs": {str(k): str(d) for k, d in (j.get("dirs") or {}).items() if d}}
+             "dirs": {str(k): str(d) for k, d in (j.get("dirs") or {}).items() if d},
+             "roles": {str(k): str(r) for k, r in (j.get("roles") or {}).items() if r in MOVE_ROLES}}
     except Exception:
-        v = {"off": set(), "force": set(), "dirs": {}}
+        v = {"off": set(), "force": set(), "dirs": {}, "roles": {}}
     _CACHE[p] = (mt, v)
     return v
 
 
-def save(folder, off, force, dirs=None):
+def save(folder, off, force, dirs=None, roles=None):
     p = sel_path(folder)
-    off, force = sorted(set(off)), sorted(set(force) - set(off))
+    if roles is None:
+        roles = load(folder).get("roles") or {}
+    roles = {k: v for k, v in roles.items() if v in MOVE_ROLES}
+    # a frame given another role is not a forced bracket frame
+    off, force = sorted(set(off)), sorted(set(force) - set(off) - set(roles))
     if dirs is None:
         dirs = load(folder).get("dirs") or {}
     dirs = {k: v for k, v in dirs.items() if v}
-    if not off and not force and not dirs:
+    if not off and not force and not dirs and not roles:
         try:
             os.remove(p)
         except OSError:
@@ -73,6 +89,8 @@ def save(folder, off, force, dirs=None):
         doc = {"version": 1, "off": off, "force": force}
         if dirs:
             doc["dirs"] = dict(sorted(dirs.items()))
+        if roles:
+            doc["roles"] = dict(sorted(roles.items()))
         json.dump(doc, open(tmp, "w"), indent=1)
         os.replace(tmp, p)
     _CACHE.pop(p, None)
@@ -135,7 +153,45 @@ def drop_off(paths, listing_dir):
         off = load(base)["off"]
         if off:
             paths = [p for p in paths if key(p, base) not in off]
+    # frames of this folder given another role are not its bracket frames
+    rl = load(d)["roles"]
+    if rl:
+        paths = [p for p in paths if rl.get(key(p, d)) not in MOVE_ROLES]
     return paths
+
+
+def reassigned(folder, role, selected=True):
+    """The frames of the image folder given `role` ("short" or "contact") in
+    the Frames panel, in name order; switched-off ones left out unless
+    `selected` is False. Only frames lying directly in the folder count."""
+    sel = load(folder)
+    out = []
+    for k, r in sorted(sel["roles"].items()):
+        if r != role or "/" in k or os.path.isabs(k):
+            continue
+        p = os.path.join(folder, k)
+        if not os.path.isfile(p):
+            continue
+        if selected and not _BYPASS[0] and k in sel["off"]:
+            continue
+        out.append(p)
+    return out
+
+
+def set_roles(folder, changes):
+    """changes: {key: "lights" | "short" | "contact"} for frames lying directly
+    in the image folder. Returns the number of frames now holding another role."""
+    sel = load(folder)
+    roles = dict(sel["roles"])
+    for k, r in changes.items():
+        if "/" in k or os.path.isabs(k) or not os.path.isfile(os.path.join(folder, k)):
+            continue
+        if r in MOVE_ROLES:
+            roles[k] = r
+        else:
+            roles.pop(k, None)
+    save(folder, sel["off"], sel["force"], sel.get("dirs"), roles)
+    return len(roles)
 
 
 def forced(folder):
@@ -174,16 +230,22 @@ def groups(folder, flat_dir=None, bias_dir=None, dark_dir=None):
         _BYPASS[0] -= 1
     dirs.update(_found)
     out = []
+    rl = load(folder)["roles"]
     for role, title, forceable in ROLES:
         d = dirs.get(role)
-        if not d or not os.path.isdir(d):
-            continue
-        try:
-            ps = list_raws(d, selected=False)
-        except Exception:
-            ps = []
+        ps = []
+        if d and os.path.isdir(d):
+            try:
+                ps = list(list_raws(d, selected=False))
+            except Exception:
+                ps = []
+        if role == "lights":
+            ps = [p for p in ps if rl.get(key(p, folder)) not in MOVE_ROLES]
+        elif role in MOVE_ROLES:
+            # with the frames of the image folder given this role
+            ps += [p for p in reassigned(folder, role, selected=False) if p not in ps]
         if ps:
-            out.append((role, title, forceable, d, ps))
+            out.append((role, title, forceable, d if (d and os.path.isdir(d)) else folder, ps))
     return out
 
 

@@ -280,7 +280,7 @@ NAFE_INPUT = "flatten"      # "flatten" = 0.23.8's input (recipe 4); "lf" = reci
 PROM_FEATHER_PX = 4.0       # 0.23.11 lab: soft edge on MGN's prominence holes, see _prom_feather
 ALONG_SIGMA_R = 0.0         # along-filament smoothing OFF (build 29, 2026-10-12): its coherence gate left a patchwork of radially smeared streaks and raw-noise patches in MGN (gate vs MGN fine-scale std r = -0.96, one test set); grain goes at the end with NXT. Was 0.010 R (builds 13-28)
 MGN_LIMB_M0 = (20.0, 40.0)  # build 29: the ring-average residual of the flattened log luminance is removed within 20 px of the limb mask, fading out by 40 px (see build_layers); None = off
-LAYER_BUILD = 36            # 36 = rebuilt for the star list of stars.STARS_BUILD 9, which can lift a different set of stars out of the corona (2026-11-12). 35 = a filled prominence core rises over its whole depth, evenly in ratio (FITS test set, softer edge, plateau kept; 2026-10-16). 34 = the filament layer's radial profile smoothed past the rim (4 px), so its own band no longer prints fine rings round the Moon (FITS test set: coherent rings at 1.04-1.6 R gone or cut to a third, 2026-10-16). 33 = the filled prominence core is a membrane (Laplace) fill from the measured pixels around it, lifted to its level inward, and replaces the core's unreliable pixels outright (no seams, arcs or plateau; one test set, 2026-10-16). 32 = a filled prominence core is a soft dome from its measured edge to its level, not a flat plateau with a step at the edge (one test set, 2026-10-16). 31 = prominence core fill finds the core above the limb band and also fills a core the short frames do not cover at all when its rim reads > 1 sigma (one test set came out hollow, 2026-10-16). 30 = MGN normalisation span wide enough for the darkest corona (no flat 0.45 hole where the residual fell below -6 sd; reference set at 8 o'clock, 2026-10-16). 29 = MGN audit 2026-10-12: no along-filament smoothing; MGN scale ladder evenly spaced from the resolution floor (no near-duplicate scale); MGN global term centred on the layer's neutral 0.5; ring-average limb residual removed before MGN (no bright/dark ring 1-12 px out). 28 = the large prominence core in the clean corona filled with a floor, a texture limit and a ceiling (no 1e9 blue pixels, the blue blob beside one test set's big prominence, 2026-10-11); inner and filament detail start at the rim peak. 27 = audit batch 3 (2026-10-10): ring statistics of MGN, FNRGF, the inner corona and the debands follow the limb (the oval, A5); FNRGF fitted from every pixel of each ring (D4); hill_sigma from the merged noise floor (A7); lifted stars tapered by significance, no zero clip (A8); prominence gate in measured sigma of the smoothed map (A11); inner-detail noise measured against the merge noise (D2); detail sigmas floored at 1.2 px (D3). 26 = filament detail: bands >= 6 px weighted by radial structure past 1.5-2.2 R, target falling as (r/2)^-0.75 (no blotches in the faint corona, 2026-10-10). 25 = filament detail layer (band_detail.npy: per-scale contrast, noise-limited, per-band adaptive gain, 2026-10-10). 24 = stars lifted with the stars.py build-6 list (a catalogue-confirmed faint star is lifted and laid back too, 2026-10-10). 23 = inner detail ring statistics follow the limb (no dark ring 8-20 px outside it, 2026-10-10). 22 = inner detail layer (loops near the limb, inner_detail.npy, 2026-10-10). 21 = sensor artefacts (hot green photosites) no longer lifted as stars (stars.py build 5, 2026-10-10). 20 = catalogue-confirmed stars lifted too (starcat.py, 2026-10-09). 19 = stars lifted out of the corona before every layer (stars.remove, 2026-10-09). 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
+LAYER_BUILD = 39            # 39 = the filament layer's radial profile past the frame edge carried on per sector (no ring at the Sun's distance to the nearest edge on a tightly framed test set, 2026-11-12). 38 = rebuilt for stars.STARS_BUILD 11 (2026-11-12). 37 = rebuilt for stars.STARS_BUILD 10 (which stars are lifted out changes; 2026-11-12). 36 = rebuilt for the star list of stars.STARS_BUILD 9, which can lift a different set of stars out of the corona (2026-11-12). 35 = a filled prominence core rises over its whole depth, evenly in ratio (FITS test set, softer edge, plateau kept; 2026-10-16). 34 = the filament layer's radial profile smoothed past the rim (4 px), so its own band no longer prints fine rings round the Moon (FITS test set: coherent rings at 1.04-1.6 R gone or cut to a third, 2026-10-16). 33 = the filled prominence core is a membrane (Laplace) fill from the measured pixels around it, lifted to its level inward, and replaces the core's unreliable pixels outright (no seams, arcs or plateau; one test set, 2026-10-16). 32 = a filled prominence core is a soft dome from its measured edge to its level, not a flat plateau with a step at the edge (one test set, 2026-10-16). 31 = prominence core fill finds the core above the limb band and also fills a core the short frames do not cover at all when its rim reads > 1 sigma (one test set came out hollow, 2026-10-16). 30 = MGN normalisation span wide enough for the darkest corona (no flat 0.45 hole where the residual fell below -6 sd; reference set at 8 o'clock, 2026-10-16). 29 = MGN audit 2026-10-12: no along-filament smoothing; MGN scale ladder evenly spaced from the resolution floor (no near-duplicate scale); MGN global term centred on the layer's neutral 0.5; ring-average limb residual removed before MGN (no bright/dark ring 1-12 px out). 28 = the large prominence core in the clean corona filled with a floor, a texture limit and a ceiling (no 1e9 blue pixels, the blue blob beside one test set's big prominence, 2026-10-11); inner and filament detail start at the rim peak. 27 = audit batch 3 (2026-10-10): ring statistics of MGN, FNRGF, the inner corona and the debands follow the limb (the oval, A5); FNRGF fitted from every pixel of each ring (D4); hill_sigma from the merged noise floor (A7); lifted stars tapered by significance, no zero clip (A8); prominence gate in measured sigma of the smoothed map (A11); inner-detail noise measured against the merge noise (D2); detail sigmas floored at 1.2 px (D3). 26 = filament detail: bands >= 6 px weighted by radial structure past 1.5-2.2 R, target falling as (r/2)^-0.75 (no blotches in the faint corona, 2026-10-10). 25 = filament detail layer (band_detail.npy: per-scale contrast, noise-limited, per-band adaptive gain, 2026-10-10). 24 = stars lifted with the stars.py build-6 list (a catalogue-confirmed faint star is lifted and laid back too, 2026-10-10). 23 = inner detail ring statistics follow the limb (no dark ring 8-20 px outside it, 2026-10-10). 22 = inner detail layer (loops near the limb, inner_detail.npy, 2026-10-10). 21 = sensor artefacts (hot green photosites) no longer lifted as stars (stars.py build 5, 2026-10-10). 20 = catalogue-confirmed stars lifted too (starcat.py, 2026-10-09). 19 = stars lifted out of the corona before every layer (stars.remove, 2026-10-09). 18 = MGN deband fitted from every pixel of each ring (the far-field rings), NAFE not built (2026-10-08); 17: prominence removal no longer puts R/G pixel noise into the corona outside the prominences (promlayer.clean_corona, 2026-10-08); layers rebuilt on the fixed corona. 16: the build-13 recipe restored after the 2026-10-07 audit (recipe 15 rejected 2026-10-08: over-smoothed, long streamers lost); the number only forces the rebuild of recipe-15 caches. 13: along-filament smoothing of the denoised log luminance before every detail layer. 12: saturated prominence cores filled in the prominence layer (promlayer.build_light). 11: NAFE's level-axis tails rolled in, not clipped (no flat black/white plateaus). 10: the large prominence core in the clean corona filled along rows of constant height with the corona's own texture (promlayer._fill_core_polar), no edge for the detail filters. 9: the 0.24 prominence layer: layers built on the merge with its H-alpha light taken out by colour (promlayer.clean_corona), the prominences as their own layer (promlayer.build_light). 8: NAFE statistics exclude the disc and the limb's first 3 px. 7: NAFE flatten follows the limb (the collar round the Moon). 6: MGN prominence holes feathered. 5: prominence gate + mask also from the merge (promlayer.detect). recipe number of the detail layers; the server rebuilds
                             # them from a cached stack when a run's number is older
 
 
@@ -2334,7 +2334,7 @@ def build_hill(wd, progress, lum_dn=None, disc=None, prom=None,
         del M, imlog, sig_log
         return st
     except Exception as e:
-        progress.log(f"[fail] partial convolution: masks not built ({e})", None)
+        progress.log(f"[warn] partial convolution: masks not built ({e})", None)
         for f in ("hill.npy", "hill_log.npy", "hill_sigma.npy"):
             p = os.path.join(wd, f)
             if os.path.exists(p):
@@ -2566,7 +2566,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
             lstats["prom_corona"] = _plm.clean_corona(wd, geo, progress)
             lstats["prom_light"] = _plm.build_light(wd, geo, progress)
         except Exception as _e:
-            progress.log(f"[fail] prominence layer not built ({_e}); prominences stay in "
+            progress.log(f"[warn] prominence layer not built ({_e}); prominences stay in "
                          f"the corona", None)
             for _f in (_plm.CORONA_RGB, _plm.CORONA_LUM):
                 try:
@@ -3247,7 +3247,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     except _NafeOff:
         pass
     except Exception as e:
-        progress.log(f"[fail] NAFE layer not built ({e})", None)
+        progress.log(f"[warn] NAFE layer not built ({e})", None)
         np.save(os.path.join(wd, "nafe.npy"), np.full((H, W), 0.5, np.float32))
     del Lf
     del r_rel                   # the limb-relative radius is not needed past here
@@ -3394,7 +3394,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
                              "channel, gated", None)
                 del _pdf
             except Exception as _e:
-                progress.log(f"[fail] prominence detail layer not built ({_e})", None)
+                progress.log(f"[warn] prominence detail layer not built ({_e})", None)
         else:
             progress.log("[warn] prominence colour: too few limb samples", None)
     if "prom" in lstats:
@@ -3472,7 +3472,8 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
 #: the whole ~10 min rebuild (builds 22-26 in one day). The server compares
 #: these with report.json's layer_recipe.fast and rebuilds only what moved
 #: (rebuild_fast); LAYER_BUILD still forces everything.
-FAST_BUILDS = {"inner_detail": 4, "band_detail": 6}
+FAST_BUILDS = {"inner_detail": 4, "band_detail": 7}
+# band_detail 7: radial profile past the frame edge per sector (sector_balanced_profile, 2026-11-12)
 # band_detail 6: the fine-only filament layer (band_detail_fine.npy) built in the same pass (2026-10-12)
 # inner_detail 2: band noise measured against the merge-noise map (audit D2); sigmas floored at 1.2 px (D3)
 # band_detail 2: sigmas floored at 1.2 px and kept an octave apart (D3)
@@ -4032,6 +4033,65 @@ BAND_PROFILE_SIGMA_PX = 4.0   # smoothing of the radial profile past the rim (se
 BAND_PROFILE_RIM_PX = 6.0    # ... over this far past the rim edge, ramped in over as far again
 
 
+PROFILE_SECTORS = 72            # azimuth sectors of sector_balanced_profile
+PROFILE_SECTOR_COVER = 0.6      # a sector counts as in the frame above this share of its ring
+PROFILE_OFFSET_TAU_R = 0.05     # its offset from the mean is a running mean over this far (R)
+
+
+def sector_balanced_profile(rb, vv, val, cy, cx, sm, cnt, rho0, R,
+                            ns=PROFILE_SECTORS, cover=PROFILE_SECTOR_COVER,
+                            tau_R=PROFILE_OFFSET_TAU_R):
+    """Per-radius sums of `val` (as `sm`, with the counts `cnt`) whose ratio
+    stays the mean of the whole ring after part of the ring has left the
+    frame. rb: the radius bin of every pixel; vv: the pixels used; rho0: the
+    radius in px of bin 0 (for each sector's full count). Where every sector
+    is covered the returned sums are `sm` unchanged."""
+    H, W = rb.shape
+    nb = sm.size
+    ys = np.arange(H, dtype=np.float32)[:, None] - np.float32(cy)
+    xs = np.arange(W, dtype=np.float32)[None, :] - np.float32(cx)
+    sec = ((np.arctan2(ys, xs) + np.float32(np.pi)) * np.float32(ns / (2.0 * np.pi))).astype(np.int32)
+    del ys, xs
+    np.clip(sec, 0, ns - 1, out=sec)
+    idx = (sec * nb + rb)[vv]
+    del sec
+    A_c = np.bincount(idx, minlength=ns * nb).reshape(ns, nb).astype(np.float64)
+    A_s = np.bincount(idx, weights=val[vv].astype(np.float64), minlength=ns * nb).reshape(ns, nb)
+    del idx
+    rho = np.maximum(rho0 + np.arange(nb, dtype=np.float64) + 0.5, 1.0)
+    full = 2.0 * np.pi * rho / ns
+    pres = A_c >= cover * full[None, :]
+    Ps = A_s / np.maximum(A_c, 1.0)
+    P = sm / np.maximum(cnt, 1e-9)
+    out = np.asarray(sm, np.float64).copy()
+    a = 1.0 / max(tau_R * float(R), 1.0)
+    d = np.zeros(ns)
+    seen = np.zeros(ns, bool)
+    last = None
+    for j in range(nb):
+        p = pres[:, j]
+        if p.all():
+            dj = Ps[:, j] - P[j]
+            d = np.where(seen, d + a * (dj - d), dj)
+            seen[:] = True
+            last = float(P[j])
+            continue
+        if not seen.any() or cnt[j] <= 0:
+            continue                    # never seen whole: nothing to hold
+        if not p.any():
+            p = A_c[:, j] >= 0.15 * full[j]     # only slivers left: use them
+        if p.any():
+            pj = float(np.mean(Ps[p, j] - d[p]))
+            d[p] = d[p] + a * ((Ps[p, j] - pj) - d[p])
+        elif last is not None:
+            pj = last
+        else:
+            continue
+        last = pj
+        out[j] = pj * cnt[j]
+    return out
+
+
 def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
     cy, cx, R = float(geo["cy"]), float(geo["cx"]), float(geo["R"])
     from . import promlayer as _plm
@@ -4093,6 +4153,18 @@ def build_band_detail(wd, geo, progress=None, win=4.0, ease=None, r_out=6.0):
     _vv = v > 0
     _cnt = np.bincount(_rb[_vv], minlength=_rmax + 1)
     _sm = np.bincount(_rb[_vv], weights=lY[_vv].astype(np.float64), minlength=_rmax + 1)
+    # THE PROFILE PAST THE FRAME EDGE (2026-11-12, a test set framed
+    # tight): once a ring about the Sun runs off the frame, the mean of what
+    # is left is the mean of different sectors, and the corona is not the
+    # same brightness all round -- the profile bent at the Sun's distance to
+    # the nearest frame edge, and its bands, taken out of every band below,
+    # printed a ring there all round the Moon (+0.017 then -0.006 in the
+    # layer at 2.90-2.98 R, the edge at 2.93 R). Past that radius each sector
+    # that has left the frame is carried on at its last offset from the
+    # mean (sector_balanced_profile); where every sector is in the frame the
+    # profile is exactly as before.
+    _sm = sector_balanced_profile(_rb, _vv, lY, cy, cx, _sm, _cnt,
+                                  float(R) * float(np.median(Rm)) - 16.0, R)
     _pr = (ndimage.uniform_filter1d(_sm.astype(np.float64), 3)
            / np.maximum(ndimage.uniform_filter1d(_cnt.astype(np.float64), 3), 1e-9))
     # FINE RINGS FROM THE PROFILE (2026-10-16, FITS test set): the profile's own

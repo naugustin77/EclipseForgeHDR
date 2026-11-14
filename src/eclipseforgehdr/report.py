@@ -139,7 +139,13 @@ METHODS = [
      "the lunar disc from a stack of the long frames registered on the limb, "
      "with a scattered-light model (power law in radius plus a plane) fitted "
      "and removed, the maria kept as a band-passed, equalised structure map "
-     "laid over the disc at the look's Moon level"),
+     "laid over the disc at the look's Moon level. Whether that structure is "
+     "let into the result, and how strongly, is checked against a map of the "
+     "real Moon (LRO camera colour map, NASA Scientific Visualization Studio, "
+     "public domain) in every orientation, against random patterns of the "
+     "same texture: a match well above chance confirms it, no match leaves "
+     "the disc smooth. The map is used for this check only; nothing from it "
+     "is drawn into the picture"),
     ("Stars",
      "point sources found in the merge beyond 1.4 R (sigma-clipped detection, "
      "shape, colour and sensor-artefact tests), checked against a bundled "
@@ -682,6 +688,19 @@ def build(stats):
                 pitch = cam["focal_mm"] * 1000.0 * scale / 206265.0
                 A(f"implied pitch: {pitch:.2f} um/px at {cam['focal_mm']:g} mm "
                   f"(cross-check against your sensor)")
+    _el = stats.get("earthshine") if isinstance(stats.get("earthshine"), dict) else None
+    if _el:
+        _ck = _el.get("check") or {}
+        if _ck:
+            A(f"earthshine   : checked against a map of the real Moon (used for the check only): "
+              f"best match {_ck.get('best', 0):.2f} against {_ck.get('random_mean', 0):.2f} "
+              f"+- {_ck.get('random_sd', 0):.2f} for random patterns ({_ck.get('sd', 0):+.1f} sd), "
+              f"{_ck.get('verdict', '?')}; in the picture at {100 * float(_el.get('share') or 0):.0f} %")
+        if _el.get("forced"):
+            _fc = _el.get("forced_check") or {}
+            A(f"              : FORCE EARTHSHINE ON -- the earthshine from {_el.get('forced_source', '?')} "
+              f"(match {_fc.get('best', 0):.2f}, above chance but not confirmed) at "
+              f"{100 * float(_el.get('forced_share') or 0):.0f} %")
     if stats.get("corona_extent_R"):
         A(f"corona traced: out to {stats['corona_extent_R']:.1f} lunar radii "
           f"before the signal drops into the sky noise")
@@ -1008,6 +1027,22 @@ def write(wd, stats):
             if _cat.get("arcsec_per_px"):
                 stats = dict(stats, stars_catalogue={"arcsec_per_px": float(_cat["arcsec_per_px"]),
                                                      "north_deg_cw_from_up": _cat.get("north_deg_cw_from_up")})
+    except Exception:
+        pass
+    # THE EARTHSHINE (moonlayer.py) is built after the stack and can be
+    # switched to its forced variant later, so it is read here as well
+    try:
+        _mj = os.path.join(wd, "moon_layer.json")
+        if os.path.exists(_mj):
+            from . import moonlayer as _ml
+            _m = json.load(open(_mj)) or {}
+            _f = _ml.force_info(wd)
+            _e = {"check": _m.get("maria_check"), "share": _m.get("maria_share"),
+                  "forced": bool(_f.get("available") and _f.get("on"))}
+            if _e["forced"]:
+                _e.update(forced_source=_f.get("source"), forced_share=_f.get("share"),
+                          forced_check=_f.get("check"))
+            stats = dict(stats, earthshine=_e)
     except Exception:
         pass
     txt = build(stats)

@@ -147,13 +147,37 @@ def _moon(Lh, seed=None):
     return float(f[0]) * 2.0, float(f[1]) * 2.0, float(f[2]) * 2.0
 
 
+BRACKET_BLEND_R = 0.06            # a bracket with another Moon comes in over this far (R) past the limb band
+BRACKET_SAME_MOON_PX = (1.0, 3.0)   # Moon offsets up to the first count as the target's Moon, from the second as another
+
+
 def _moon_w_rows(r0, r1, W, cy, cx, ty, tx, R, margin, soft):
-    """The per-frame Moon's weight (pipeline._pfm_weight) for rows r0..r1 of
-    a full-res frame: 1 away from both limbs, and in the limb band a Gaussian
-    in the difference of the distances to this HDR's limb and the target's."""
-    from .pipeline import _PFM_EPS
+    """The Moon's weight of one bracket HDR for rows r0..r1 of a full-res
+    frame: 1 away from both limbs, and in the limb band a Gaussian in the
+    difference of the distances to this HDR's limb and the target's
+    (pipeline._pfm_weight).
+
+    A BRACKET WHOSE MOON IS NOT THE TARGET'S (2026-11-13). Two brackets of one
+    test set, a minute apart, had their Moons 20 px apart. The weight had a
+    floor (1e-4), and the bracket with the target's Moon has no data inside
+    its own limb: in the crescent inside the target Moon but outside the other
+    bracket's, that other bracket was the only one with a weight above zero
+    and its corona showed inside the Moon -- a band up to 17 px wide, flat,
+    with a dark line where the target's own limb began. And 18 px outside the
+    farther limb the weight went from 0 to 1 within a few px, where the two
+    brackets' merges differ by up to 20 % in the innermost corona: a step of
+    6 % all round, which the detail layers drew as a sharp ring. Now: no
+    floor (where no bracket counts, the combine takes the merge of all frames,
+    which holds the target Moon), and a bracket with another Moon counts for
+    nothing up to the limb band outside BOTH discs and comes in from there
+    over BRACKET_BLEND_R. Deep inside both discs nothing changes. A Moon
+    within BRACKET_SAME_MOON_PX of the target's is treated as before."""
     w = np.ones((r1 - r0, W), np.float32)
-    pad = R + margin + 4
+    off = float(np.hypot(cy - ty, cx - tx))
+    k = float(np.clip((off - BRACKET_SAME_MOON_PX[0])
+                      / (BRACKET_SAME_MOON_PX[1] - BRACKET_SAME_MOON_PX[0]), 0.0, 1.0))
+    blend = max(BRACKET_BLEND_R * R, 1.0)
+    pad = R + margin + 4 + (blend if k > 0 else 0.0)
     y0 = int(max(r0, np.floor(min(cy, ty) - pad)))
     y1 = int(min(r1, np.ceil(max(cy, ty) + pad) + 1))
     x0 = int(max(0, np.floor(min(cx, tx) - pad)))
@@ -162,10 +186,17 @@ def _moon_w_rows(r0, r1, W, cy, cx, ty, tx, R, margin, soft):
         return w
     yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
     m = float(max(margin, 1.0))
-    dp = np.clip(np.hypot(yy - cy, xx - cx) - R, -m, m)
-    dt = np.clip(np.hypot(yy - ty, xx - tx) - R, -m, m)
+    rp = np.hypot(yy - cy, xx - cx) - R            # px outside this HDR's Moon
+    rt = np.hypot(yy - ty, xx - tx) - R            # px outside the target Moon
+    dp = np.clip(rp, -m, m)
+    dt = np.clip(rt, -m, m)
     ww = np.exp(-0.5 * ((dp - dt) / float(soft)) ** 2)
-    w[y0 - r0:y1 - r0, x0:x1] = np.maximum(ww, _PFM_EPS)
+    if k > 0:
+        t = np.clip((np.minimum(rp, rt) - m) / blend, 0.0, 1.0)
+        ramp = t * t * (3.0 - 2.0 * t)
+        ramp = np.where(np.maximum(rp, rt) <= -m, 1.0, ramp)      # the Moon itself: as it was
+        ww = ww * (1.0 - k * (1.0 - ramp))
+    w[y0 - r0:y1 - r0, x0:x1] = ww
     return w
 
 
@@ -445,7 +476,7 @@ def hdr_per_bracket(folder, wd, hdr, bracket_of, sec_of, epoch, run_kw, ref,
                 tmap[r0:r1] = np.where(ok & test[None], t, 0).max(axis=0)
             nrej += int(rej.sum())
             nsamp += int((ok & test[None]).sum())
-            del med, dev, t, rej
+            del med, dev, t, rej, ok, test
         ww = wgt * keep
         s = ww.sum(axis=0)
         acc = (ww[..., None] * X).sum(axis=0)
@@ -454,7 +485,9 @@ def hdr_per_bracket(folder, wd, hdr, bracket_of, sec_of, epoch, run_kw, ref,
         if nodat.any():
             blk[nodat] = hdr[r0:r1][nodat]
         out[r0:r1] = blk
-        del X, Wt, MW, L, wgt, ok, keep, ww, s, acc, blk
+        # `ok` and `test` exist only when the outlier test ran (three brackets
+        # or more); two brackets crashed here (0.30.2) -- deleted above instead
+        del X, Wt, MW, L, wgt, keep, ww, s, acc, blk
     info.update({"used": True, "n": n, "rejected_frac": round(nrej / max(nsamp, 1), 6),
                  "kappa": BRACKET_KAPPA,
                  "target_moon": [round(v, 2) for v in tgt] if tgt else None,

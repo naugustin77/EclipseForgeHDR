@@ -1,4 +1,4 @@
-__version__ = "0.30.1"
+__version__ = "0.31.0"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -362,6 +362,13 @@ CACHE_FAMILIES = (
     # the detail layers are rebuilt on their own build numbers): the stack is
     # the same data.
     frozenset({"0.30.0", "0.30.1"}),
+    # 0.31.0 changes the stack: the per-tier clipped mean grows its rejection
+    # around strong outliers (an object crossing the field), measured-brightness
+    # tiers never merge different camera exposure times, frames can be given
+    # another role (short exposure, contact frame) without moving them, and
+    # brackets shot apart are linked on the corona clear of both Moons. No 0.30.x
+    # cache is the same data: its own family, one re-stack per folder.
+    frozenset({"0.31.0"}),
 
 )
 

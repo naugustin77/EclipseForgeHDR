@@ -52,6 +52,19 @@ MAG_SCORE = 8.5                           # ... and that score a hypothesis
 # or "possible" is kept when a catalogue star sits under it; the long high
 # eclipses that reach past mag 8.5 are what this is for.
 MAG_CONFIRM = 10.0
+# A DEEPER PASS FOR A LONG LENS (0.30.2, 2026-11-12). Near the Sun the field
+# can hold no star to MAG_PAIRS at all apart from one or two: on one test
+# stack (1.1 arcsec/px, a 2.4 x 1.6 deg frame) the eight point sources found
+# were seven catalogue stars of mag 8.5-9.4 and one of 5.2, so the match at
+# MAG_PAIRS / MAG_SCORE had nothing to stand on and the stars stayed
+# unconfirmed. Only when the normal pass finds no clear solution, the same
+# search runs once more with the deeper limits below, and its solution is
+# taken only with DEEP_MIN_MATCH stars or more (the rule the eclipse-date
+# fallback uses) and the same missing-star test, now asked to the deeper
+# limit. Scrambled candidates on four test stacks gave no more chance fits.
+MAG_PAIRS_DEEP = 9.0
+MAG_SCORE_DEEP = 9.5
+DEEP_MIN_MATCH = 5
 LINE_TOL_R = 0.25                         # Sun to the ecliptic line through the Moon, lunar radii
 # Two stars are enough when the place and time are given (0.25.1,
 # 2026-10-10): the pair fixes scale, rotation and offset exactly, and is
@@ -158,7 +171,7 @@ def load_catalogue():
     return {k: z[k] for k in z.files}
 
 
-def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
+def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None, deep=False):
     """dets: list of dicts with y, x, z (full-res merge pixels). Returns a dict
     with the solution and, per detection index, the catalogue star it sits on;
     or None when no solution stands out."""
@@ -223,9 +236,10 @@ def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     # confirmed by a solution but never seed one
     order = np.array([i for i in np.argsort([-d["z"] for d in dets])
                       if not dets[i].get("faint")][:8], dtype=int)
-    seed = np.flatnonzero(mag <= MAG_PAIRS)
+    MAG_PAIRS_, MAG_SCORE_ = (MAG_PAIRS_DEEP, MAG_SCORE_DEEP) if deep else (MAG_PAIRS, MAG_SCORE)
+    seed = np.flatnonzero(mag <= MAG_PAIRS_)
     scale_lo, scale_hi = R / SD_RANGE[1], R / SD_RANGE[0]  # px per deg
-    score_cat = np.flatnonzero(mag <= MAG_SCORE)
+    score_cat = np.flatnonzero(mag <= MAG_SCORE_)
     rD = np.abs(D)
     # Refraction and distortion are not modelled, so the tolerance grows with
     # the distance from the centre: two stars fix a hypothesis exactly and a
@@ -406,7 +420,7 @@ def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     # CONFIRMATION PASS: the solution stands; the detections it did not use
     # are now tried against the catalogue to MAG_CONFIRM, nearest star within
     # the fit tolerance, each catalogue star at most once
-    faint_cat = np.flatnonzero((mag > MAG_SCORE) & (mag <= MAG_CONFIRM))
+    faint_cat = np.flatnonzero((mag > MAG_SCORE_) & (mag <= MAG_CONFIRM))
     confirm_lim, confirm_miss = MAG_CONFIRM, None
     if len(faint_cat):
         P = a * S[faint_cat] + b
@@ -476,11 +490,11 @@ def _match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     inside = (px > 0) & (px < W) & (py > 0) & (py < H)
     out["predicted"] = [dict(y=float(py[k]), x=float(px[k]), mag=float(mag[k]),
                              ra=float(cra[k]), dec=float(cde[k]), name=str(names[k]), **_ids(k))
-                        for k in np.flatnonzero(inside & (mag <= MAG_SCORE))]
+                        for k in np.flatnonzero(inside & (mag <= MAG_SCORE_))]
     return out
 
 
-def match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
+def _match_at(dets, geo, timestamp, shape, zfun=None, progress=None, site=None, deep=False):
     """dets: list of dicts with y, x, z (full-res merge pixels). Returns the
     solution dict, {"ambiguous": True, ...}, or None.
 
@@ -490,11 +504,11 @@ def match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     other date -- with three, a wrong date gave a unique-looking chance fit in
     2 of 20 trials on one test stack."""
     if site and site.get("ut"):
-        r = _match(dets, geo, timestamp, shape, zfun, progress, site=site)
+        r = _match(dets, geo, timestamp, shape, zfun, progress, site=site, deep=deep)
         if r is not None and not r.get("ambiguous"):
             r["date_source"] = "observing site and time"
         return r
-    r = _match(dets, geo, timestamp, shape, zfun, progress)
+    r = _match(dets, geo, timestamp, shape, zfun, progress, deep=deep)
     if r is not None and not r.get("ambiguous"):
         r["date_source"] = "frames"
         return r
@@ -502,7 +516,7 @@ def match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
     for d in ECLIPSE_DATES:
         if timestamp and str(timestamp).replace("-", ":")[:10] == d:
             continue
-        rr = _match(dets, geo, d + " 12:00:00", shape, zfun, progress)
+        rr = _match(dets, geo, d + " 12:00:00", shape, zfun, progress, deep=deep)
         if rr is not None and not rr.get("ambiguous"):
             found.append((rr["matches"], d, rr))
     if not found:
@@ -525,4 +539,19 @@ def match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
         n, d, rr = min(group, key=lambda t: (-t[0], abs(int(t[1][:4]) - yr)))
         rr["date_source"] = ("eclipse table (" + d + "; the frames say " + str(timestamp) + ")")
         return rr
+    return r
+
+
+def match(dets, geo, timestamp, shape, zfun=None, progress=None, site=None):
+    """dets: list of dicts with y, x, z (full-res merge pixels). Returns the
+    solution dict, {"ambiguous": True, ...}, or None. The normal pass first
+    (_match_at); only when it finds no clear solution, the deeper one
+    (MAG_PAIRS_DEEP / MAG_SCORE_DEEP), taken with DEEP_MIN_MATCH stars or more."""
+    r = _match_at(dets, geo, timestamp, shape, zfun, progress, site=site)
+    if r is not None and not r.get("ambiguous"):
+        return r
+    rd = _match_at(dets, geo, timestamp, shape, zfun, progress, site=site, deep=True)
+    if rd is not None and not rd.get("ambiguous") and int(rd.get("matches", 0)) >= DEEP_MIN_MATCH:
+        rd["depth"] = "deep (seed mag %.1f, score mag %.1f)" % (MAG_PAIRS_DEEP, MAG_SCORE_DEEP)
+        return rd
     return r

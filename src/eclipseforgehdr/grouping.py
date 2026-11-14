@@ -26,6 +26,10 @@ HOW
     into tiers wherever two neighbours differ by more than GAP (8 %). Real
     steps are 19 % and more (1/4 EV); frame-to-frame scatter inside a tier
     was 0.3-8 % on that set;
+  * camera files (exposure from the camera) are only ever SPLIT: a header
+    group falls apart where its frames differ by more than GAP, but frames
+    with different camera exposure times are never merged (FITS labels are);
+  * each pair is placed on each other before it is compared (_align);
   * a tier's key is its median brightness times one scale, chosen so the
     tiers' keys match their frames' header times in the median. The keys stay
     seconds-like, so everything downstream that reads `s` and `s * cal[s]`
@@ -62,11 +66,73 @@ def _box(a, r=2):
     return (c[n:, n:] - c[:-n, n:] - c[n:, :-n] + c[:-n, :-n]) / (n * n)
 
 
+#: the frames of a pair are put on top of each other before they are
+#: compared (see _align) when the placed pair correlates at least this well;
+#: otherwise they are compared where they are
+ALIGN_MIN_CORR = 0.5
+
+
+def _align(x, y, sat):
+    """Shift (dy, dx) that puts y on x, and the correlation of the placed pair.
+
+    WHY (2026-11-14). The slope below compares the two frames pixel by
+    pixel, so it assumes they show the sky in the same place. Frames shot in
+    one burst do; two brackets a minute apart need not. On a test set of two
+    brackets whose framing moved about 630 px between them, the unplaced
+    pairs gave ratios 6-7 % instead of the 20 % the exposures differ by, three
+    pairs of frames from different brackets became one tier each, and each
+    such tier averaged two framings into a doubled Moon and corona. So the
+    pair is placed first, on the log brightness high-passed (exposure-free),
+    by phase correlation; whole pixels at this quarter size are enough for a
+    brightness ratio."""
+    from scipy import ndimage
+    from skimage.registration import phase_cross_correlation
+
+    def prep(a):
+        a = np.where(np.isfinite(a), a, 0).astype(np.float64)
+        ok = (a > LO * sat) & (a < 0.98 * sat)
+        la = np.log(np.maximum(a, LO * sat))
+        hp = la - ndimage.uniform_filter(la, 15)
+        return np.where(ok, hp, 0.0)
+
+    px, py = prep(x), prep(y)
+    try:
+        sh, _err, _ph = phase_cross_correlation(px, py, normalization=None)
+    except Exception:
+        return (0, 0), float("nan")
+    dy, dx = int(round(sh[0])), int(round(sh[1]))
+    ys = ndimage.shift(py, (dy, dx), order=0, mode="constant", cval=0.0)
+    m = (px != 0) & (ys != 0)
+    if m.sum() < MIN_PX:
+        return (dy, dx), float("nan")
+    a, b = px[m], ys[m]
+    c = float(np.corrcoef(a, b)[0, 1])
+    return (dy, dx), c
+
+
+def _overlap(x, y, dy, dx):
+    """x and y cut to the part they share once y is moved by (dy, dx)."""
+    H, W = x.shape
+    ys0, ys1 = max(0, -dy), min(H, H - dy)
+    xs0, xs1 = max(0, -dx), min(W, W - dx)
+    if ys1 - ys0 < 16 or xs1 - xs0 < 16:
+        return None, None
+    return x[ys0 + dy:ys1 + dy, xs0 + dx:xs1 + dx], y[ys0:ys1, xs0:xs1]
+
+
 def link(x, y, sat):
     """Brightness of frame y relative to frame x (slope), and the pixel count.
     NaN when the frames share too few usable pixels."""
     if x.shape != y.shape:
         return float("nan"), 0
+    # placed only when the placement is sure; otherwise compared as they are
+    # (frames of one burst barely move, and a frame whose corona is mostly
+    # clipped cannot be placed but still links fine where it is)
+    (dy, dx), c = _align(x, y, sat)
+    if np.isfinite(c) and c >= ALIGN_MIN_CORR and (dy or dx):
+        x, y = _overlap(x, y, dy, dx)
+        if x is None:
+            return float("nan"), 0
     lo, hi = LO * sat, HI * sat
     m = np.isfinite(x) & np.isfinite(y) & (x > lo) & (y > lo) & (x < hi) & (y < hi)
     if m.sum() < MIN_PX:
@@ -122,21 +188,46 @@ def by_brightness(paths, sec_of, ts_of=None, progress=None, gap=GAP):
                 n_fallback += 1
                 if progress is not None:
                     progress.log(f"[warn] brightness {os.path.basename(prev_p)} -> "
-                                 f"{os.path.basename(p)}: {npx} shared pixels, header "
-                                 f"ratio {k:.4g} used", None)
+                                 f"{os.path.basename(p)}: "
+                                 f"{npx} shared pixels, header ratio {k:.4g} used", None)
             logb[p] = logb[prev_p] + float(np.log(k))
         prev, prev_p = g, p
         if progress is not None and (i + 1) % 25 == 0:
             progress.log(f"  measuring frame brightness: {i + 1}/{len(order)}", None)
     # split the sorted brightness run at the gaps
-    srt = sorted(order, key=lambda p: logb[p])
-    groups, cur = [], [srt[0]]
-    for a, b in zip(srt[:-1], srt[1:]):
-        if logb[b] - logb[a] > np.log(gap):
-            groups.append(cur)
-            cur = []
-        cur.append(b)
-    groups.append(cur)
+    #
+    # CAMERA HEADERS ARE NOT MERGED ACROSS (2026-11-14). A camera's own
+    # exposure time is a measurement of the shutter, not a label: frames that
+    # say different times were exposed differently. Merging them is only right
+    # for labels typed into FITS headers (the case this module was built
+    # for). On a set of two complementary brackets 1/3 EV apart, frames from
+    # the two brackets measured within the gap (light and framing changed in
+    # the minute between them) and were averaged into one tier. So for camera
+    # files the measurement may only SPLIT a header group (frames at another
+    # ISO or aperture, a frame that got other light); FITS keep the global
+    # grouping.
+    from .fits import is_fits
+
+    def _runs(ps):
+        srt = sorted(ps, key=lambda p: logb[p])
+        out, cur = [], [srt[0]]
+        for a, b in zip(srt[:-1], srt[1:]):
+            if logb[b] - logb[a] > np.log(gap):
+                out.append(cur)
+                cur = []
+            cur.append(b)
+        out.append(cur)
+        return out
+
+    fits_ps = [p for p in order if is_fits(p)]
+    cam_ps = [p for p in order if not is_fits(p)]
+    groups = _runs(fits_ps) if fits_ps else []
+    by_sec = {}
+    for p in cam_ps:
+        by_sec.setdefault(round(float(sec_of.get(p) or 0), 9), []).append(p)
+    for _s, ps in sorted(by_sec.items()):
+        groups.extend(_runs(ps))
+    groups.sort(key=lambda g: float(np.median([logb[p] for p in g])))
     med_b = [float(np.exp(np.median([logb[p] for p in g]))) for g in groups]
     scale = [np.median([sec_of[p] for p in g if (sec_of.get(p) or 0) > 0] or [np.nan]) / mb
              for g, mb in zip(groups, med_b)]

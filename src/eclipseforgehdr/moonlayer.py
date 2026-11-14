@@ -19,7 +19,7 @@ on the reference test set, Oct 2026):
      the SENSOR on this set (measured: early vs late frames correlate 0.41 in
      sensor coordinates, 0.23 on the Moon), so it is left out;
   6. faded out over the last 0.08 R, where the limb's spill owns the light.
-Checked against an independent PixInsight earthshine of the same frames: same
+Checked against an independent earthshine processing of the same frames: same
 orientation; correlation 0.54 / 0.67 / 0.61 / 0.27 in the bands 0.02-0.08 /
 0.03-0.15 / 0.06-0.3 / 0.1-0.5 R (the largest is where the two scattered-light
 models differ most).
@@ -32,8 +32,14 @@ from scipy.signal import fftconvolve
 
 MOON_FILE = "moon_layer.npy"
 MOON_META = "moon_layer.json"
-MOON_BUILD = 3              # 2: limb band levelled and equalised before the fade (2026-10-07)
+MOON_BUILD = 5              # 2: limb band levelled and equalised before the fade (2026-10-07)
                             # 3: scaled by the maria agreement of two half-stacks (2026-10-28)
+                            # 4: the structure checked against a map of the real Moon (lunarcheck.py, 2026-11-14)
+                            # 5: the Force earthshine variant built alongside (2026-11-14)
+#: the variant the Moon group's "Force earthshine" box switches to, and the
+#: small file that remembers the box for this folder
+MOON_FORCE_FILE = "moon_layer_forced.npy"
+FORCE_STATE = "moon_force.json"
 #: below this agreement between the two half-stacks the structure is taken as
 #: noise or glare and the disc is left smooth
 MARIA_MIN_AGREE = 0.10
@@ -42,6 +48,38 @@ MARIA_MIN_AGREE = 0.10
 def _log(progress, msg, frac=None):
     if progress is not None:
         progress.log(msg, frac)
+
+
+def forced_on(wd):
+    """Is Force earthshine ticked for this folder?"""
+    try:
+        return bool(json.load(open(os.path.join(wd, FORCE_STATE))).get("on", False))
+    except Exception:
+        return False
+
+
+def set_forced(wd, on):
+    json.dump({"on": bool(on)}, open(os.path.join(wd, FORCE_STATE), "w"))
+
+
+def layer_path(wd):
+    """The Moon layer to load: the forced variant when the box is ticked and
+    one was built, the normal layer otherwise."""
+    fp = os.path.join(wd, MOON_FORCE_FILE)
+    if forced_on(wd) and os.path.exists(fp):
+        return fp
+    return os.path.join(wd, MOON_FILE)
+
+
+def force_info(wd):
+    """What the box can do here, for the page: available, on, source, note."""
+    try:
+        f = dict(json.load(open(os.path.join(wd, MOON_META))).get("force") or {})
+    except Exception:
+        f = {}
+    f["available"] = bool(f.get("available")) and os.path.exists(os.path.join(wd, MOON_FORCE_FILE))
+    f["on"] = forced_on(wd)
+    return f
 
 
 def needs_build(wd):
@@ -138,7 +176,7 @@ def build(folder, wd, progress=None, frames=None):
     tmax = max(t for _, t in frames)
     use = [(p, t) for p, t in frames if t >= tmax / 16.0 - 1e-9]
     # THE LONGEST EXPOSURE IS LEFT OUT when at least two shorter ones remain.
-    # Measured on the reference set against that PixInsight earthshine: its large-scale
+    # Measured on the reference set against that independent earthshine: its large-scale
     # pattern is instrumental (4x the others' level in rate units), and with it
     # the maria scale agrees 0.05 with that result, without it 0.27 (0.61 at
     # 0.04-0.2 R instead of 0.53).
@@ -324,7 +362,7 @@ def build(folder, wd, progress=None, frames=None):
     # the whole stack has half the noise variance, so its signal share is
     # 2c / (1 + c). The layer is scaled by that share: earthshine as strong as
     # the data supports, and a smooth disc where the maria are not there.
-    _agree = None; _share = 1.0
+    _agree = None; _share = 1.0; _EA = _EB = None
     if min(_hn) >= 1 and all(a is not None for a in hacc):
         try:
             _EA = _layer(hacc[0] / np.maximum(hw[0], 1e-9))[0]
@@ -336,41 +374,123 @@ def build(folder, wd, progress=None, frames=None):
             _share = 2.0 * _c / (1.0 + _c)
             if _c < MARIA_MIN_AGREE:
                 _share = 0.0
-            del _EA, _EB, _a, _b, _m
+            del _a, _b, _m
         except Exception as _e:
             _log(progress, f"[warn] Moon layer: maria agreement not measured ({_e})", None)
-            _agree = None; _share = 1.0
-    sd = float(1.4826 * np.median(np.abs(Eb[r < 0.8] - np.median(Eb[r < 0.8])))) or 1.0
-    e = 0.5 + np.float64(0.5 * _share) * np.tanh(Eb / (2.5 * sd))
+            _agree = None; _share = 1.0; _EA = _EB = None
+    # THE REAL MOON (2026-11-14, lunarcheck.py). The halves test above is
+    # internal and can be fooled both ways: it kept 22 % of maria that are
+    # there on one test set, and 89 % of a pattern that is not the Moon on a
+    # set of four frames. So the
+    # structure is also compared with a map of the real Moon's surface, in
+    # every orientation, against random patterns of the same texture. The map
+    # decides only whether, and how strongly, the user's own structure goes
+    # into the result; nothing from the map is drawn.
+    _share_halves = _share
+    _chk = None
+    try:
+        from . import lunarcheck as _lc
+        _chk = _lc.check(_lc.disc_from(Eb, mcy, mcx, mR))
+        if _chk["verdict"] == "confirmed":
+            _share = max(_share, _lc.share_for(_chk["best"]))
+        elif _chk["verdict"] == "rejected":
+            _share = 0.0
+    except Exception as _e:
+        _log(progress, f"[warn] Moon layer: the check against the lunar map did not run ({_e}); "
+                       "the halves test alone decides", None)
+        _chk = None
+    # FORCE EARTHSHINE (2026-11-14). People like earthshine, and a strict
+    # check takes it away from some sets where it may be there. So a second
+    # variant is built for the Moon group's "Force earthshine" box. It still
+    # has to beat chance against the real Moon; it only accepts what the
+    # default does not:
+    #   - all frames match above chance but not by CONFIRM_SD: the structure
+    #     at share_for(best) (at least 50 %) instead of the halves test's share;
+    #   - all frames do not beat chance, but one half of the frames does: that
+    #     half, with about 1.4x the noise. The better of two halves gives
+    #     chance two tries, and the random patterns get two tries as well
+    #     (lunarcheck.check_halves).
+    # Nothing that is at chance level against the real Moon is forced in.
+    _Ef = None; _share_f = None
+    if _chk is None:
+        _force = {"available": False, "why": "the check against the lunar map did not run"}
+    elif _chk["verdict"] == "confirmed":
+        _force = {"available": False, "why": "not needed: the earthshine is confirmed"}
+    elif _chk["verdict"] == "undecided":
+        _sf = float(_lc.share_for(_chk["best"]))
+        if _sf > _share + 0.02:
+            _Ef, _share_f = Eb, _sf
+            _force = {"available": True, "source": "all frames", "share": round(_sf, 3), "check": _chk}
+        else:
+            _force = {"available": False, "why": "not needed: it would not add earthshine"}
+    elif _EA is None or _EB is None:
+        _force = {"available": False, "why": "nothing to use: all frames do not match the real "
+                                             "Moon better than chance, and there are no two halves to try"}
+    else:
+        try:
+            _ch = _lc.check_halves(_lc.disc_from(_EA, mcy, mcx, mR), _lc.disc_from(_EB, mcy, mcx, mR))
+            if _ch["verdict"] != "rejected":
+                _Ef = _EA if _ch["half"] == 0 else _EB
+                _share_f = float(_lc.share_for(_ch["best"]))
+                _force = {"available": True, "share": round(_share_f, 3), "check": _ch,
+                          "source": "the " + ("first" if _ch["half"] == 0 else "second") + " half of the frames"}
+            else:
+                _force = {"available": False, "check": _ch,
+                          "why": "nothing to use: neither all frames nor either half of them "
+                                 "matches the real Moon better than chance"}
+        except Exception as _e:
+            _force = {"available": False, "why": f"the halves could not be checked ({_e})"}
+    del _EA, _EB
     # ---- onto the merge grid
     Yg = np.arange(H, dtype=np.float64)
-    out = np.full((H, W), 0.5, np.float16)
-    y0m, y1m = max(int(cy - 1.05 * R), 0), min(int(cy + 1.05 * R) + 1, H)
-    x0m, x1m = max(int(cx - 1.05 * R), 0), min(int(cx + 1.05 * R) + 1, W)
-    gyy, gxx = np.mgrid[y0m:y1m, x0m:x1m].astype(np.float64)
-    _dy, _dx = gyy - cy, gxx - cx
-    _uq = geo.get("unsquash")
-    if _uq and _uq.get("S"):
-        # THE MERGE IS STRETCHED ROUND (pipeline.fit_limb_oval): the raw
-        # frames this layer is stacked from are not, so the merge's offsets
-        # from the disc centre are taken back through S^-1 before they index
-        # the stack -- the Moon's oval then lands exactly on the merge's
-        # round disc instead of up to 1.5 % of R off along one axis.
-        _Si = np.linalg.inv(np.asarray(_uq["S"], float))
-        _dy, _dx = (_Si[0, 0] * _dy + _Si[0, 1] * _dx), (_Si[1, 0] * _dy + _Si[1, 1] * _dx)
-    py = mcy + _dy / 2.0; px = mcx + _dx / 2.0
-    out[y0m:y1m, x0m:x1m] = ndimage.map_coordinates(e, [py, px], order=1, mode="constant", cval=0.5).astype(np.float16)
+
+    def _to_grid(Ex, sh):
+        sdx = float(1.4826 * np.median(np.abs(Ex[r < 0.8] - np.median(Ex[r < 0.8])))) or 1.0
+        e = 0.5 + np.float64(0.5 * sh) * np.tanh(Ex / (2.5 * sdx))
+        return _onto_merge(e), sdx
+
+    def _onto_merge(e):
+        out = np.full((H, W), 0.5, np.float16)
+        y0m, y1m = max(int(cy - 1.05 * R), 0), min(int(cy + 1.05 * R) + 1, H)
+        x0m, x1m = max(int(cx - 1.05 * R), 0), min(int(cx + 1.05 * R) + 1, W)
+        gyy, gxx = np.mgrid[y0m:y1m, x0m:x1m].astype(np.float64)
+        _dy, _dx = gyy - cy, gxx - cx
+        _uq = geo.get("unsquash")
+        if _uq and _uq.get("S"):
+            # THE MERGE IS STRETCHED ROUND (pipeline.fit_limb_oval): the raw
+            # frames this layer is stacked from are not, so the merge's offsets
+            # from the disc centre are taken back through S^-1 before they index
+            # the stack -- the Moon's oval then lands exactly on the merge's
+            # round disc instead of up to 1.5 % of R off along one axis.
+            _Si = np.linalg.inv(np.asarray(_uq["S"], float))
+            _dy, _dx = (_Si[0, 0] * _dy + _Si[0, 1] * _dx), (_Si[1, 0] * _dy + _Si[1, 1] * _dx)
+        py = mcy + _dy / 2.0; px = mcx + _dx / 2.0
+        out[y0m:y1m, x0m:x1m] = ndimage.map_coordinates(e, [py, px], order=1, mode="constant", cval=0.5).astype(np.float16)
+        return out
+
+    out, sd = _to_grid(Eb, _share)
     np.save(os.path.join(wd, MOON_FILE), out)
+    del out
+    _fp = os.path.join(wd, MOON_FORCE_FILE)
+    if _Ef is not None:
+        np.save(_fp, _to_grid(_Ef, _share_f)[0])
+    elif os.path.exists(_fp):
+        os.remove(_fp)
+    del _Ef
     meta = {"build": MOON_BUILD, "frames": nused, "exposures": sorted(set(round(t, 6) for _, t in use)),
             "psf_alpha": alpha, "disc_level": level, "structure_rms": sd,
             "structure_rel": sd / max(level, 1e-9), "band_px_halfres": [s_lo, s_hi],
-            "half_frames": list(_hn), "maria_agreement": _agree, "maria_share": _share}
+            "half_frames": list(_hn), "maria_agreement": _agree, "maria_share": _share,
+            "maria_share_halves": _share_halves, "maria_check": _chk, "force": _force}
     json.dump(meta, open(os.path.join(wd, MOON_META), "w"), indent=1)
     _log(progress, f"[ok] Moon layer: {nused} frames, scatter model r^-{alpha:g}, "
                    f"maria {100 * sd / max(level, 1e-9):.2f}% of disc light", None)
     if _agree is None:
         _log(progress, "Moon layer: maria agreement not measured (needs frames in both "
-                       "halves of the sequence); earthshine layer used as built", None)
+                       "halves of the sequence)" + ("" if _chk else "; earthshine layer used as built"), None)
+    elif _chk is not None:
+        _log(progress, f"Moon layer: the first and second half of the frames agree {_agree:.2f} on the disc "
+                       f"(on its own that would give {100 * _share_halves:.0f} %)", None)
     elif _share <= 0.0:
         _log(progress, f"[warn] Moon layer: the two halves of the frames agree only "
                        f"{_agree:.2f} on the disc -- no maria found in the data, only noise "
@@ -378,5 +498,28 @@ def build(folder, wd, progress=None, frames=None):
     else:
         _log(progress, f"Moon layer: maria agreement {_agree:.2f} between the first and "
                        f"second half of the frames -- earthshine structure at "
-                       f"{100 * _share:.0f} %", None)
+                       f"{100 * _share_halves:.0f} %", None)
+    if _chk is not None:
+        _txt = (f"best match {_chk['best']:.2f} against {_chk['random_mean']:.2f} +- {_chk['random_sd']:.2f} "
+                f"for random patterns of the same texture ({_chk['sd']:+.1f} sd)")
+        if _chk["verdict"] == "confirmed":
+            _log(progress, f"[ok] Moon layer: the structure on the disc matches the real Moon's maria "
+                           f"({_txt}): earthshine at {100 * _share:.0f} %. The lunar map is used for this "
+                           "check only; the picture shows your own data", None)
+        elif _chk["verdict"] == "rejected":
+            _log(progress, f"[warn] Moon layer: the structure on the disc does not match the real Moon's "
+                           f"maria ({_txt}): glare or noise, the Moon is left smooth", None)
+        else:
+            _log(progress, f"Moon layer: the match with the real Moon's maria is not clear ({_txt}); "
+                           f"earthshine at {100 * _share:.0f} % from the halves test", None)
+    if _force.get("available"):
+        _c = _force["check"]
+        _log(progress, f"Moon layer: \"Force earthshine\" (Moon group) can use the earthshine from "
+                       f"{_force['source']} (best match {_c['best']:.2f} against {_c['random_mean']:.2f} "
+                       f"+- {_c['random_sd']:.2f} for random patterns, {_c['sd']:+.1f} sd): above chance but "
+                       f"not confirmed, so it may be luck, and "
+                       + ("half the frames carry more noise" if "half" in _force["source"]
+                          else "it goes in at " + f"{100 * _force['share']:.0f} %"), None)
+    elif _chk is not None and _chk["verdict"] == "rejected":
+        _log(progress, f"Moon layer: \"Force earthshine\" not available here: {_force['why']}", None)
     return meta

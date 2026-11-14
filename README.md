@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.30.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.31.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -63,6 +63,50 @@ motion, film and corona sound.
 </details>
 
 ---
+
+## New in 0.31.0
+
+- **"How this was shot"** (tab 1): before anything is stacked, EFHDR reads the
+  frames' own data and the camera's small preview in each raw file and says how
+  the set was shot — the bracket pattern, the exposure steps, frames per
+  exposure, ISO or aperture that change, framing that moved between brackets,
+  frames that look like diamond ring or beads, smeared frames, how far each
+  exposure clips. On top it gives a verdict, the settings to change (each with
+  its reason and an Apply button), what to expect from the result, and tips
+  that only apply if the result shows a problem, with the way back.
+- **Another role for a frame** (Frames panel): a frame in the image folder can
+  be used as a short exposure (prominence layer only) or a contact frame
+  (camera clock only) without moving it. The survey proposes such roles; one
+  click applies them.
+- **The run stops instead of giving a broken picture.** When the exposures
+  cannot be aligned to each other, show Moons of different sizes or in
+  different places, or when the frames of one exposure group do not show the
+  same scene, the run stops with a message that says what is wrong and what to
+  change. Red in the log now means exactly that.
+- **"Check your result"** (tab 3): warnings of the run that can show in the
+  picture — rings at the limb, a soft limb, brackets not tied, exposure data
+  that look wrong, a missing layer — in plain words, with what to look for and
+  what to try.
+- **Earthshine checked against the real Moon.** The structure on the lunar disc
+  is compared with a map of the real Moon (NASA LRO) in every orientation and
+  against random patterns of the same texture; it goes into the picture only
+  when it matches well above chance. The map is used for this check only:
+  nothing from it is drawn, the disc shows your own data. A **Force
+  earthshine** box takes in a weaker match (still above chance), with more noise.
+- **Objects crossing the field** (aircraft, satellites, birds) no longer leave a
+  trail of faint copies: the clipped mean rejects the area around a strong
+  outlier, not only its core.
+- **Mixed ISO or aperture:** Tiers "By measured brightness" splits a shutter
+  speed by what the frames recorded, and never merges frames whose camera
+  exposure times differ.
+- **Two brackets shot apart** are tied on the corona clear of both Moons; no
+  second Moon or sharp ring with HDR per bracket.
+- **Tightly framed sets:** no ring at the frame edge's distance, links from
+  patches where the correlation window has no signal, no colour below zero
+  from the per-channel fit; stars are marked only when the catalogue confirms
+  them, with a deeper pass for long lenses.
+- **Steady progress bar** and time left.
+- **Re-stack once:** caches from 0.30.x are not reused.
 
 ## New in 0.30.0
 
@@ -781,6 +825,10 @@ leaks from clipped pixels into unclipped ones and the corona reads low there —
 on some brackets a little, on others enough to show as a coloured rim. *Exact
 edge* keeps the weight exact: radiometrically correct, rings visible. The log
 prints what the trade costs on your data.
+*Exact edge* is the default. With steps of 2 EV or more between exposures,
+"How this was shot" names the trade: if rings show around the limb or bright
+prominences, try *Blended edge* (a new stack) and compare; if the corona just
+outside the limb then comes out too dark or a magenta ring shows, go back.
 
 ### White balance — Camera (as shot) / Daylight / None
 
@@ -821,6 +869,13 @@ nothing — each frame is calibrated and merged on its own. *Choose one of the
 last two when the exposure times cannot be trusted* — typed in by hand,
 recovered from video, or rewritten by a converter — because grouping by
 shutter speed is the one step that believes the header instead of measuring it.
+*By measured brightness* is also the setting for a set whose ISO or aperture
+changes part-way: it splits a shutter speed into the light each frame really
+got. With camera files it only ever splits; frames whose camera exposure times
+differ are never merged into one tier (only labels in FITS headers can be).
+"How this was shot" suggests the right choice for the folder, and the recipe
+check warns when "By measured brightness" is left on for a set that does not
+need it.
 
 ### Alignment — Automatic / Always align / Keep frames as they are
 
@@ -874,6 +929,9 @@ on a tier carrying a particle strike it cut the resulting error from 19864 ADU
 to 9.3. It needs every frame of a tier in memory at once, so it costs RAM.
 *Use it if* one frame of one tier has a satellite trail, an aircraft or a
 cosmic-ray hit.
+Around a strong outlier the rejection follows the connected pixels of that
+frame that still stand out and adds a small margin, so an object crossing the
+field leaves no faint ring of copies along its path.
 
 ### FNRGF — EFHDR (order 6) / Published (order 30, attenuated)
 
@@ -892,6 +950,17 @@ exposures, with the scattered glare modelled and removed. It is built after the
 stack, takes about a minute, and is shown with the Moon group's sliders (disc
 level, earthshine, colour, its own tone curve). It needs long tiers with real
 signal on the disc; without them the disc stays plain.
+
+Whether that structure goes into the picture is checked against a map of the
+real Moon (the LRO camera's map, from NASA's Scientific Visualization Studio,
+public domain), drawn in every position angle, mirrored and with libration,
+and compared with random patterns of the same texture: a match far above
+chance lets the structure in, a match at chance level leaves the disc smooth.
+The map is used for this check only; nothing from it is drawn into the
+picture. The log and the run report give the numbers. *Force earthshine*
+(Moon group, tab 3) takes in a match that is above chance but not confirmed,
+from all frames or from the better half of them — more noise, and the match
+may be luck; a pattern at chance level is never forced in.
 
 ### Fix hot pixels — on by default
 
@@ -1293,6 +1362,10 @@ Data bundled with the package:
 - F. Espenak, NASA GSFC, *Eclipse Predictions* — the Besselian elements of the
   2026 and 2027 eclipses.
 - GeoNames (geonames.org), CC BY 4.0 — the places in the paths of totality.
+- NASA's Scientific Visualization Studio, *CGI Moon Kit* — the Lunar
+  Reconnaissance Orbiter camera's colour map of the Moon, reduced to a 720 x
+  360 grayscale map (public domain); used only to check the earthshine
+  structure, never drawn into a picture.
 
 If this is useful in published work, please cite the papers above for the
 methods and link this repository for the implementation.

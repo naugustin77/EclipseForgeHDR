@@ -278,6 +278,39 @@ body.t1 .railgrip, body.t2 .railgrip{display:none}
 body.t3 .rail .group[data-tab="4"]{display:none}
 body.t4 .rail .group[data-tab="3"]{display:none}
 
+/* ---- tab 1, "How this was shot" (2026-11-13): a verdict, what to do, what to expect,
+   and the findings folded away ---- */
+.svverdict{display:flex;gap:12px;align-items:flex-start;padding:10px 14px;border-radius:6px;margin:4px 0 12px;
+  background:var(--panel2);border-left:4px solid #3a4250}
+.svverdict .svic{flex:none;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font:700 13px ui-monospace,monospace;background:#3a4250;color:#cfd5de;margin-top:1px}
+.svverdict b{display:block;font-size:14px;color:var(--text);font-weight:600}
+.svverdict span{display:block;font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.45}
+.svverdict.ok{border-left-color:#2f7d4f}.svverdict.ok .svic{background:#2f7d4f;color:#fff}
+.svverdict.adjust{border-left-color:var(--gold)}.svverdict.adjust .svic{background:var(--gold);color:#111}
+.svverdict.limits{border-left-color:#d99088}.svverdict.limits .svic{background:#d99088;color:#2a1513}
+.svgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 28px;align-items:start}
+@media (max-width:1100px){.svgrid{grid-template-columns:1fr}}
+.svcol h4{margin:0 0 6px;font:600 11px ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.svcol:empty{display:none}
+.svrow{display:flex;gap:10px;align-items:flex-start;padding:6px 8px;border-radius:5px;font-size:12.5px;line-height:1.45}
+.svrow+.svrow{border-top:1px solid var(--line)}
+.svrow .svtx{flex:1;min-width:0}
+.svrow .svtx b{color:var(--text);font-weight:600}
+.svrow .svtx .svwhy{display:block;color:var(--muted)}
+.svrow .svtx .svnow{color:var(--muted)}
+.svrow.done .svtx b{color:var(--muted)}
+.svrow button{flex:none;white-space:nowrap}
+.svrow .svok{flex:none;color:#5fb37f;font:12px ui-monospace,monospace;padding-top:2px}
+.svall{margin-top:8px}
+.svbul{margin:0;padding:0;list-style:none}
+.svbul li{position:relative;padding:4px 0 4px 16px;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.svbul li:before{content:"";position:absolute;left:3px;top:11px;width:6px;height:6px;border-radius:50%;background:#5d6673}
+.svbul li.warn:before{background:#d99088}
+.svbul li.warn{color:#e6c9c4}
+.svdetails{margin-top:12px}
+.svdetails summary{cursor:pointer;font-size:12px;color:var(--muted);user-select:none}
+.svdetails .svfacts{margin-top:8px}
 /* ---- tab 1 checklist, tab 3 stale note (2026-11-08) ---- */
 .cklist{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:4px 18px}
 .ckrow{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.45;padding:3px 4px;border-radius:4px}
@@ -335,6 +368,14 @@ body.srcimport .rawonly{display:none !important}
 .fpcard .fpoffx{position:absolute;top:8px;right:9px;display:none;background:#5d6673;color:#fff;
   border-radius:3px;padding:0 5px;font-weight:700}
 .fpcard.off .fpoffx{display:block}
+.fpcard .fprole{width:100%;margin-top:4px;padding:1px 4px;font:11px ui-monospace,monospace;background:transparent;
+  color:var(--muted);border:1px solid var(--line);border-radius:4px}
+.fpcard .fprole.moved{color:var(--text);border-color:#3fb8a6}
+.fpcard .fpprop{margin-top:4px;padding:2px 4px;border-radius:4px;background:rgba(222,198,124,.12);color:#eadcae;
+  display:flex;gap:4px;align-items:center;line-height:1.3}
+.fpcard .fpprop span{flex:1;min-width:0}
+.fpcard .fpprop button{padding:0 6px;font-size:11px}
+.fpcard.prop{border-color:#8a7a45}
 .fpseg{display:flex;margin-top:4px;border:1px solid var(--line);border-radius:4px;overflow:hidden}
 .fpseg button{flex:1;border:0;border-radius:0;background:transparent;color:var(--muted);padding:2px 0;font-size:11px}
 .fpseg button+button{border-left:1px solid var(--line)}
@@ -715,6 +756,16 @@ label.optchk.nondef{color:var(--gold2)}
       </div>
     </div>
   </section>
+  <section class="psec rawonly" id="svsec" style="display:none">
+    <h3 class="ptitle" title="Read from the frames' own data and from the camera's small preview inside each raw file, before anything is stacked."><span class="sico"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/></svg></span>How this was shot <span class="hint" id="svnote"></span></h3>
+    <div class="svverdict" id="svverdict"></div>
+    <div class="svgrid">
+      <div class="svcol" id="svdo"></div>
+      <div class="svcol" id="svexpect"></div>
+    </div>
+    <details class="svdetails" id="svdetails"><summary>All findings <span id="svcount"></span></summary>
+      <div id="survey" class="cklist svfacts"></div></details>
+  </section>
   <section class="psec rawonly">
 <div class="fpinline" id="fpanel">
   <div>
@@ -722,7 +773,8 @@ label.optchk.nondef{color:var(--gold2)}
       <label class="hint" title="How the previews are drawn. Strong: everything stretched so faint corona shows. Gentle: a milder stretch. As exposed: no stretch, the frame against the sensor's full scale (short exposures and darks look dark, as shot). Previews only; the stack is not affected.">Previews
         <select id="fpstretch" class="sel" style="width:auto;display:inline-block;margin-left:4px;padding:2px 6px">
           <option value="strong">strong stretch</option><option value="gentle">gentle stretch</option><option value="exposed">as exposed</option></select></label>
-      <button class="mini" id="fpallauto" title="Set every frame back to Auto: the app decides again.">All auto</button>
+      <button class="mini" id="fpapply" style="display:none" title="Do what the survey in 'How this was shot' proposes for single frames: frames that look like diamond ring or beads become contact frames, smeared frames are switched off. Each card shows the reason; every choice can be changed back.">Apply survey</button>
+      <button class="mini" id="fpallauto" title="Set every frame back to Auto and to its own role: the app decides again.">All auto</button>
       <button class="mini" id="fpclose" style="display:none">&#10005;</button><button class="mini" id="fprefresh" title="Read the folder again">&#8635; refresh</button></div>
     <div class="fpbody" id="fpbody"></div>
   </div>
@@ -1059,6 +1111,9 @@ label.optchk.nondef{color:var(--gold2)}
   </div>
   <div class="railgrip" id="railgrip" title="Drag to resize the panel"></div>
   <aside class="rail"><div class="railinner">
+    <div class="group" data-tab="3" id="rnsec" style="display:none"><div class="grouphead"><span class="gico"></span><h2>Check your result</h2><span class="tog">&#9662;</span></div>
+      <div class="hint" style="margin-bottom:6px">This run finished, but the log noted things that can show in the picture. Each says what to look for and what to try.</div>
+      <div id="rnlist"></div></div>
     <div class="group" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Structure</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div><div id="g-structure"></div></div>
     <div class="group" id="grp-hill" data-tab="3"><div class="grouphead"><span class="gico"></span><h2>Partial convolution</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">Unsharp masks of the log-stretched image at
@@ -1415,7 +1470,7 @@ function drawTimeline(){
   const hOf = s => 5 + (smax > smin ? Math.log(s / smin) / lr : 0.6) * (H - top - bot - 5);
   const bw = Math.max(1.2, Math.min(6, (W - padL - padR) / (F.length * 1.7)));
   const COL = ["#5aa0f0", "#3a76c8"];
-  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d", short: "#3fb8a6", off: "#2e333b"};
+  const SC = {brightness: "#e8a33d", dropped: "#5d6673", excluded: "#c0504d", short: "#3fb8a6", contact: "#d8c48a", off: "#2e333b"};
   const MOONC = "#e6e9ee";
   // brackets: alternate shading behind each, number on top
   if (j.repeated){
@@ -1434,6 +1489,7 @@ function drawTimeline(){
   // second) are drawn as one bar with their count on top, the bar split by
   // what happened to them; hover lists them.
   const why = {short: "short exposure: prominence layer only",
+               contact: "contact frame: camera clock only",
                excluded: "not stacked (not a totality frame / unreadable)",
                brightness: "left out: brightness more than 15 % off the tier median",
                dropped: "left out by the sharpness cut",
@@ -1451,7 +1507,7 @@ function drawTimeline(){
       g.push(f);
     else groups.push([f]);
   }
-  const ORDER = ["stacked", "short", "brightness", "dropped", "excluded", "off", null];
+  const ORDER = ["stacked", "short", "contact", "brightness", "dropped", "excluded", "off", null];
   for (const g of groups){
     const f0 = g[0], h = hOf(f0.sec);
     const xa = X(f0.t) - bw / 2, xb = X(g[g.length - 1].t) + bw / 2;
@@ -1527,6 +1583,7 @@ function drawTimeline(){
   if (j.unread) s += ` · ${j.unread} without an exposure time`;
   let leg = "";
   if (j.n_short) leg += `<i style="background:${SC.short}"></i>short exposures ${j.n_short}`;
+  if (cnt("contact")) leg += `<i style="background:${SC.contact}"></i>contact frames ${cnt("contact")}`;
   if (cnt("off")) leg += `<i style="background:${SC.off};outline:1px solid #6b7380"></i>off ${cnt("off")}`;
   if (j.ran){
     leg += `<i style="background:${COL[0]}"></i>stacked ${cnt("stacked")}`;
@@ -1591,8 +1648,10 @@ function fpSegHtml(g, f){
 function drawFrames(){
   const nOff = fpAll().filter(([g, f]) => f.state === "off").length;
   const nF = fpAll().filter(([g, f]) => f.state === "force").length;
-  $("fpsum").textContent = `${fpAll().length} frames · ${nOff} off · ${nF} forced in` +
-    (nOff || nF ? " · changes apply at the next Start (re-stack)" : "") + ` · saved in ${FP.file}`;
+  const nM = fpAll().filter(([g, f]) => f.moved).length, nP = fpAll().filter(([g, f]) => f.prop).length;
+  $("fpsum").textContent = `${fpAll().length} frames · ${nOff} off · ${nF} forced in` + (nM ? ` · ${nM} given another role` : "") +
+    (nOff || nF || nM ? " · changes apply at the next Start (re-stack)" : "") + ` · saved in ${FP.file}`;
+  const ab = $("fpapply"); if (ab){ ab.style.display = nP ? "" : "none"; ab.textContent = `Apply survey (${nP})`; }
   let h = "";
   for (const g of FP.groups){
     const shut = fpShut(g.role);
@@ -1608,11 +1667,17 @@ function drawFrames(){
                        (f.status === "promunused" && f.note ? `<span>${f.note}</span>` : "");
       if (f.gain != null && f.status !== "stacked") line2 += `${f.gain < 1 ? "" : "+"}${Math.round((f.gain - 1) * 100)} % `;
       if (f.sharp != null) line2 += `<span title="Sharpness of the last run, relative to the tier's sharpest frame">sharp ${Math.round(f.sharp * 100)} %</span>`;
-      h += `<div class="fpcard ${f.state === "auto" ? "" : f.state}" data-k="${f.key}" data-r="${g.role}">` +
+      // a frame lying in the image folder can be given another role (not moved)
+      const ro = (v, lab) => `<option value="${v}"${g.role === v ? " selected" : ""}>${lab}</option>`;
+      const roleSel = f.home ? `<select class="fprole${f.moved ? " moved" : ""}" title="What this frame is used for. Bracket frame: stacked into the HDR. Short exposure: prominence layer only. Contact frame: camera clock only (diamond ring, beads). The file stays where it is.">` +
+        ro("lights", "bracket frame") + ro("short", "short exposure") + ro("contact", "contact frame") + `</select>` : "";
+      const PL = {contact: ["contact frame?", "make it one"], short: ["short exposure?", "make it one"], off: ["smeared?", "switch off"]};
+      const propHtml = f.prop && PL[f.prop.role] ? `<div class="fpprop" title="From the survey (How this was shot): ${String(f.prop.why || "").replace(/"/g, "&quot;")}"><span>survey: ${PL[f.prop.role][0]}</span><button class="mini" data-prop="1">${PL[f.prop.role][1]}</button></div>` : "";
+      h += `<div class="fpcard ${f.state === "auto" ? "" : f.state}${f.prop ? " prop" : ""}" data-k="${f.key}" data-r="${g.role}">` +
            `<img loading="lazy" src="${fpUrl(f.key, "thumb")}" alt="" title="Open larger">` +
            `<span class="fpflag" title="Forced in by you">&#9873; forced</span><span class="fpoffx" title="Switched off by you">off</span>` +
            `<div class="fpname" title="${f.key}">${f.name}</div><div class="fpmeta">${meta}</div><div class="fpmeta">${line2}</div>` +
-           `<div class="fpseg">${fpSegHtml(g, f)}</div></div>`;
+           `<div class="fpseg">${fpSegHtml(g, f)}</div>${roleSel}${propHtml}</div>`;
     }
     h += "</div></div>";
   }
@@ -1649,11 +1714,45 @@ $("fpbody").addEventListener("click", e => {
   if (!card) return;
   const btn = e.target.closest(".fpseg button");
   if (btn){ fpSet({[card.dataset.k]: btn.dataset.v}); return; }
+  if (e.target.closest("[data-prop]")){
+    const hit = fpAll().find(([g, f]) => f.key === card.dataset.k);
+    if (hit && hit[1].prop) fpApply([hit[1]]);
+    return;
+  }
   if (e.target.tagName === "IMG") fpView(card.dataset.k);
 });
+// ANOTHER ROLE FOR A FRAME OF THE IMAGE FOLDER (2026-11-13): saved in the same
+// file as the switches; the frame leaves or rejoins the bracket at the next Start
+async function fpRole(roles, set){
+  try {
+    const body = Object.assign({set: set || {}, role: roles}, Object.fromEntries(new URLSearchParams(fpQuery())));
+    const j = await (await fetch("/api/frames", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                  body: JSON.stringify(body)})).json();
+    if (!j.ok){ $("fpsum").textContent = j.error; return false; }
+    await openFrames();
+    refreshCache(); loadTimeline(); loadChecklist();
+    return true;
+  } catch (e){ $("fpsum").textContent = "could not save: " + e; return false; }
+}
+function fpApply(frames){
+  const roles = {}, set = {};
+  for (const f of frames){
+    if (!f.prop) continue;
+    if (f.prop.role === "off") set[f.key] = "off"; else roles[f.key] = f.prop.role;
+  }
+  if (Object.keys(roles).length || Object.keys(set).length) fpRole(roles, set);
+}
+$("fpbody").addEventListener("change", e => {
+  const sel = e.target.closest(".fprole"); if (!sel) return;
+  const card = sel.closest(".fpcard"); if (!card) return;
+  fpRole({[card.dataset.k]: sel.value});
+});
+$("fpapply").addEventListener("click", () => fpApply(fpAll().map(([g, f]) => f).filter(f => f.prop)));
 $("fpallauto").addEventListener("click", () => {
-  const ch = {}; for (const [g, f] of fpAll()) if (f.state !== "auto") ch[f.key] = "auto";
-  if (Object.keys(ch).length) fpSet(ch);
+  const ch = {}, rl = {};
+  for (const [g, f] of fpAll()){ if (f.state !== "auto") ch[f.key] = "auto"; if (f.moved) rl[f.key] = "lights"; }
+  if (Object.keys(rl).length) fpRole(rl, ch);
+  else if (Object.keys(ch).length) fpSet(ch);
 });
 $("fpclose").addEventListener("click", () => $("fpanel").classList.remove("on"));
 function fpView(k){ FPV = {k, crop: false}; $("fpview").classList.add("on"); fpViewDraw(); }
@@ -1726,14 +1825,153 @@ async function loadChecklist(){
       `<span class="ckic">${CK_IC[it.level] || "i"}</span><div><b>${it.title}</b><span>${it.text}</span></div></div>`).join("");
     box._items = j.items;
     const n = j.items.filter(it => it.level === "warn" || it.level === "missing").length;
-    const tb = document.querySelector('.tabbtn[data-tab="1"]');
-    let bd = tb.querySelector(".tbadge"); if (!bd){ bd = document.createElement("span"); bd.className = "tbadge"; tb.appendChild(bd); }
-    bd.textContent = n; bd.style.display = n ? "" : "none";
-    bd.title = n ? `${n} item(s) to check in the checklist` : "";
+    CK_N = n; tab1Badge();
     $("cknote").textContent = n ? `· ${n} to check` : "· all needed frames found";
   } catch (e){ $("cksec").style.display = "none"; }
   loadRecipeCheck();
+  loadSurvey();
 }
+// the badge on tab 1 counts the checklist and the survey together
+var CK_N = 0, SV_N = 0, SV_T = null;
+function tab1Badge(){
+  const tb = document.querySelector('.tabbtn[data-tab="1"]'); if (!tb) return;
+  let bd = tb.querySelector(".tbadge"); if (!bd){ bd = document.createElement("span"); bd.className = "tbadge"; tb.appendChild(bd); }
+  const n = (CK_N || 0) + (SV_N || 0);
+  bd.textContent = n; bd.style.display = n ? "" : "none";
+  bd.title = n ? `${n} item(s) to check in tab 1` : "";
+}
+/* ---- tab 1, "How this was shot" (2026-11-13): the survey of the folder
+   (server: /api/survey, survey.py). The rows from the metadata come at once,
+   those from the camera previews fill in; polled while the job runs ---- */
+let SV = null;
+async function loadSurvey(){
+  const sec = $("svsec"); if (!sec) return;
+  clearTimeout(SV_T);
+  const off = () => { sec.style.display = "none"; SV = null; SV_N = 0; tab1Badge(); };
+  if (!$("folder").value.trim() || document.body.classList.contains("srcimport")) return off();
+  try {
+    const j = await (await fetch("/api/survey")).json();
+    if (!j.ok || !j.items) return off();
+    SV = j; drawSurvey();
+    if (j.pending) SV_T = setTimeout(loadSurvey, j.waiting ? 5000 : 1200);
+  } catch (e){ off(); }
+}
+// the settings the survey suggests that differ from what is set in tab 2
+function svOpen(){
+  const g = (SV && SV.guide) || {};
+  return (g.settings || []).filter(x => { const el = $(x.id); return el && el.value !== x.value; });
+}
+function svEsc(t){ return String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+function drawSurvey(){
+  const j = SV; if (!j) return;
+  const sec = $("svsec"); sec.style.display = "";
+  const g = j.guide || {settings: [], frames: {}, expect: [], limits: []};
+  const pend = j.roles_pending || {};
+  const nC = Object.values(pend).filter(r => r.role === "contact").length;
+  const nO = Object.values(pend).filter(r => r.role === "off").length;
+  const open = svOpen();
+  const nDo = open.length + (nC ? 1 : 0) + (nO ? 1 : 0);
+  // the verdict
+  const V = $("svverdict");
+  let cls, ic, tt, tx;
+  if (j.pending && !j.items.length){ cls = ""; ic = "…"; tt = "Reading the frames…"; tx = ""; }
+  else if (nDo){
+    cls = "adjust"; ic = "!";
+    tt = nDo === 1 ? "One change suggested before you start" : `${nDo} changes suggested before you start`;
+    tx = "Apply them below (each says why), then start in 2 Processing. Every change can be undone.";
+  } else if ((g.limits || []).length){
+    cls = "limits"; ic = "!"; tt = "Ready to stack, with limits";
+    tx = "Nothing to change in the settings, but the set itself limits the result: see below.";
+  } else {
+    cls = "ok"; ic = "\u2713"; tt = "Ready to stack";
+    tx = (g.settings || []).length ? "The settings that matter for this set are already right."
+                                   : "Nothing in this set needs a setting different from the defaults.";
+  }
+  if (j.pending && j.items.length) tx += (tx ? " " : "") + "Still reading the camera previews: this may change.";
+  V.className = "svverdict " + cls;
+  V.innerHTML = `<span class="svic">${ic}</span><div><b>${tt}</b>${tx ? `<span>${tx}</span>` : ""}</div>`;
+  // what to do
+  let h = "";
+  for (const x of g.settings || []){
+    const el = $(x.id), cur = el ? (el.options ? (el.options[el.selectedIndex] || {}).text : el.value) : "";
+    const done = el && el.value === x.value;
+    h += `<div class="svrow${done ? " done" : ""}"><div class="svtx"><b>${svEsc(x.name)}: ${svEsc(x.label)}</b>` +
+         (done ? "" : ` <span class="svnow">(now: ${svEsc(cur)})</span>`) +
+         `<span class="svwhy">${svEsc(x.why)}</span>` +
+         (x.check ? `<span class="svwhy"><i>If it goes wrong:</i> ${svEsc(x.check)}.</span>` : "") + `</div>` +
+         (done ? `<span class="svok">\u2713 set</span>` : `<button class="mini" data-svset="${x.id}" data-v="${svEsc(x.value)}">Apply</button>`) + `</div>`;
+  }
+  if (nC) h += `<div class="svrow"><div class="svtx"><b>${nC} frame${nC > 1 ? "s" : ""} as contact frame${nC > 1 ? "s" : ""}</b>` +
+       `<span class="svwhy">They look like diamond ring or beads, so they leave the stack and set the camera clock instead. Marked on their cards in Frames below.</span></div>` +
+       `<button class="mini" data-svframes="contact">Apply</button></div>`;
+  if (nO) h += `<div class="svrow"><div class="svtx"><b>Switch off ${nO} smeared frame${nO > 1 ? "s" : ""}</b>` +
+       `<span class="svwhy">The Moon's edge is blurred against the other frames at the same exposure (shake, wind). Check them in Frames below.</span></div>` +
+       `<button class="mini" data-svframes="off">Apply</button></div>`;
+  if (nDo > 1) h += `<div class="svall"><button class="mini" id="svapplyall">Apply all ${nDo}</button></div>`;
+  $("svdo").innerHTML = h ? `<h4>Before you start</h4>${h}` : "";
+  // what to expect
+  const ex = (g.limits || []).concat(g.expect || []);
+  let eh = ex.length ? `<h4>What to expect</h4><ul class="svbul">` +
+      ex.map(e => `<li class="${e.level === "warn" ? "warn" : ""}">${svEsc(e.text)}</li>`).join("") + `</ul>` : "";
+  // IF THE RESULT SHOWS A PROBLEM (2026-11-14): settings that can help or
+  // hurt depending on the set, so they are not changed up front. Each says
+  // what to look for, what to try, and when to go back.
+  const tr = g.tries || [];
+  if (tr.length){
+    eh += `<h4>If the result shows a problem</h4>`;
+    for (const t of tr){
+      const el = $(t.id), on = el && el.value === t.value, bk = t.back || {};
+      eh += on
+        ? `<div class="svrow"><div class="svtx"><b>${svEsc(bk.if)}: go back to ${svEsc(t.name)} ${svEsc(bk.label)}</b>` +
+          `<span class="svwhy">${svEsc(t.name)} is set to ${svEsc(t.label)} now. ${svEsc(t.why)}. ${svEsc(t.then)}.</span></div>` +
+          `<button class="mini" data-svset="${t.id}" data-v="${svEsc(bk.value)}">Use ${svEsc(bk.label)}</button></div>`
+        : `<div class="svrow"><div class="svtx"><b>${svEsc(t.if)}: try ${svEsc(t.name)} ${svEsc(t.label)}</b>` +
+          `<span class="svwhy">${svEsc(t.why)}. ${svEsc(t.then)}.</span></div>` +
+          `<button class="mini" data-svset="${t.id}" data-v="${svEsc(t.value)}">Use ${svEsc(t.label)}</button></div>`;
+    }
+  }
+  $("svexpect").innerHTML = eh;
+  // the findings
+  const box = $("survey");
+  box.innerHTML = j.items.map((it, i) =>
+    `<div class="ckrow ${it.level}${it.act ? " act" : ""}" data-i="${i}" title="${it.act ? (it.act.tab ? "Go to tab " + it.act.tab : "Go to the frames") : ""}">` +
+    `<span class="ckic">${CK_IC[it.level] || "i"}</span><div><b>${it.title}</b><span>${it.text}</span></div></div>`).join("");
+  box._items = j.items;
+  $("svcount").textContent = `(${j.items.length})`;
+  $("svnote").textContent = j.pending
+    ? (j.waiting ? "· waits for the run to finish" : (j.total ? `· reading the previews ${j.done}/${j.total}` : "· reading…"))
+    : "";
+  SV_N = nDo + (g.limits || []).length; tab1Badge();
+}
+async function svApplySetting(id, v){
+  const el = $(id); if (!el) return;
+  if (el.type === "checkbox") el.checked = v === "True"; else el.value = v;
+  el.dispatchEvent(new Event("change", {bubbles: true}));
+}
+async function svApplyFrames(kind){
+  const pend = (SV && SV.roles_pending) || {}, roles = {}, set = {};
+  for (const [n, r] of Object.entries(pend)){
+    if (kind && r.role !== kind) continue;
+    if (r.role === "off") set[n] = "off"; else roles[n] = r.role;
+  }
+  if (Object.keys(roles).length || Object.keys(set).length){ await fpRole(roles, set); await loadSurvey(); }
+}
+$("svsec").addEventListener("click", async e => {
+  const b = e.target.closest("[data-svset]");
+  if (b){ await svApplySetting(b.dataset.svset, b.dataset.v); drawSurvey(); return; }
+  const fb = e.target.closest("[data-svframes]");
+  if (fb){ fb.disabled = true; await svApplyFrames(fb.dataset.svframes); return; }
+  if (e.target.closest("#svapplyall")){
+    for (const x of svOpen()) await svApplySetting(x.id, x.value);
+    await svApplyFrames(null); drawSurvey(); return;
+  }
+  const row = e.target.closest("#survey .ckrow.act"); if (!row) return;
+  const it = ($("survey")._items || [])[+row.dataset.i]; if (!it || !it.act) return;
+  if (it.act.tab){ setTab(it.act.tab); return; }
+  const el = $(it.act.field); if (el){ setTab(1); el.scrollIntoView({block: "start"}); }
+});
+// a setting changed in tab 2 changes what is still open here
+$("optpanel").addEventListener("change", () => { if (SV) drawSurvey(); });
 // THE RECIPE CHECK (tab 2, above Start): the options as set here against what
 // the folder holds (server: /api/recipecheck). Findings only advise; "use"
 // sets the suggested value, Start is never blocked.
@@ -2014,7 +2252,11 @@ function fmtDur(s){
 // reached its current fraction with when the last one did, and scales that
 // run's total. With no history the fraction itself is extrapolated.
 let RUN_TL = null;
-function tlKey(kind, any){ return "efh.tl." + kind + (any ? "" : "." + ($("folder").value || "").trim()); }
+// keyed by the stacking mode too: HDR per bracket runs the whole pipeline once
+// per bracket and its time profile has nothing in common with a single stack
+// (2026-11-13: the estimate jumped and ran far off after switching modes)
+function tlMode(){ const b = $("bracketMode"); return b ? "." + b.value : ""; }
+function tlKey(kind, any){ return "efh.tl." + kind + tlMode() + (any ? "" : "." + ($("folder").value || "").trim()); }
 function tlLoad(kind){
   for (const any of [false, true]){
     try { const t = JSON.parse(localStorage.getItem(tlKey(kind, any)) || "null");
@@ -2079,19 +2321,44 @@ function runSync(j){
     RUN_TL.f = j.frac; RUN_TL.tf = j.elapsed || 0; RUN_TL.s.push([j.frac, RUN_TL.tf]);
   }
 }
+// THE BAR NEVER GOES BACK, AND THE TIME LEFT DOES NOT JUMP (2026-11-13). The
+// bar was the larger of the pipeline's own fraction and elapsed / estimated
+// total, and the estimated total was recomputed from scratch at every step the
+// pipeline reported: a step that came late raised the total, the bar fell
+// back and the minutes left jumped up and down. Now the total is smoothed
+// (it moves toward each new estimate over about ten seconds), the bar only
+// moves forward, and the time left never counts up faster than the clock.
+function runSmooth(est, e){
+  if (!est || !RUN_TL) return est;
+  const now = Date.now()/1000;
+  if (RUN_TL.Ts == null){ RUN_TL.Ts = est.T; RUN_TL.at = now; }
+  else {
+    const dt = Math.max(0, now - (RUN_TL.at || now)); RUN_TL.at = now;
+    RUN_TL.Ts += (est.T - RUN_TL.Ts) * Math.min(1, dt / 10);
+  }
+  let left = Math.max(0, RUN_TL.Ts - e);
+  if (RUN_TL.left != null && RUN_TL.leftAt != null){
+    const lim = RUN_TL.left + 0.3 * (now - RUN_TL.leftAt);         // up only slowly
+    if (left > lim) left = lim;
+  }
+  RUN_TL.left = left; RUN_TL.leftAt = now;
+  return {T: e + left, left};
+}
 function runBar(frac){
-  const est = RUN_BASE && runEstimate(RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at));
-  const w = est ? Math.min(0.99, Math.max(frac || 0, 1 - Math.max(0, est.left)/est.T)) : (frac || 0);
+  const e = RUN_BASE ? RUN_BASE.e + (Date.now()/1000 - RUN_BASE.at) : 0;
+  const est = RUN_BASE && runSmooth(runEstimate(e), e);
+  let w = est ? Math.min(0.99, Math.max(frac || 0, 1 - Math.max(0, est.left)/Math.max(est.T, 1e-6))) : (frac || 0);
+  if (RUN_TL){ w = Math.max(w, RUN_TL.wmax || 0); RUN_TL.wmax = w; }
   $("pbar").style.width = (w*100).toFixed(1) + "%";
+  return est;
 }
 function runTick(){
   SPIN_I = (SPIN_I + 1) % SPIN.length;
   $("spin").textContent = SPIN[SPIN_I];
   if (!RUN_BASE) return;
   const d = Date.now()/1000 - RUN_BASE.at, el = RUN_BASE.e + d;
-  const est = runEstimate(el);
+  const est = runBar(RUN_TL ? RUN_TL.f : 0);
   $("clock").innerHTML = fmtDur(el) + (est ? ' <span class="left">· ' + (est.left > 5 ? "~" + fmtDur(est.left) + " left" : "finishing") + '</span>' : "");
-  if (est) runBar(RUN_TL ? RUN_TL.f : 0);
   const since = RUN_BASE.s + d, note = $("stepnote");
   if (since > 45 && RUN_BASE.step){
     note.className = "stale";
@@ -2193,6 +2460,13 @@ async function pollProgress(){
   if (j.error && j.cancelled){ $("status").textContent = j.error;
     runStop("■", "cancelled"); $("start").disabled = false;
     $("clearcache").disabled = false; await refreshCache(); return; }
+  if (j.error && j.stopped){
+    // A DELIBERATE STOP (2026-11-14): the run found that the data cannot give a
+    // sound result with these settings; the message says what to change.
+    $("status").textContent = "stopped — " + String(j.error).split(". ")[0].replace(/^Stopped: /, "");
+    appendLog(j.error, "fail"); runStop("■", "stopped: change the setting named in the log and start again");
+    $("start").disabled = false; $("clearcache").disabled = false; await refreshCache();
+    $("sdot").className = "sdot err"; return; }
   if (j.error){ $("status").textContent = "error — see log"; appendLog(j.error, "fail");
     runStop("✕", "failed"); $("start").disabled = false;
     $("clearcache").disabled = false; await refreshCache(); $("sdot").className = "sdot err"; return; }
@@ -2232,6 +2506,73 @@ function applyBrand(j){
   document.body.insertBefore(bar, document.body.firstChild);
 }
 
+/* ---- CHECK YOUR RESULT (2026-11-14): the warnings of the last run that can
+   show in the picture (runnotes.py), in plain words, above the controls ---- */
+function drawRunNotes(){
+  const sec = $("rnsec"); if (!sec) return;
+  const n = (GEO && GEO.runNotes) || [];
+  sec.style.display = n.length ? "" : "none";
+  $("rnlist").innerHTML = n.map(x => `<div class="svrow"><div class="svtx"><b>${svEsc(x.title)}</b>`
+    + `<span class="svwhy">${svEsc(x.text)}</span>`
+    + `<span class="svwhy" style="opacity:.7;font-size:11px">log: ${svEsc(x.line)}</span></div></div>`).join("");
+}
+/* ---- FORCE EARTHSHINE (2026-11-14) ------------------------------------
+   The earthshine goes into the picture only when its pattern matches a map
+   of the real Moon well above chance. The box below the Earthshine slider
+   switches to a second Moon layer built beside it, which accepts a weaker
+   match: above chance but not confirmed, from all frames or from the better
+   half of them. Nothing at chance level is forced in, and the picture always
+   shows the user's own data. Switching reloads one layer; nothing is rebuilt. */
+const EF_TIP = "Uses the earthshine even when its match with the real Moon is above chance but not "
+  + "confirmed, if needed from the better half of the frames. It may then be luck, and half the frames "
+  + "carry more noise. A pattern that does not beat chance is never forced in. The lunar map is used "
+  + "for this check only; the picture shows your own data.";
+function syncEarthForce(){
+  const esc = $("s_earthShine"); if (!esc) return;
+  const row = esc.closest(".ctl"); if (!row) return;
+  let box = $("efrow");
+  if (!box){
+    box = document.createElement("div"); box.id = "efrow"; box.style.margin = "-2px 0 8px";
+    box.innerHTML = `<label class="optchk" style="justify-content:flex-start;padding:2px 0 3px" title="${EF_TIP}"><input type="checkbox" id="earthForce"> Force earthshine</label>`
+      + `<div class="hint" id="earthForceNote"></div>`;
+    row.after(box);
+    $("earthForce").addEventListener("change", setEarthForce);
+  }
+  const f = (GEO && GEO.earthForce) || {};
+  box.style.display = GEO && GEO.has_earth ? "" : "none";
+  const cb = $("earthForce");
+  cb.checked = !!(f.available && f.on);
+  cb.disabled = !f.available;
+  box.querySelector("label").style.opacity = f.available ? "" : ".5";
+  let note = "";
+  if (f.available){
+    const c = f.check || {};
+    note = `Can use the earthshine from ${f.source}: match ${(+c.best).toFixed(2)} against `
+      + `${(+c.random_mean).toFixed(2)} for chance. Above chance, not confirmed.`;
+  } else if (f.why){
+    note = "Not available: " + f.why + ".";
+  }
+  $("earthForceNote").textContent = note;
+}
+async function setEarthForce(){
+  const cb = $("earthForce"), on = cb.checked;
+  cb.disabled = true;
+  let j = null;
+  try {
+    j = await (await fetch("/api/earthforce", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({on})})).json();
+  } catch (e){ j = {ok:false, error: String(e)}; }
+  if (j && j.earthForce) GEO.earthForce = j.earthForce;
+  if (!j || !j.ok){
+    appendLog("Force earthshine: " + ((j && j.error) || "failed"), "warn");
+  } else {
+    appendLog(on ? `Force earthshine on: the Moon layer from ${GEO.earthForce.source} is used`
+                 : "Force earthshine off: the checked Moon layer is used");
+    await fetchLayer("earth");
+    renderNow();
+  }
+  syncEarthForce();
+}
 function fetchLayer(name){
   return new Promise(res => {
     const im = new Image();
@@ -2363,6 +2704,8 @@ async function loadLayers(){
     if (row) row.style.display = GEO.has_earth ? "" : "none";
     if (!GEO.has_earth){ P.earthShine = 0; esc.value = 0; $("v_earthShine").textContent = "0"; }
   }
+  syncEarthForce();
+  drawRunNotes();
   await Promise.all(names.map(fetchLayer));
   // median of the NAFE layer, so its mix is centred like the other two
   if (L.nafe){

@@ -327,6 +327,16 @@ def frames_api():
                     prom[n] = (bool(it.get("used")), why)
         except Exception:
             pass
+        # what the survey of the folder proposes for single frames (tab 1,
+        # "How this was shot"): a role, or off, with the reason. Shown on the
+        # card; nothing is applied until the user says so.
+        prop = {}
+        try:
+            from . import survey as _sv
+            prop = _sv.proposals(f)
+        except Exception:
+            prop = {}
+        f_abs = os.path.abspath(f)
         groups = []
         for role, title, forceable, d, ps in _fs.groups(f, request.args.get("flat") or None,
                                                         request.args.get("bias") or None,
@@ -373,7 +383,12 @@ def frames_api():
                     status, note = "clock", clock[p]
                 else:
                     status, note = ((t or {}).get("status") if role == "lights" else None), ""
+                home = (role in ("lights", "short", "contact")
+                        and os.path.dirname(os.path.abspath(p)) == f_abs)
+                pr = prop.get(n) if (role == "lights" and home and k not in sel["off"]) else None
                 frs.append({"key": k, "name": n, "sec": sec, "ts": ts,
+                            "home": home, "moved": bool(home and role != "lights"),
+                            "prop": pr,
                             "state": ("off" if k in sel["off"] else
                                       "force" if (forceable and k in sel["force"]) else "auto"),
                             "status": status, "note": note,
@@ -382,7 +397,9 @@ def frames_api():
             groups.append({"role": role, "title": title, "forceable": forceable,
                            "dir": _fs.key(d, f), "frames": frs})
         return jsonify({"ok": True, "groups": groups, "file": _fs.SEL_FILE,
-                        "n_off": len(sel["off"]), "n_force": len(sel["force"])})
+                        "n_off": len(sel["off"]), "n_force": len(sel["force"]),
+                        "n_moved": len(sel.get("roles") or {}),
+                        "n_prop": sum(1 for g in groups for x in g["frames"] if x.get("prop"))})
     except Exception as e:
         return jsonify({"ok": False, "error": f"frames: {e}"})
 
@@ -410,8 +427,10 @@ def frame_preview():
 
 @app.post("/api/frames")
 def frames_set():
-    """{"set": {key: "auto" | "off" | "force"}} -> saved; the next Start
-    re-stacks when the selection changed what it would stack."""
+    """{"set": {key: "auto" | "off" | "force"}, "role": {key: "lights" |
+    "short" | "contact"}} -> saved; the next Start re-stacks when the
+    selection changed what it would stack. "role" gives a frame lying in the
+    image folder another role without moving it (frameselect.set_roles)."""
     f = STATE.get("folder")
     if not f:
         return jsonify({"ok": False, "error": "no folder"}), 400
@@ -434,7 +453,11 @@ def frames_set():
             elif v == "force" and idx[k][2]:
                 force.add(k)
         _fs.save(f, off, force)
-        return jsonify({"ok": True, "n_off": len(off), "n_force": len(force - off)})
+        n_moved = len(sel.get("roles") or {})
+        rc = {str(k): str(v) for k, v in (data.get("role") or {}).items() if k in idx}
+        if rc:
+            n_moved = _fs.set_roles(f, rc)
+        return jsonify({"ok": True, "n_off": len(off), "n_force": len(force - off), "n_moved": n_moved})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -541,9 +564,17 @@ def checklist():
             "none: vignetting and dust are not corrected", {"field": "flatDir"})
         # 4. short exposures and contact frames
         sd = find_short_dir(f)
-        add("ok" if sd else "info", "Short exposures",
-            f"{len(list_raws(sd))} in {os.path.basename(sd)}/, for the prominence layer" if sd else
-            "none: the prominences come from the bracket's shortest exposures", {"field": "dir_short"})
+        # with the frames of the image folder given that role in the Frames panel
+        r_short, r_cont = _fs.reassigned(f, "short"), _fs.reassigned(f, "contact")
+        _n_sd = len(list_raws(sd)) if sd else 0
+        if sd or r_short:
+            add("ok", "Short exposures",
+                " and ".join(x for x in ((f"{_n_sd} in {os.path.basename(sd)}/" if sd else ""),
+                                         (f"{len(r_short)} given that role in Frames" if r_short else "")) if x)
+                + ", for the prominence layer", {"field": "dir_short"} if sd else {"field": "fpanel"})
+        else:
+            add("info", "Short exposures", "none: the prominences come from the bracket's shortest exposures",
+                {"field": "dir_short"})
         cd = find_contact_dir(f)
         site = None
         try:
@@ -551,9 +582,10 @@ def checklist():
         except Exception:
             pass
         has_site = bool(site and site.get("ut") and site.get("lat") is not None)
-        if cd:
+        if cd or r_cont:
             add("ok" if has_site else "info", "Contact frames",
-                f"{len(list_raws(cd))} in {os.path.basename(cd)}/"
+                " and ".join(x for x in ((f"{len(list_raws(cd))} in {os.path.basename(cd)}/" if cd else ""),
+                                         (f"{len(r_cont)} given that role in Frames" if r_cont else "")) if x)
                 + ("; they set the camera clock" if has_site else
                    "; enter the observing site (tab 2) so they can set the camera clock"),
                 {"field": "dir_contact"} if has_site else {"tab": 2})
@@ -564,11 +596,40 @@ def checklist():
             "entered" if has_site else
             "not entered: the star match is less exact and the polar map has no solar north", {"tab": 2})
         sel = _fs.load(f)
-        if sel["off"] or sel["force"]:
-            add("info", "Your frame choices", f"{len(sel['off'])} switched off, {len(sel['force'])} forced in")
+        if sel["off"] or sel["force"] or sel.get("roles"):
+            add("info", "Your frame choices", f"{len(sel['off'])} switched off, {len(sel['force'])} forced in"
+                + (f", {len(sel['roles'])} given another role" if sel.get("roles") else ""), {"field": "fpanel"})
         return jsonify({"ok": True, "items": items})
     except Exception as e:
         return jsonify({"ok": False, "error": f"checklist: {e}", "items": items})
+
+
+@app.get("/api/survey")
+def survey_api():
+    """TAB 1, "How this was shot": the survey of the folder (survey.py) --
+    the rows read from the metadata at once, those read from the camera
+    previews as a background job; the page polls while `pending`. Not started
+    while a stack is running (cores, memory)."""
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"})
+    try:
+        from . import survey as _sv, frameselect as _fs
+        st = _sv.status(f, workdir(f), start=not _busy())
+        # the survey's proposals for single frames that are not done yet: a
+        # frame already given that role, or already switched off, is done
+        sel = _fs.load(f)
+        pend = {}
+        for n, r in (st.get("roles") or {}).items():
+            if n in sel["off"]:
+                continue
+            if r.get("role") in _fs.MOVE_ROLES and sel["roles"].get(n) == r.get("role"):
+                continue
+            pend[n] = r
+        st["roles_pending"] = pend
+        return jsonify(st)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"survey: {e}"})
 
 
 @app.post("/api/framedirs")
@@ -886,6 +947,29 @@ def recipecheck():
                     + " have fewer and are a plain mean")
             else:
                 add("ok", "Tier combine", "clipped mean")
+        # 2b. tiers by measured brightness on honest camera files (2026-11-14):
+        # left over from a mixed-ISO folder, it put frames of two brackets of
+        # another folder into one tier (a doubled Moon). It is for mixed ISO or
+        # aperture and for missing or wrong exposure data.
+        if o.get("tier_mode") == "measured" and lights:
+            try:
+                from .fits import is_fits as _isf
+                _cam = not any(_isf(p) for p in lights)
+                _meta = {}
+                try:
+                    _meta = (json.load(open(os.path.join(wd, "survey.json"))) or {}).get("meta") or {}
+                except Exception:
+                    pass
+                _isos = {m.get("iso") for m in _meta.values() if m.get("iso")}
+                _fnos = {round(m["fnum"], 1) for m in _meta.values() if m.get("fnum")}
+                if _cam and _meta and len(_isos) <= 1 and len(_fnos) <= 1:
+                    add("warn", "Tiers", "By measured brightness with camera files whose ISO and aperture do "
+                        "not change: the camera's exposure times are right here, and grouping by "
+                        "shutter speed is the safe choice. Measured brightness is for mixed ISO or "
+                        "aperture and for missing or wrong exposure data",
+                        fix("tier_mode", "exposure", "Use By shutter speed"))
+            except Exception:
+                pass
         # 3. fewer frames than there are
         if not simple and frames in ("best", "best50") and nmin >= 2:
             k = 1 if frames == "best" else max(1, nmin // 2)
@@ -981,11 +1065,20 @@ def recipecheck():
         if o.get("despeckle") == "False" and not find_dark_dir(f):
             add("warn", "Hot pixels", "no darks and Fix hot pixels is off: hot photosites stay in the picture "
                 "as coloured dots", {"id": "despeckle", "value": "True", "label": "Fix hot pixels"})
-        # 9. edge weight with big exposure steps
-        if not simple and o.get("feather") == "taper" and maxstep >= 2.0:
-            add("info", "Merge weight", f"Exact edge with steps up to {maxstep:.1f} EV between exposures: "
-                "radiometrically right, but if rings show just outside the limb, Blended edge hides them",
-                fix("feather", "plain", "Use Blended edge"))
+        # 9. edge weight with big exposure steps (2026-11-14): a conditional
+        # tip, not a recommendation. Exact edge is the default because Blended
+        # edge fails at the limb (limb ramp, magenta ring; see the CHANGELOG);
+        # with wide steps Exact edge can print clipping contours as rings.
+        if not simple and maxstep >= 2.0:
+            if o.get("feather") == "taper":
+                add("info", "Merge weight", f"Exact edge, steps up to {maxstep:.1f} EV between exposures: if rings "
+                    "show around the limb or bright prominences, try Blended edge (new stack) and compare; it can "
+                    "leave the corona just outside the limb too dark and a magenta ring round the disc",
+                    fix("feather", "plain", "Try Blended edge"))
+            elif o.get("feather") == "plain":
+                add("info", "Merge weight", "Blended edge: if the corona just outside the limb is too dark or a "
+                    "magenta ring shows round the disc, go back to Exact edge (new stack)",
+                    fix("feather", "taper", "Use Exact edge"))
         # 10. photometric chain over many tiers
         if not simple and o.get("photo_solve") == "chain" and len(exps) >= 4:
             add("info", "Photometric solve", f"Chain over {len(exps)} exposures: one bad link shifts every "
@@ -1530,6 +1623,7 @@ def start_run():
                     if _ml.needs_build(wd):
                         prog.log("building Moon layer (earthshine) from long frames...", None)
                         _ml.build(folder, wd, prog)
+                        _report_refresh(wd)
                 except Exception as _e:
                     if getattr(prog, "cancelled", False):
                         raise
@@ -1537,6 +1631,7 @@ def start_run():
                 _build_stars(wd, prog)
                 prog.log("loading layers for preview...", None)
                 STATE["layers"] = Layers(wd)
+                _save_run_notes(prog)
                 prog.log("ready", 1.0)
                 prog.done = True
                 return
@@ -1575,6 +1670,7 @@ def start_run():
                     _rebuild_layers(wd, prog, denoise, fnrgf_preset, partialconv)
                 prog.log("loading layers for preview...", None)
                 STATE["layers"] = Layers(wd)
+                _save_run_notes(prog)
                 prog.log("ready", 1.0)
                 prog.done = True
                 return
@@ -1596,7 +1692,9 @@ def start_run():
             if o is not None:
                 # Denoise is a LAYER option (2026-10-08): a change rebuilds the
                 # detail layers below, never the stack
-                opts_ok = (o.get("flat_dir") == _fd
+                from . import pipeline as _plb
+                opts_ok = (int(o.get("stack_build", 0) or 0) == int(getattr(_plb, "STACK_BUILD", 0))
+                           and o.get("flat_dir") == _fd
                            and o.get("flat_inputs") == _flat_fp(_fd)
                            # Dropping a bias/ or darks/ folder beside the raws
                            # changes the stacked data, and nothing the page
@@ -1885,6 +1983,7 @@ def start_run():
                 if _ml.needs_build(wd):
                     prog.log("building Moon layer (earthshine) from long frames...", None)
                     _ml.build(folder, wd, prog)
+                    _report_refresh(wd)
             except Exception as _e:
                 if getattr(prog, "cancelled", False):
                     raise
@@ -1892,12 +1991,18 @@ def start_run():
             _build_stars(wd, prog)
             prog.log("loading layers for preview...", None)
             STATE["layers"] = Layers(wd)
+            _save_run_notes(prog)
             prog.log("ready", 1.0)
             prog.done = True
         except Exception as e:
+            from .pipeline import RunStopped as _RS
             if getattr(prog, "cancelled", False):
                 prog.error = ("cancelled by you -- nothing from this run is used; "
                               "the next Start runs it again")
+            elif isinstance(e, _RS):
+                # a deliberate stop: the message says what to change, no traceback
+                prog.error = str(e)
+                prog.stopped = True
             else:
                 prog.error = f"{e}\n{traceback.format_exc()}"
             prog.done = True
@@ -1935,6 +2040,7 @@ def get_progress():
                     "levels": _lv[-250:] if len(_lv) == len(p.lines) else [],
                     "error": p.error,
                     "cancelled": bool(getattr(p, "cancelled", False)),
+                    "stopped": bool(getattr(p, "stopped", False)),
                     "cancelling": bool(getattr(p, "cancel_requested", False)) and not p.done,
                     "elapsed": round(p.elapsed(), 1),
                     "since": round(p.since(), 1),
@@ -2074,7 +2180,74 @@ def get_geometry():
                     "has_mgn_fine": getattr(ly, "has_mgn_fine", False),
                     "flat_range": list(getattr(ly, "flat_range", []) or []),
                     "flat_error": getattr(ly, "flat_error", None),
-                    "has_earth": getattr(ly, "has_earth", False)})
+                    "has_earth": getattr(ly, "has_earth", False),
+                    "earthForce": _earth_force_info(ly),
+                    "runNotes": _run_notes_for(ly)})
+
+
+def _save_run_notes(prog):
+    """The warnings of this run that can show in the picture (runnotes.py),
+    saved beside the result so the page shows them above the controls."""
+    try:
+        from . import runnotes as _rn
+        _rn.save(workdir(STATE["folder"]), list(prog.lines), list(getattr(prog, "levels", []) or []))
+    except Exception:
+        pass
+
+
+def _report_refresh(wd):
+    """Re-write report.json / report.txt so they carry the Moon layer's check
+    and the Force earthshine state (report.write reads both)."""
+    try:
+        _rp = os.path.join(wd, "report.json")
+        if os.path.exists(_rp):
+            from .report import write as _write_report
+            _write_report(wd, json.load(open(_rp)) or {})
+    except Exception:
+        pass
+
+
+def _run_notes_for(ly):
+    try:
+        from . import runnotes as _rn
+        return _rn.load(ly.wd)
+    except Exception:
+        return []
+
+
+def _earth_force_info(ly):
+    try:
+        from . import moonlayer as _ml
+        return _ml.force_info(ly.wd)
+    except Exception:
+        return {"available": False, "on": False}
+
+
+@app.post("/api/earthforce")
+def earth_force():
+    """FORCE EARTHSHINE (2026-11-14): the Moon group's box. Switches the Moon
+    layer between the checked one and the forced variant built beside it
+    (moonlayer.py), remembered for the folder; nothing is rebuilt."""
+    _b = _busy()
+    if _b:
+        return jsonify({"ok": False, "error": f"{_b} is still running"}), 400
+    ly = STATE["layers"]
+    if ly is None:
+        return jsonify({"ok": False, "error": "run the pipeline first"}), 400
+    from . import moonlayer as _ml
+    on = bool((request.json or {}).get("on", False))
+    info = _ml.force_info(ly.wd)
+    if on and not info.get("available"):
+        return jsonify({"ok": False, "error": "not available here: " + str(info.get("why", "no forced layer")),
+                        "earthForce": info}), 400
+    _ml.set_forced(ly.wd, on)
+    if not ly.reload_earth():
+        _ml.set_forced(ly.wd, False)
+        ly.reload_earth()
+        return jsonify({"ok": False, "error": "the Moon layer could not be loaded; Force earthshine is off",
+                        "earthForce": _ml.force_info(ly.wd)}), 400
+    _report_refresh(ly.wd)
+    return jsonify({"ok": True, "earthForce": _ml.force_info(ly.wd)})
 
 
 @app.post("/api/contact")
@@ -2277,6 +2450,11 @@ _PROCESSING_KEYS = {
     # fallback back on: the recipe is built from what the run reported, and the
     # simple path reported only denoise and fnrgf_preset.
     "simple":        ("False",     "simpleStack"),
+    # TIER EXPORT IN THE RECIPE (2026-11-12): a test recipe has to be able to
+    # ask for the aligned tiers, which are what an alignment check measures.
+    # It is part of the cache check too, so a change re-stacks either way.
+    "export_tiers":  ("False",     "exportTiers"),
+    "tier_linear":   ("False",     "tierLinear"),
 }
 
 

@@ -42,7 +42,7 @@ from .parallel import gaussian_filter as _pgauss   # scipy's, on several threads
 STARS_FILE = "stars.json"
 # A change here that alters WHICH stars are found must also bump detail.LAYER_BUILD:
 # the stars are lifted out of the corona while the layers are built (detail.py).
-STARS_BUILD = 9                # 9: a faint candidate no longer raises the missing-star bar of a solution; such matches are dropped instead (2026-11-12). 8: catalogue to mag 10, faint candidates confirmed only down to the depth the picture reaches (2026-10-18). 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
+STARS_BUILD = 11               # 11: the frames' time from the folder scan on a first run, before report.json exists (2026-11-12). 10: no star without a catalogue solution; a deeper catalogue pass for long lenses (2026-11-12). 9: a faint candidate no longer raises the missing-star bar of a solution; such matches are dropped instead (2026-11-12). 8: catalogue to mag 10, faint candidates confirmed only down to the depth the picture reaches (2026-10-18). 7: green-only test from 5 sigma (a single warm green photosite on one test set passed as a star at G 7.0 sigma, 2026-10-16). 6: two-star catalogue check with the site known, faint (4.5-5 sigma) candidates confirmable (2026-10-10). 5: sensor artefacts rejected by colour and profile (2026-10-10). 4: catalogue numbers and the main streamers for the sky map. 3: observing site and time used when given (observer.py). 2: checked against the bundled ecliptic catalogue (starcat.py)
 SIGMAS = (0.6, 1.0, 1.5, 2.25)        # band-pass widths, binned px (R ~ 300 px)
 RMIN = 1.4                             # inner limit, lunar radii
 Z_FLOOR = 6.0
@@ -359,6 +359,22 @@ def find(wd, progress=None):
                     and c.get("flux_snr", 0) >= ART_COMPACT_SNR and c["pof"] > ART_COMPACT * pref):
                 c["class"] = "artefact"
                 c["why"] = f"sharper than the stars ({c['pof'] / pref:.1f}x their peak/flux)"
+    # NO CATALOGUE SOLUTION, NO STARS (0.30.2, 2026-11-12): a point source
+    # is marked, lifted out of the corona and laid back as a star only when the
+    # catalogue confirms it. Without a clear solution (no time, no match, an
+    # ambiguous one) every candidate stays in the picture exactly as stacked,
+    # unmarked -- a test stack showed eight "stars" with the match failed.
+    if (cat or {}).get("status") != "solved":
+        _nu = 0
+        for c in out:
+            if c["class"] == "star":
+                c["class"] = "unconfirmed"
+                c["why"] = "no catalogue solution"
+                _nu += 1
+        if _nu:
+            cat = dict(cat or {}, unconfirmed_no_solution=_nu)
+            _log(progress, f"stars: no clear catalogue solution - {_nu} point source(s) left in the "
+                           f"picture as stacked, not marked as stars", None)
     n_art = sum(1 for c in out if c["class"] == "artefact")
     if n_art:
         _log(progress, f"stars: {n_art} candidate(s) rejected as sensor artefacts (" +
@@ -397,6 +413,17 @@ def _catalogue_check(wd, g, out, Zpos, f, shape, sky_ok, progress=None):
         except Exception:
             pass
         ts = rep.get("shot_first")
+        # THE FIRST RUN HAS NO REPORT YET (0.30.2, 2026-11-12): the stars are
+        # found before report.json is written, so on a folder's first stack the
+        # frames' time was missing and the catalogue check stopped at "no
+        # timestamp". The folder scan's EXIF table is there from the start.
+        if not ts:
+            try:
+                _tl = json.load(open(os.path.join(wd, "timeline_exif.json")))
+                _tss = sorted(str(v.get("ts")) for v in _tl.values() if isinstance(v, dict) and v.get("ts"))
+                ts = _tss[0] if _tss else None
+            except Exception:
+                ts = None
         from . import observer as _ob
         site = _ob.load(os.path.dirname(os.path.abspath(wd)))
         if not ts and not (site and site.get("ut")):
@@ -459,9 +486,11 @@ def _catalogue_check(wd, g, out, Zpos, f, shape, sky_ok, progress=None):
             if c["class"] == "star" and i not in pairs:
                 est = m0 - 2.5 * np.log10(max(c["z"], 1e-3))
                 c["mag_est"] = round(float(est), 2)
-                if est <= _sc.MAG_CONFIRM - 1.0:
-                    c["class"] = "unconfirmed"
-                    demoted += 1
+                # every star the solution does not confirm is left unmarked
+                # (0.30.2): before, one estimated fainter than mag 9 stayed a
+                # star on its signal alone
+                c["class"] = "unconfirmed"
+                demoted += 1
         added = 0
         have = [(c["y"], c["x"]) for c in dets]
         # The catalogue VERIFIES what the search found; it does not add.
