@@ -16,8 +16,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14          # Apple silicon
-          - os: macos-13          # Intel
+          - os: macos-15          # Apple silicon
+          - os: macos-15-intel    # Intel (GitHub's last Intel Mac machines)
           - os: windows-latest
     runs-on: ${{ matrix.os }}
     steps:
