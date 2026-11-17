@@ -1,4 +1,4 @@
-__version__ = "0.31.0"
+__version__ = "0.32.0"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -369,6 +369,12 @@ CACHE_FAMILIES = (
     # brackets shot apart are linked on the corona clear of both Moons. No 0.30.x
     # cache is the same data: its own family, one re-stack per folder.
     frozenset({"0.31.0"}),
+    # 0.32.0 changes the stack for sets shot in bursts and for very large Moons
+    # (one disc per tier, more than one seed for the disc, the Moon's speed only
+    # from tiers that span time, links for a Moon that fills most of the frame,
+    # colour planes measured clear of the Moon on such sets). No 0.31.0 cache
+    # is the same data: its own family, one re-stack per folder.
+    frozenset({"0.32.0"}),
 
 )
 

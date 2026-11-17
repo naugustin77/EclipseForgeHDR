@@ -15,7 +15,7 @@ from one of those runs, not from a synthetic.
 
 **Per-channel linear fit, now the default.** Each pair of neighbouring
 exposures is fitted with a slope and an offset, separately in R, G and B, after
-PixInsight's LinearFit as used in a published HDR eclipse workflow. This replaces
+the LinearFit as used in a published HDR eclipse workflow. This replaces
 one luminance scale factor per exposure. It is a dropdown in the toolbar —
 "Per-channel (linear fit)" or "Single scale factor" — because both are worth
 having and because a setting nobody can see is a setting nobody can check.
@@ -99,7 +99,7 @@ where the corona is fainter, so the residual comes out systematically positive.
 Measured at 7× the layer's own structure at 1.03–1.08 R, now 0.55.
 
 **FITS**: the saturation ceiling no longer collapses onto the frame's own
-maximum, planes-first RGB cubes (what Siril and PixInsight write) import
+maximum, planes-first RGB cubes (what stacking programs write) import
 correctly, and odd dimensions no longer raise. All three are pinned as tests.
 
 **Windows**: a memory-mapped array kept a file open across the write that
@@ -114,7 +114,7 @@ model with enough freedom to describe a real horizon sky has enough freedom to
 eat the outer corona.
 
 **VNG demosaic** comes off the toolbar. It was added so a render could be
-compared with PixInsight's on equal terms; that comparison has been made and
+compared with astronomy software's on equal terms; that comparison has been made and
 showed no advantage.
 
 ## Known issues

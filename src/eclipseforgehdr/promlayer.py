@@ -6,7 +6,7 @@ the whole frame, so a deep-red, very bright prominence core either clips or
 turns into a flat red blob. The answer is to keep the prominences out of
 the composite's hands and hand them over as their own layer -- same pixel
 grid as the 16-bit export, alpha already masked -- to be blended in
-Photoshop with Blend If / opacity / screen. This module builds that layer.
+an image editor (blend-if / opacity / screen). This module builds that layer.
 
 TWO SOURCES, EACH FOR WHAT IT DOES WELL (measured on the reference test set):
   * the HDR MERGE's red excess has 2-3x less noise than the short stack, but
@@ -560,7 +560,7 @@ def detect(wd, geo, shape, log=None):
 # (build_light), stacked from the SHORT frames only: sharp, unclipped and
 # colour-true. The render lays it over the finished picture with its own
 # transparency (render.py, promLayer). The same layer is what the RGBA export
-# writes for Photoshop.
+# writes for an image editor.
 
 LIGHT_FILE = "prom_light.npy"        # the prominence light, linear RGB, merge units, disc box
 LIGHT_META = "prom_light.json"
@@ -791,7 +791,20 @@ def build_short_stack(wd, items, cy, cx, R, H, W, progress=None):
         log("[warn] prominence layer: no short frame usable; using the merge")
         return False
     S = acc / np.maximum(accw, 1e-30)[..., None]
-    S[accw <= 0] = ref[accw <= 0]
+    # THIN COVERAGE FALLS BACK TO THE MERGE (0.32.0). Where every item is
+    # clipped, only the outer edge of each item's clip ramp reaches the pixel,
+    # and acc/accw is then the average of a few edge pixels: on a test set with
+    # prominence cores clipped in all the fast tiers, a weight of 1-15 % of the
+    # usual left G at -650 000 against +22 000 in the corona around it, and the
+    # finished picture showed black spots inside four prominences. Below half
+    # the usual coverage (the median on 1.1-1.4 R) the stack now blends into
+    # the merge, which holds the measured value there (or the shortest tier's
+    # lower bound where everything is clipped).
+    _wr = accw[ring & (accw > 0)]
+    _wn = float(np.median(_wr)) if _wr.size else float(accw.max())
+    _a = ss(accw / max(0.5 * _wn, 1e-30)).astype(np.float32)[..., None]
+    S = S * _a + ref * (1.0 - _a)
+    del _a
     np.save(os.path.join(wd, SHORT_FILE), S.astype(np.float32))
     np.save(os.path.join(wd, SHORT_W), accw.astype(np.float32))
     np.save(os.path.join(wd, SHORT_WC), accwc.astype(np.float32))
@@ -956,9 +969,28 @@ def clean_corona(wd, geo, progress=None):
         core = np.isin(lab, 1 + np.flatnonzero(sz >= 2000 * q * q))
     else:
         core = np.zeros_like(core)
+    # WHERE THE COLOUR MODEL LEAVES NO CORONA (0.32.0). H-alpha lies outside
+    # what the colour matrix can hold: where R is high the merge's G goes to
+    # zero (measured on a test set at a large image scale: G = 0 over whole
+    # small prominences and along the resolved chromosphere), the red excess
+    # `a` is then all of R, and the corona left behind is negative -- clipped
+    # to black. Cores below the size limit were not filled, and the picture
+    # showed black spots inside four prominences and a dark strip on the limb.
+    # Every such pixel outside the disc (G of the corona estimate at or below
+    # zero inside 1.45 R) now joins the cores that are filled from around.
+    # From the measured limb outward, not from the disc mask's edge: with the
+    # limb blurred the mask margin is wide (22 px on that set) and the spots sat
+    # astride it, so the fill now starts 2 px outside the limb itself.
+    _hmin = -max(3.0, float(geo.get("limb_margin", 3.0)) - 2.0)
+    _bad = (cor[..., 1] <= 0) & (h > _hmin) & (rr < 1.45)
+    if _bad.any():
+        _bad = ndimage.binary_opening(_bad, iterations=1)
+        _bad = ndimage.binary_dilation(_bad, iterations=max(1, int(round(q))))
+        core = core | _bad
+    del _bad
     nfill = 0
     if core.any():
-        core = ndimage.binary_dilation(core, iterations=2) & (h > -3)
+        core = ndimage.binary_dilation(core, iterations=2) & (h > _hmin)
         cor = np.clip(cor, 0, None)
         lab2, n2 = ndimage.label(core)
         bcy, bcx = cy - y0, cx - x0

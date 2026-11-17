@@ -207,24 +207,6 @@ CATALOGUE = [
              dict(id="fmt", label="File", type="select", default="jpg",
                   values=[["jpg", "JPG"], ["png", "PNG"]]),
          ]),
-    dict(id="limb", title="Limb panorama", group="picture", out="JPG/PNG",
-         desc="The inner corona unwrapped along the Moon's edge at the picture's own resolution, in rows, "
-              "position angle along the bottom: every prominence and the base of every streamer in one strip.",
-         options=[
-             dict(id="outer", label="Out to", type="select", default="1.32",
-                  values=[["1.2", "1.2 radii"], ["1.32", "1.32 radii"], ["1.5", "1.5 radii"]],
-                  title="The outer edge of the strip."),
-             dict(id="rows", label="Rows", type="select", default="4",
-                  values=[["2", "2 (180° each)"], ["3", "3 (120° each)"], ["4", "4 (90° each)"]],
-                  title="The circle cut into this many rows."),
-             dict(id="zoom", label="Zoom", type="select", default="1",
-                  values=[["1", "1:1"], ["2", "2:1"]], title="Enlargement of the strip."),
-             dict(id="marks", label="Mark prominences", type="check", default=True,
-                  title="A marker above every prominence found along the limb."),
-             FILES_OPT,
-             dict(id="fmt", label="File", type="select", default="jpg",
-                  values=[["jpg", "JPG"], ["png", "PNG"]]),
-         ]),
 ]
 
 COMING = []
@@ -236,8 +218,7 @@ COMING = []
 BASIC = {
     "overlay": ["turn", "frame", "social", "safe"],
     "poster": ["turn", "frame", "maplook", "social", "safe"],
-    "limb": ["outer", "rows"],
-    "activity": ["view", "scale", "grain"],
+    "activity": ["view", "pace", "scale", "grain"],
     "film": ["aspect", "safe", "rotate", "pace"],
     "sound": ["turn", "aspect", "safe", "rotate"],
 }
@@ -1711,67 +1692,6 @@ def find_prominences(src, ctx, strip=None, th=None, rr=None, sens=5.0):
     return out
 
 
-# ---------------------------------------------------------------- 3 limb panorama
-def limb(rgb, ctx, v):
-    src = np.asarray(rgb, np.float32)
-    r1 = float(v["outer"])
-    strip, th, rr = _limb_strip(src, ctx, r1)
-    proms = find_prominences(src, ctx, strip, th, rr) if v["marks"] else []
-    z = int(v["zoom"])
-    nr, nt = strip.shape[:2]
-    rows = int(v["rows"])
-    q = nt // rows
-    s8 = Image.fromarray(_to8(strip))
-    if z > 1:
-        s8 = s8.resize((nt * z, nr * z), Image.LANCZOS)
-    sh, sw = nr * z, q * z
-    fs = max(7.0, sw / 95.0)
-    left = int(fs * 4.5)
-    head = int(fs * 4.6)
-    gap = int(fs * 2.8)
-    pano = Image.new("RGB", (left + sw + int(fs), head + rows * (sh + gap) + int(fs)), BG)
-    d = Draw(pano)
-    unit = _unit(ctx)
-    ft = _font(fs * 1.7, True)
-    d.text((fs, fs * 0.9), "Limb panorama", fill=INK, font=ft)
-    sub = (f"{ctx['Rm'] / ctx['Rs']:.2f}\u2013{r1:.2f} {unit} unwrapped at {z}:1 \u00b7 "
-           + (_origin_words(ctx) + ", falling to the right as on the sky"
-              if ctx["o"]["origin"] in ("solar", "celestial") else _origin_words(ctx))
-           + (" \u00b7 \u25bc prominences found, their height above the Moon\u2019s edge" if proms else ""))
-    d.text((fs + _text_w(d, "Limb panorama", ft) + fs * 1.2, fs * 1.45), sub, fill=(150, 150, 150),
-           font=_font(fs * 0.95))
-    for kk in range(rows):
-        y = head + kk * (sh + gap)
-        pano.paste(s8.crop((kk * sw, 0, (kk + 1) * sw, sh)), (left, y))
-        for pa in range(0, 360, 10):
-          for col in _angle_cols(th, pa):
-            xx = left + (col + 0.5) * z - kk * sw
-            if left - 1 <= xx <= left + sw + 1:
-                xx = min(max(xx, left), left + sw)
-                d.line([(xx, y + sh), (xx, y + sh + fs * 0.4)], fill=(165, 165, 165), width=1)
-                if pa % 30 == 0:
-                    lab = _tick_lab(ctx, pa)
-                    anc = "lt" if xx < left + fs else ("rt" if xx > left + sw - fs else "mt")
-                    d.text((xx, y + sh + fs * 0.55), lab, fill=GOLD if len(lab) == 1 else (205, 205, 205),
-                           font=_font(fs * 0.9, len(lab) == 1), anchor=anc)
-        for rv in np.arange(1.1, r1 - 0.01, 0.1):
-            yy = y + (r1 - rv) / (r1 - rr[-1]) * sh
-            d.text((left - fs * 0.4, yy), f"{rv:.1f}", fill=(135, 135, 135), font=_font(fs * 0.8), anchor="rm")
-    for p in proms:
-        xg = p["col"] * z
-        kk = int(xg // sw)
-        xx = left + xg - kk * sw
-        y = head + kk * (sh + gap)
-        d.polygon([(xx - fs * 0.4, y - fs * 0.7), (xx + fs * 0.4, y - fs * 0.7), (xx, y - fs * 0.1)],
-                  fill=(255, 140, 170))
-        if p["height_km"] is not None and p["height_km"] >= 1000:
-            lab = f"\u2248 {_round_km(p['height_km']):,.0f} km".replace(",", " ")
-            right = xx + fs * 0.8 + _text_w(d, lab, _font(fs * 0.85)) < left + sw
-            d.text((xx + fs * 0.8 if right else xx - fs * 0.8, y - fs * 0.45), lab, fill=(255, 185, 205),
-                   font=_font(fs * 0.85), anchor="lm" if right else "rm")
-    return pano, proms
-
-
 def _fmt_s(t):
     return f"{t:g} s" if t >= 1 else f"1/{round(1 / t):g} s"
 
@@ -1784,7 +1704,7 @@ def make(kind, rgb, geo, wd, folder, opts, scale=1.0, north="solar", manual_cw=N
     layer=PIL RGBA or None, fmt, info=str, data=dict)."""
     opts = dict(opts or {}, _angles=[north, manual_cw, offset_deg])
     v = option_values(kind, opts)
-    if preview and rgb is not None and kind in ("overlay", "poster", "limb", "sound") \
+    if preview and rgb is not None and kind in ("overlay", "poster", "sound") \
             and rgb.shape[1] < 1400:
         # a small preview picture (a small sensor, or the 1/4 layers of a
         # small frame) drawn on as it is gets lettering far too big for it:
@@ -1822,7 +1742,7 @@ def make(kind, rgb, geo, wd, folder, opts, scale=1.0, north="solar", manual_cw=N
     return _make(kind, rgb, ctx, geo, wd, folder, opts, v, scale, prog, preview, out_base, rgb_map)
 
 
-LAYERED = ("overlay", "poster", "limb")
+LAYERED = ("overlay", "poster")
 
 
 def _make(kind, rgb, ctx, geo, wd, folder, opts, v, scale, prog, preview, out_base, rgb_map=None):
@@ -1869,11 +1789,6 @@ def _make(kind, rgb, ctx, geo, wd, folder, opts, v, scale, prog, preview, out_ba
         im = poster(rgb, ctx, v, rgb_map=rgb_map)
         return dict(image=im, layer=None, fmt=v["fmt"], info=f"poster {im.width} x {im.height}{how}; " + ctx["o"]["note"],
                     data={})
-    if kind == "limb":
-        im, proms = limb(rgb, ctx, v)
-        return dict(image=im, layer=None, fmt=v["fmt"],
-                    info=f"limb panorama {im.width} x {im.height}; {len(proms)} prominences marked; " + ctx["o"]["note"],
-                    data={"prominences": [{k: p[k] for k in ("pa", "width_deg", "height_km", "score")} for p in proms]})
     if kind == "film":
         from . import film as _film
         im = _film.storyboard(rgb, geo, wd, folder, opts, scale=scale)

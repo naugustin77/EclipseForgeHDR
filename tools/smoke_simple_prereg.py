@@ -1,4 +1,4 @@
-"""Simple stack on a set a writer already registered (Siril-style black
+"""Simple stack on a set a writer already registered (stacking-program black
 borders of different widths): the stack must keep the frames as written."""
 import os, sys, tempfile, shutil, json
 import numpy as np

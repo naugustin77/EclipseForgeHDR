@@ -54,7 +54,7 @@ def _planes_direct(path):
     can treat every input alike, and the pipeline then interpolates it back.
     That round trip throws three quarters of each channel away and guesses it
     again, and the guess is gradient-directed, so it lands hardest at the lunar
-    limb. Siril and PixInsight write RGB cubes. For those the planes are right
+    limb. Astronomy stacking software writes RGB cubes. For those the planes are right
     there, and reading them is both more accurate and cheaper.
     """
     if os.path.splitext(path)[1].lower() not in (".fit", ".fits", ".fts"):
@@ -131,7 +131,7 @@ def _flag_clipped_planes(a, min_px=64):
     A Bayer raw has its saturation flagged on the sensor's numbers (below); a
     3-plane FITS came here without that, so its clipped core went into the
     tier mean and the alignment as data (2026-10-13). The writer's scaling
-    moves the ceiling per plane -- a FITS test set's Siril frames clip at 59889 in red,
+    moves the ceiling per plane -- a FITS test set's frames clip at 59889 in red,
     65520 in green and 65535 in blue, and a few hot pixels sit above the red
     one -- so the ceiling is found as a spike in each plane's histogram: the
     most common value in the upper half, held by at least `min_px` pixels
@@ -366,14 +366,14 @@ def _feature(g):
       * the sensor's fixed pattern -- hot pixels and pixel-scale noise. Phase
         correlation whitens the spectrum, so in a long frame the thousands of
         hot pixels outweigh the corona and the peak lands on the SENSOR's
-        offset between the frames. On Siril-registered frames that is
-        the registration shift Siril applied (3, -7 px between two 10 s
+        offset between the frames. On frames registered by a stacking
+        program that is the registration shift it applied (3, -7 px between two 10 s
         frames, the same in every patch of the sky), not a sky motion. A 3x3
         median and a 1 px blur take it out;
       * clipped pixels. The clipped core grows with the exposure, so its edge
         moves outwards on every side; read as the clip level, its two sides
         gave two opposite peaks of 10-20 px. They are no data now;
-      * the black border a registering writer (Siril) leaves where it shifted
+      * the black border a registering writer (a stacking program) leaves where it shifted
         a frame, and the strip a shift leaves empty in a tier stack.
     No-data pixels are filled from their valid neighbours and the feature
     fades to zero over ~16 px towards them, so their edges carry no signal.
@@ -663,8 +663,8 @@ def run(folder, progress, denoise="off", demosaic_method="mhc",
                      + ", ".join(k for k in ("bias", "rate", "flat") if k in calib)
                      .replace("rate", "dark"), None)
     is_planes = _planes_direct(files[0]) is not None
-    # FRAMES THE WRITER ALREADY REGISTERED (2026-10-13, a Siril-registered test set). A
-    # registering program (Siril, PixInsight) pads every shifted frame with a
+    # FRAMES THE WRITER ALREADY REGISTERED (2026-10-13, a test set registered by a stacking program). A
+    # registering program pads every shifted frame with a
     # black border of its own width. Such a set is kept as written: the
     # writer aligned each frame on its full data, and re-aligning it here only
     # adds error -- on that set the chained correlation moved the 6.5 s frame
@@ -720,7 +720,7 @@ def run(folder, progress, denoise="off", demosaic_method="mhc",
     # there is. The feature ignores hot pixels and clipped pixels (_feature).
     # A peak that does not stand PEAK_MIN times above the next candidate is
     # not trusted: the frame keeps the previous tier's shift. On
-    # Siril-registered frames that is what the long single frames get (their
+    # frames registered elsewhere that is what the long single frames get (their
     # unclipped field is faint, flat outer corona); on a bracket with
     # structure every tier peaks 3-12x above the next.
     tier_feat = None
@@ -756,7 +756,7 @@ def run(folder, progress, denoise="off", demosaic_method="mhc",
                 progress.log("  black level (shortest tier, frame 1): "
                              "R %.1f  G %.1f  B %.1f" % tuple(black), None)
             # a writer's registration border: exactly 0 in every plane before
-            # the black level came off (Siril pads a shifted frame with 0).
+            # the black level came off (a stacking program pads a shifted frame with 0).
             # No data -- out of the tier mean and out of the alignment feature
             _zb = np.all(f == 0, axis=0)
             f -= black[:, None, None]

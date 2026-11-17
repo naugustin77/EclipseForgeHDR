@@ -118,7 +118,7 @@ DEFAULTS = {
     # So the rendered sky chroma is just (temp, tint, 1/temp) renormalised, and
     #     R/G = temp/tint        B/G = 1/(temp*tint)
     #
-    # A PixInsight version of the same frames -- "lowered the green curve a bit and raised
+    # A version of the same frames from astronomy processing software -- "lowered the green curve a bit and raised
     # the blue curve a little" -- measured off its JPEG, linearised, normalised
     # to green: sky R/G 1.064, B/G 1.884. Inverting the two expressions gives
     # temp 0.752, tint 0.706, which reproduces that sky exactly.
@@ -163,7 +163,7 @@ DEFAULTS = {
     # Sky pedestal (2026-10-19): the share of the measured sky light that
     # is taken off before the envelope curve -- see Layers.sky_p3. 0 = off.
     "skySub": 0.0,
-    # Final sharpening (Oct 2026): a published Photoshop finish with a
+    # Final sharpening (Oct 2026): a published image-editor finish with a
     # noise gate. All off by default -- it is a finish, not a default look.
     "finalMid": 0.0, "finalDark": 0.0, "finalLight": 0.0, "finalNoise": 3.0,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
@@ -172,9 +172,9 @@ DEFAULTS = {
     "toneCurve": [[0.0, 0.0], [1.0, 1.0]], "containWhites": 1.0,
     "discSoft": 12.0,
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
-    # the look controls (lab 0.24), all off -- see look()
+    # the look controls (0.24), all off -- see look()
     "coronaLevel": 0.0, "skyLevel": 0.0, "skyColour": 0.0, "moonColour": 0.0,
-    # THE MOON GROUP (lab 0.24): the Moon's own tone curve -- the main curve no
+    # THE MOON GROUP (0.24): the Moon's own tone curve -- the main curve no
     # longer reaches the disc -- and the colour its tint heads towards, picked
     # on the page (display RGB; the default is the look's blue, LOOK_BLUE).
     "moonCurve": [[0.0, 0.0], [1.0, 1.0]],
@@ -524,7 +524,7 @@ class Layers:
         del D
         inner = np.load(os.path.join(wd, "inner.npy"))
         inner0 = np.load(os.path.join(wd, "inner0.npy"))
-        # THE MOON LAYER (moonlayer.py, lab 0.24) when the work directory has
+        # THE MOON LAYER (moonlayer.py, 0.24) when the work directory has
         # one; the old Earthshine-option layer otherwise
         # (or its Force earthshine variant when that box is ticked)
         from . import moonlayer as _mlm
@@ -578,7 +578,7 @@ class Layers:
         _t = np.clip((Ls - _floor) / (8.0 * _nz), 0.0, 1.0)
         _conf = (_t * _t * (3.0 - 2.0 * _t)).astype(np.float32)
         del _t
-        # WHERE THE FADE GOES WHEN THE SKY WAS SUBTRACTED (lab 0.24). With the
+        # WHERE THE FADE GOES WHEN THE SKY WAS SUBTRACTED (0.24). With the
         # sky in the merge, the far field's colour IS the sky's and fading it to
         # neutral is harmless. With the sky subtracted it is the corona's own
         # colour (and a floor in that colour) all the way out -- on the reference
@@ -695,7 +695,7 @@ class Layers:
         # No sky cast is left to neutralise once the sky was subtracted: the far
         # field is the corona's own colour (see _fade_to above). Dividing by it
         # whitened the corona where the colour is trusted and not beyond, which
-        # is the same hue edge the other way round (lab 0.24).
+        # is the same hue edge the other way round (0.24).
         if bool((_ssub or {}).get("applied")):
             self.bg_chroma = np.ones(3, np.float32)
         # The prominence detail layer is optional: a workdir built before 0.18
@@ -1198,9 +1198,9 @@ def _detail_layers(src, P, preview=True, views=False):
     return mg, fn, inner_eff
 
 
-# FINAL SHARPENING (Oct 2026). A Photoshop finish, read out of a
+# FINAL SHARPENING (Oct 2026). An image-editor finish, read out of a
 # published action file and reproduced here, plus a noise
-# gate Photoshop cannot have.
+# gate the editor cannot have.
 #
 # The action: five copies of the finished image, High Pass at 1.5 / 3 / 6 /
 # 12 / 24 px, all in Soft Light; the five stacked into a smart object and
@@ -1225,9 +1225,9 @@ def _detail_layers(src, P, preview=True, views=False):
 #     (the finest band of a finished render is noise -- the set resolves to
 #     1.4 px), carried to the other scales by each filter's measured white-
 #     noise response. No model, no camera table; k is the "Noise gate"
-#     slider, 0 switches it off and gives exactly the Photoshop result.
+#     slider, 0 switches it off and gives exactly the editor's result.
 #   * Applied to the FINISHED display image, after tone and colour, before
-#     the ring overlay -- where the action runs in Photoshop.
+#     the ring overlay -- where the action runs in the editor.
 #   * Row bands with a margin of three times the widest radius, so a 44 Mpx
 #     export does not hold five full-size high-pass planes at once.
 
@@ -1291,7 +1291,7 @@ def apply_tone(rgb, pts, ceiling, moon_pts=None, eg=None, pin=None):
     the picture is scaled down so the 99.99th percentile of its luminance
     sits at `ceiling` (1.0 = off). Never scales up.
 
-    THE MOON HAS ITS OWN CURVE (lab 0.24): the disc sits low on the
+    THE MOON HAS ITS OWN CURVE (0.24): the disc sits low on the
     display scale (Moon disc level ~0.1), exactly where a mid-tone lift bites
     hardest, so the main curve moved the Moon a lot and the corona hardly at
     all. With `eg` (1 outside the Moon, 0 on the disc, the disc's soft edge in
@@ -1333,7 +1333,7 @@ def apply_tone(rgb, pts, ceiling, moon_pts=None, eg=None, pin=None):
     return rgb
 
 
-# THE LOOK CONTROLS (lab 0.24). Four controls that act on the finished picture
+# THE LOOK CONTROLS (0.24). Four controls that act on the finished picture
 # and set what a viewer reads as the "look" of a published eclipse, measured off
 # published renders (looks/refs.json):
 #   coronaLevel  the median display brightness of the inner corona, 1.05-1.15 R.
@@ -1514,7 +1514,7 @@ FINAL_GATE = (1.0, 0.6, 0.35, 0.2, 0.1)
 
 
 def _soft_light(a, b):
-    """Photoshop soft light, a = base, b = blend, both in 0..1"""
+    """Soft light (the image-editor blend mode), a = base, b = blend, both in 0..1"""
     d = np.where(a <= 0.25, ((16 * a - 12) * a + 4) * a, np.sqrt(np.clip(a, 0, None)))
     return np.where(b <= 0.5, a - (1 - 2 * b) * a * (1 - a), a + (2 * b - 1) * (d - a))
 
@@ -1550,7 +1550,7 @@ def final_sharpen(rgb, R, mid=0.0, dark=0.0, light=0.0, k=2.0, tile=32, band_row
     """rgb: finished display image, float32 in 0..1, (H, W, 3). R: solar radius
     on THIS grid (already divided by the preview decimation).
 
-    The five Photoshop high passes are rebuilt from BANDS: b0 = I - G_1.5 I,
+    The five high passes of the action are rebuilt from BANDS: b0 = I - G_1.5 I,
     b_i = G_r(i-1) I - G_ri I, and HP_i = b0 + ... + b_i. With the gate off the
     sums are exactly the high passes. With it on, each band is attenuated
     against its own noise level, so the pixel noise that every high pass
@@ -2057,7 +2057,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         # Overlay of a mid-grey layer is bounded by construction: below 0.5
         # the base is multiplied, above 0.5 it is screened, and no mask can
         # push a pixel past white; the contrast it adds tapers toward either
-        # end of the range. It is what a high-pass layer does in Photoshop
+        # end of the range. It is what a high-pass layer does in an image editor
         # and what the recipe points to ("soft light blending mode"). The grey
         # layer is EXACTLY what the Partial-conv view draws at Base weight
         # 0: 0.5 + 0.75 k E. So the view shows the layer, and the slider is
@@ -2308,7 +2308,7 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
         if _corona is not None:
             keep["corona"] = 1 - (1 - _corona) * (1 - P["ringBlend"] * c)
             _corona = None
-    # THE MOON VIEW (lab 0.24): the finished Moon on its own -- the composite's
+    # THE MOON VIEW (0.24): the finished Moon on its own -- the composite's
     # disc (level, earthshine, colour, its own curve), black outside it, the
     # disc's soft edge as the fade. What the Moon-layer export carries.
     if view == "moon":
@@ -2378,7 +2378,7 @@ def moon_alpha(layers, P, decim, shape):
 
 
 def export_moon_layer(layers, params, out_path, composite, size="full"):
-    """THE MOON AS ITS OWN LAYER (lab 0.24): a 16-bit RGBA TIFF on the
+    """THE MOON AS ITS OWN LAYER (0.24): a 16-bit RGBA TIFF on the
     export's grid -- the composite's own disc pixels, alpha = the disc with its
     soft edge. Laid over the composite (Normal) it changes nothing; it is there
     to be edited on its own."""
@@ -2423,7 +2423,7 @@ def _png_add_iccp(path, prof):
 
     OpenCV writes the only 16-bit PNG we can produce and has no way to embed a
     profile, so this file went out untagged -- the exact case the sRGB tagging
-    was added to prevent, and the one that makes PixInsight read it as linear.
+    was added to prevent, and the one that makes astronomy software read it as linear.
     Rewriting the container is cheap and lossless: iCCP goes after IHDR, which
     is where the spec requires it (PNG 1.2, 4.2.2.4).
     """
@@ -2643,8 +2643,8 @@ def export(layers: Layers, params, fmt, out_path, view="composite", size="full",
         arr16 = np.ascontiguousarray(0.2126 * rgb[:, :, 0] + 0.7152 * rgb[:, :, 1] + 0.0722 * rgb[:, :, 2])
     # Tag the file. The render is already in display encoding (the browser
     # preview shows these exact bytes as sRGB), so sRGB is what it IS -- but it
-    # was going out untagged, leaving every host to guess. Photoshop guessed
-    # right by accident; PixInsight assumes linear and got it wrong.
+    # was going out untagged, leaving every host to guess. Image editors guessed
+    # right by accident; astronomy software assumes linear and got it wrong.
     from . import icc
     _prof = icc.srgb_profile()
     # ONLY ON RGB (0.22.78). This is an RGB sRGB profile, and it was being

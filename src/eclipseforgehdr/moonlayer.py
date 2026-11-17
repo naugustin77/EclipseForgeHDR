@@ -1,4 +1,4 @@
-"""THE MOON LAYER (lab 0.24): earthshine structure on the lunar disc.
+"""THE MOON LAYER (0.24): earthshine structure on the lunar disc.
 
 Built from the long frames of the bracket, after the stack, in about a minute,
 and cached as MOON_FILE on the merge grid (0.5 = neutral, the format the old
@@ -32,10 +32,11 @@ from scipy.signal import fftconvolve
 
 MOON_FILE = "moon_layer.npy"
 MOON_META = "moon_layer.json"
-MOON_BUILD = 5              # 2: limb band levelled and equalised before the fade (2026-10-07)
+MOON_BUILD = 9              # 2: limb band levelled and equalised before the fade (2026-10-07)
                             # 3: scaled by the maria agreement of two half-stacks (2026-10-28)
                             # 4: the structure checked against a map of the real Moon (lunarcheck.py, 2026-11-14)
                             # 5: the Force earthshine variant built alongside (2026-11-14)
+                            # 9: blobs of the edge pass faded to the plain disc (2026-11-17)
 #: the variant the Moon group's "Force earthshine" box switches to, and the
 #: small file that remembers the box for this folder
 MOON_FORCE_FILE = "moon_layer_forced.npy"
@@ -82,9 +83,15 @@ def force_info(wd):
     return f
 
 
+MOON_DUMP = "moon_stack_dump.npz"       # lab diagnostics (ECLIPSEFORGE_MOON_DUMP=1)
+
+
 def needs_build(wd):
     """Missing, built by an older recipe, or older than the merge it sits on."""
     try:
+        if (os.environ.get("ECLIPSEFORGE_MOON_DUMP", "") not in ("", "0")
+                and not os.path.exists(os.path.join(wd, MOON_DUMP))):
+            return True
         mp = os.path.join(wd, MOON_FILE)
         if not os.path.exists(mp):
             return True
@@ -267,8 +274,8 @@ def build(folder, wd, progress=None, frames=None):
         I = ndimage.map_coordinates(Gm, [my - _y0, mx - _x0], order=1, mode="constant", cval=0.0)
         del Gm
         I[r < 1.005] = 0.0
-        inside = r < 0.97
-        sub = np.flatnonzero(inside.ravel())[::2]
+        # ---- 3: the scattered light, fitted inside 0.97 R
+        sub = np.flatnonzero((r < 0.97).ravel())[::2]
         X = (xx - mcx) / mR; Yv = (yy - mcy) / mR
         ky, kx = np.mgrid[-n:n + 1, -n:n + 1].astype(np.float64)
         rho2 = ky * ky + kx * kx
@@ -286,72 +293,176 @@ def build(folder, wd, progress=None, frames=None):
                 best = (s, alpha, coef, S)
         s, alpha, coef, S = best
         model = coef[0] * S + coef[1] + coef[2] * X + coef[3] * Yv + coef[4] * (X * X + Yv * Yv)
-        E = np.where(inside, M - model, 0.0)
         level = float(np.median(model[r < 0.5]))
-        # ---- 4: what follows the limb: the median of every ring
-        rb = np.clip((r * mR).astype(np.int32), 0, int(mR) + 2)
-        msk = inside.ravel()
-        med = np.zeros(rb.max() + 1)
-        order = np.argsort(rb.ravel()[msk], kind="stable")
-        rv = rb.ravel()[msk][order]; ev = E.ravel()[msk][order]
-        cuts = np.searchsorted(rv, np.arange(rb.max() + 2))
-        for k in range(rb.max() + 1):
-            seg = ev[cuts[k]:cuts[k + 1]]
-            if seg.size >= 8:
-                med[k] = np.median(seg)
-        med = ndimage.gaussian_filter1d(med, 2.0)
-        E = np.where(inside, E - med[rb], 0.0)
-        # ---- 4b: glare that hugs the limb in some directions only (a bright
-        # streamer's spill): per direction, the amplitude of a profile rising
-        # toward the limb, b(r) = exp((r - 0.97) / 0.06), fitted on 0.6-0.95 R,
-        # smoothed over 10 degrees and taken off
         th = np.arctan2(yy - mcy, xx - mcx)
-        bprof = np.exp((r - 0.97) / 0.06)
-        zone = inside & (r > 0.6) & (r < 0.95)
         nb = 360
-        tb = ((th[zone] + np.pi) / (2 * np.pi) * nb).astype(np.int32) % nb
-        ez, bz = E[zone], bprof[zone]
-        num = np.bincount(tb, ez * bz, nb); den = np.bincount(tb, bz * bz, nb)
-        amp = np.where(den > 0, num / np.maximum(den, 1e-12), 0.0)
-        amp = ndimage.gaussian_filter1d(amp, 10.0, mode="wrap")
         ti = ((th + np.pi) / (2 * np.pi) * nb) % nb
-        a_map = ndimage.map_coordinates(amp, [ti.ravel()], order=1, mode="grid-wrap").reshape(ti.shape)
-        E = np.where(inside, E - a_map * bprof, 0.0)
-        # ---- 5: band-pass by normalised convolution inside the disc: above the
-        # sensor's fine scale, below 0.3 R
-        w = inside.astype(np.float64)
-        def nconv(a, sg):
-            return _pgauss(a * w, sg) / np.maximum(_pgauss(w, sg), 1e-6)
+        rb = np.clip((r * mR).astype(np.int32), 0, int(mR) + 2)
         s_lo = max(3.0, 0.012 * mR); s_hi = 0.3 * mR
-        Eb = np.where(inside, nconv(E, s_lo) - nconv(E, s_hi), 0.0)
-        # ---- 5b: THE LIMB BAND (build 2, 2026-10-07). Measured on two
-        # test sets (one of them the reference set): after the band-pass the structure
-        # grew toward the edge (ring std 1.8x the centre's at 0.75-0.86 R) and the
-        # rings there sat dark (layer mean 0.44 against 0.50), then both dropped to
-        # flat within 0.05 R -- a visible rim. Real maria lose contrast toward the
-        # limb (foreshortening), so that growth is residual glare and the
-        # normalised convolution's edge bias. Per ring: the median taken off, and
-        # the spread held to the inner disc's.
-        ring_med = np.zeros(rb.max() + 1); ring_sd = np.zeros(rb.max() + 1)
-        ebv = Eb.ravel()[msk][order]
-        for k in range(rb.max() + 1):
-            seg = ebv[cuts[k]:cuts[k + 1]]
-            if seg.size >= 8:
-                ring_med[k] = np.median(seg)
-                ring_sd[k] = 1.4826 * np.median(np.abs(seg - ring_med[k]))
-        ring_med = ndimage.gaussian_filter1d(ring_med, 3.0)
-        ring_sd = ndimage.gaussian_filter1d(ring_sd, 3.0)
-        _rk = np.arange(rb.max() + 1) / mR
-        _ref = ring_sd[(_rk > 0.2) & (_rk < 0.6)]
-        sd0 = float(np.median(_ref)) if _ref.size else 0.0
-        gain = np.where(ring_sd > 1e-12, np.minimum(1.0, sd0 / np.maximum(ring_sd, 1e-12)), 1.0) if sd0 > 0 else np.ones_like(ring_sd)
-        Eb = np.where(inside, (Eb - ring_med[rb]) * gain[rb], 0.0)
-        # ---- 6: fade out where the limb's spill owns the light; wider than the
-        # 0.87-0.95 R of build 1 so the structure tapers instead of stopping
-        fade = np.clip((0.97 - r) / 0.17, 0, 1); fade = fade * fade * (3 - 2 * fade)
+
+        def _structure(lim, along_limb, sd_ref=None):
+            """Steps 4-5b inside `lim` R. `along_limb`: the edge pass -- also take
+            off what runs along the limb in the edge zone (step 4c) and keep the
+            fine scale only (build 8); its spread is held to `sd_ref`, the inner
+            pass's. Returns the structure and the inner disc's ring spread."""
+            inside = r < lim
+            E = np.where(inside, M - model, 0.0)
+            # ---- 4: what follows the limb: the median of every ring
+            msk = inside.ravel()
+            med = np.zeros(rb.max() + 1)
+            order = np.argsort(rb.ravel()[msk], kind="stable")
+            rv = rb.ravel()[msk][order]; ev = E.ravel()[msk][order]
+            cuts = np.searchsorted(rv, np.arange(rb.max() + 2))
+            for k in range(rb.max() + 1):
+                seg = ev[cuts[k]:cuts[k + 1]]
+                if seg.size >= 8:
+                    med[k] = np.median(seg)
+            med = ndimage.gaussian_filter1d(med, 2.0)
+            E = np.where(inside, E - med[rb], 0.0)
+            # ---- 4b: glare that hugs the limb in some directions only (a bright
+            # streamer's spill): per direction, the amplitude of a profile rising
+            # toward the limb, b(r) = exp((r - 0.97) / 0.06), fitted on 0.6-0.95 R,
+            # smoothed over 10 degrees and taken off
+            bprof = np.exp((r - 0.97) / 0.06)
+            zone = inside & (r > 0.6) & (r < 0.95)
+            tb = ((th[zone] + np.pi) / (2 * np.pi) * nb).astype(np.int32) % nb
+            ez, bz = E[zone], bprof[zone]
+            num = np.bincount(tb, ez * bz, nb); den = np.bincount(tb, bz * bz, nb)
+            amp = np.where(den > 0, num / np.maximum(den, 1e-12), 0.0)
+            amp = ndimage.gaussian_filter1d(amp, 10.0, mode="wrap")
+            a_map = ndimage.map_coordinates(amp, [ti.ravel()], order=1, mode="grid-wrap").reshape(ti.shape)
+            E = np.where(inside, E - a_map * bprof, 0.0)
+            if along_limb:
+                # ---- 4c: WHAT RUNS ALONG THE LIMB (build 7). From 0.82 R outward,
+                # at every radius, the running median over 20 degrees of arc is
+                # taken off. Leftover glare follows the limb for long stretches;
+                # lunar features are compact and stay.
+                nth = 1440
+                rr_ = np.arange(0.82 * mR - 4, lim * mR + 1, 1.0)
+                tt = np.linspace(-np.pi, np.pi, nth, endpoint=False)
+                Pp = ndimage.map_coordinates(E, [mcy + rr_[:, None] * np.sin(tt)[None],
+                                                 mcx + rr_[:, None] * np.cos(tt)[None]],
+                                             order=1, mode="nearest")
+                kk = max(3, int(round(20.0 / 360.0 * nth)) | 1)
+                Bp = ndimage.median_filter(Pp, size=(1, kk), mode="wrap")
+                Bp = ndimage.uniform_filter1d(Bp, 9, axis=1, mode="wrap")
+                Bp = ndimage.gaussian_filter1d(Bp, 2.0, axis=0)
+                Bc = ndimage.map_coordinates(Bp, [np.clip(r * mR - rr_[0], 0, len(rr_) - 1),
+                                                  ((th + np.pi) / (2 * np.pi) * nth) % nth],
+                                             order=1, mode="nearest")
+                wz = np.clip((r - 0.82) / 0.04, 0, 1); wz = wz * wz * (3 - 2 * wz)
+                E = np.where(inside, E - wz * Bc, 0.0)
+            # ---- 5: band-pass by normalised convolution inside the disc: above the
+            # sensor's fine scale, below 0.3 R
+            w = inside.astype(np.float64)
+
+            def nconv(a, sg):
+                return _pgauss(a * w, sg) / np.maximum(_pgauss(w, sg), 1e-6)
+            if along_limb:
+                # THE EDGE PASS KEEPS THE FINE SCALE ONLY (build 8, 2026-11-16).
+                # After 4c nothing large is left from 0.86 R outward (sector
+                # means within 0.2 of the inner disc's spread on a weak test
+                # set), but further in the large patches are still there. The
+                # wide low-pass averaged them into the rim and its subtraction
+                # put the OPPOSITE sign there: under bright patches of +2 the rim
+                # sat at -1.0 to -1.4, under dark ones of -0.7 at +0.8 to +1.0.
+                # So the wide low-pass is not subtracted here.
+                Eb = np.where(inside, nconv(E, s_lo), 0.0)
+            else:
+                Eb = np.where(inside, nconv(E, s_lo) - nconv(E, s_hi), 0.0)
+            # ---- 5b: THE LIMB BAND (build 2, 2026-10-07). Measured on two
+            # test sets (one of them the reference set): after the band-pass the structure
+            # grew toward the edge (ring std 1.8x the centre's at 0.75-0.86 R) and the
+            # rings there sat dark (layer mean 0.44 against 0.50), then both dropped to
+            # flat within 0.05 R -- a visible rim. Real maria lose contrast toward the
+            # limb (foreshortening), so that growth is residual glare and the
+            # normalised convolution's edge bias. Per ring: the median taken off, and
+            # the spread held to the inner disc's.
+            ring_med = np.zeros(rb.max() + 1); ring_sd = np.zeros(rb.max() + 1)
+            ebv = Eb.ravel()[msk][order]
+            for k in range(rb.max() + 1):
+                seg = ebv[cuts[k]:cuts[k + 1]]
+                if seg.size >= 8:
+                    ring_med[k] = np.median(seg)
+                    ring_sd[k] = 1.4826 * np.median(np.abs(seg - ring_med[k]))
+            ring_med = ndimage.gaussian_filter1d(ring_med, 3.0)
+            ring_sd = ndimage.gaussian_filter1d(ring_sd, 3.0)
+            _rk = np.arange(rb.max() + 1) / mR
+            _ref = ring_sd[(_rk > 0.2) & (_rk < 0.6)]
+            sd0 = float(np.median(_ref)) if _ref.size else 0.0
+            if sd_ref is not None:
+                sd0 = float(sd_ref)       # the edge pass: held to the inner pass's spread
+            gain = (np.where(ring_sd > 1e-12, np.minimum(1.0, sd0 / np.maximum(ring_sd, 1e-12)), 1.0)
+                    if sd0 > 0 else np.ones_like(ring_sd))
+            return np.where(inside, (Eb - ring_med[rb]) * gain[rb], 0.0), sd0
+
+        # THE INNER DISC AS IT WAS, THE EDGE FROM A SECOND PASS (build 7,
+        # 2026-11-16). Measured on the reference set, ring by ring against the
+        # real Moon (band 0.02-0.12 R): the structure matched 0.5-0.6 out to
+        # 0.90 R but was faded from 0.80 R, and beyond 0.90 R the match fell to
+        # 0.1-0.2 while the two halves of the frames agreed MORE -- leftover
+        # glare, steady, not lunar. Build 6 took that glare off with a narrow
+        # limb profile per direction; it kept the detail (0.56 / 0.48 at
+        # 0.90-0.95 / 0.95-0.985 R) but carved a dark band along the rim in two
+        # quadrants and changed the inner disc (0.87 against build 5). Here the
+        # inner disc is build 5's, untouched; from 0.86 to 0.92 R it hands over
+        # to a second pass that reaches 0.995 R and has what runs along the limb
+        # taken off (4c): 0.63 / 0.57 / 0.27 in the same rings, and a quarter of
+        # build 6's limb-parallel banding.
+        # BUILD 8 (2026-11-16): the edge pass carries the fine scale only (see
+        # step 5) and the hand-over runs from 0.80 to 0.92 R, so the large
+        # patches of the inner disc run out softly instead of ending in a band
+        # of the opposite sign. Weak test set: rim sector means within 0.2 of
+        # the inner spread (build 7: -1.4 to +1.0). Reference set: whole-disc
+        # match with the real Moon 0.646 (build 7: 0.638).
+        Ea, _sd_in = _structure(0.97, False)
+        Ee, _ = _structure(0.995, True, sd_ref=_sd_in)
+        wb = np.clip((r - 0.80) / 0.12, 0, 1); wb = wb * wb * (3 - 2 * wb)
+        # BLOBS AT THE EDGE FADED OUT (build 9, 2026-11-17). On a 2023 test set
+        # the edge pass carried compact patches of up to -11 times the inner
+        # disc's spread at 0.90-0.97 R (and a few bright ones), where the stack
+        # itself had nothing of the kind: leftover of the glare model beside
+        # bright limb features. Shown, they were black holes along the limb.
+        # Maria are not that strong near the limb (foreshortening). Where the
+        # edge pass, smoothed over 0.012 R, stands more than 1.5 times the inner
+        # spread off zero, it fades to the plain disc (gone at 3 times), the
+        # fade widened over the patch's shoulders and softened over 0.02 R, so
+        # what remains is the smooth disc, not a hole with a rim. Measured:
+        # that set 22 % of the 0.80-0.985 R zone faded, a high-Sun reference set
+        # 3 % (no visible change), an extreme close-up set 18 % (its limb
+        # blobs gone). The inner disc (below 0.80 R) is not touched.
+        if _sd_in > 0:
+            _a = _pgauss(np.abs(Ee) / _sd_in, 0.012 * mR)
+            _c = np.clip((_a - 1.5) / 1.5, 0, 1); _c = 1.0 - _c * _c * (3 - 2 * _c)
+            _c = ndimage.minimum_filter(_c, size=max(3, int(round(0.03 * mR)) | 1))
+            _c = np.clip(_pgauss(_c, 0.02 * mR), 0, 1)
+            Ee = Ee * _c
+        Eb = Ea * (1.0 - wb) + Ee * wb
+        # ---- 6: fade out at the very edge, 0.95-0.985 R
+        fade = np.clip((0.985 - r) / 0.035, 0, 1); fade = fade * fade * (3 - 2 * fade)
         Eb *= fade
         return Eb, r, level, alpha, s_lo, s_hi
 
+    if os.environ.get("ECLIPSEFORGE_MOON_DUMP", "") not in ("", "0"):
+        # lab diagnostics: the stacked disc (all frames and the two halves) and
+        # the merge's green light on the same grid, as _layer receives them
+        try:
+            _n = M.shape[0]
+            _yy, _xx = np.mgrid[:_n, :_n].astype(np.float64)
+            _my = cy + (_yy - mcy) * 2.0; _mx = cx + (_xx - mcx) * 2.0
+            _a0, _a1 = max(int(_my.min()) - 2, 0), min(int(_my.max()) + 3, H)
+            _b0, _b1 = max(int(_mx.min()) - 2, 0), min(int(_mx.max()) + 3, W)
+            _I = ndimage.map_coordinates(np.asarray(_hr[_a0:_a1, _b0:_b1, 1], np.float32),
+                                         [_my - _a0, _mx - _b0], order=1, mode="constant", cval=0.0)
+            np.savez(os.path.join(wd, MOON_DUMP), M=M.astype(np.float32),
+                     A=(hacc[0] / np.maximum(hw[0], 1e-9)).astype(np.float32) if hacc[0] is not None else M * 0,
+                     B=(hacc[1] / np.maximum(hw[1], 1e-9)).astype(np.float32) if hacc[1] is not None else M * 0,
+                     I=_I.astype(np.float32), m=np.array([mcy, mcx, mR]), g=np.array([cy, cx, R, H, W]),
+                     n=np.array([nused] + list(_hn)), t=np.array(sorted(t for _, t in use)))
+            del _yy, _xx, _my, _mx, _I
+            _log(progress, "Moon layer: stack written to " + MOON_DUMP + " (ECLIPSEFORGE_MOON_DUMP)", None)
+        except Exception as _e:
+            _log(progress, f"[warn] Moon layer: dump failed ({_e})", None)
     Eb, r, level, alpha, s_lo, s_hi = _layer(M)
     # MARIA AGREEMENT (2026-10-28). The same layer from the first and the
     # second half of the frames (in shooting order), each stacked on its own.
@@ -415,7 +526,7 @@ def build(folder, wd, progress=None, frames=None):
     if _chk is None:
         _force = {"available": False, "why": "the check against the lunar map did not run"}
     elif _chk["verdict"] == "confirmed":
-        _force = {"available": False, "why": "not needed: the earthshine is confirmed"}
+        _force = {"available": False, "why": "not needed: earthshine confirmed"}
     elif _chk["verdict"] == "undecided":
         _sf = float(_lc.share_for(_chk["best"]))
         if _sf > _share + 0.02:

@@ -386,57 +386,127 @@ def find_disc(lum, target=520.0):
     # around THAT radius, and refit the centre to them. Restricting to the band
     # is what makes this work at any disc size -- it is what stops streamers and
     # the corona's own falloff from being fitted along with the limb.
-    R = None
-    for _ in range(4):
-        Rn = _limb_radius_from_gradient(g, cy, cx, R or 0.25 * min(hs, ws))
-        if Rn is None or not (2.0 < Rn < 0.48 * min(hs, ws)):
-            return None
-        R = Rn
-        gthr = float(np.percentile(g, 96.0))
-        yy = np.arange(hs, dtype=np.float32)[:, None] - cy
-        xx = np.arange(ws, dtype=np.float32)[None, :] - cx
-        rr = np.hypot(yy, xx)
-        band = (g >= gthr) & (np.abs(rr - R) < max(0.25 * R, 3.0))
-        py, px = np.nonzero(band)
-        if py.size < 40:
-            return None
-        y = py.astype(np.float64)
-        x = px.astype(np.float64)
-        for _t in range(4):
-            A = np.stack([2 * x, 2 * y, np.ones(x.size)], axis=1)
-            try:
-                sol, *_ = np.linalg.lstsq(A, x * x + y * y, rcond=None)
-            except np.linalg.LinAlgError:
+    def _from_seed(cy, cx):
+        R = None
+        for _ in range(4):
+            Rn = _limb_radius_from_gradient(g, cy, cx, R or 0.25 * min(hs, ws))
+            if Rn is None or not (2.0 < Rn < 0.48 * min(hs, ws)):
                 return None
-            ccx, ccy = float(sol[0]), float(sol[1])
-            rad = sol[2] + ccx * ccx + ccy * ccy
-            if not np.isfinite(rad) or rad <= 0:
+            R = Rn
+            gthr = float(np.percentile(g, 96.0))
+            yy = np.arange(hs, dtype=np.float32)[:, None] - cy
+            xx = np.arange(ws, dtype=np.float32)[None, :] - cx
+            rr = np.hypot(yy, xx)
+            band = (g >= gthr) & (np.abs(rr - R) < max(0.25 * R, 3.0))
+            py, px = np.nonzero(band)
+            if py.size < 40:
                 return None
-            cR = float(np.sqrt(rad))
-            d = np.abs(np.hypot(x - ccx, y - ccy) - cR)
-            keep = d <= max(2.0 * float(np.median(d)), 1.0)
-            if keep.sum() < 40 or keep.all():
-                break
-            x, y = x[keep], y[keep]
-        if not (0 <= ccy < hs and 0 <= ccx < ws):
-            return None
-        cy, cx = ccy, ccx
+            y = py.astype(np.float64)
+            x = px.astype(np.float64)
+            for _t in range(4):
+                A = np.stack([2 * x, 2 * y, np.ones(x.size)], axis=1)
+                try:
+                    sol, *_ = np.linalg.lstsq(A, x * x + y * y, rcond=None)
+                except np.linalg.LinAlgError:
+                    return None
+                ccx, ccy = float(sol[0]), float(sol[1])
+                rad = sol[2] + ccx * ccx + ccy * ccy
+                if not np.isfinite(rad) or rad <= 0:
+                    return None
+                cR = float(np.sqrt(rad))
+                d = np.abs(np.hypot(x - ccx, y - ccy) - cR)
+                keep = d <= max(2.0 * float(np.median(d)), 1.0)
+                if keep.sum() < 40 or keep.all():
+                    break
+                x, y = x[keep], y[keep]
+            if not (0 <= ccy < hs and 0 <= ccx < ws):
+                return None
+            cy, cx = ccy, ccx
 
-    # Validate. Coverage alone is not enough: where the edge set is noise rather
-    # than structure -- the short-exposure stack, whose fast tiers see nothing
-    # outside the inner corona -- noise covers every azimuth and a meaningless
-    # circle scores a full 360 degrees. The SCATTER of the inliers about the
-    # circle is what separates them: measured on the reference set a real limb
-    # sits at 0.04 R and the noise-fitted circles at 0.16-0.23 R.
-    ang = np.arctan2(y - cy, x - cx)
-    bins = np.zeros(36, bool)
-    bins[((ang + np.pi) / (2 * np.pi) * 36).astype(int) % 36] = True
-    med = float(np.median(np.abs(np.hypot(x - cx, y - cy) - cR)))
-    if bins.mean() < 0.75 or med > max(0.10 * cR, 1.5):
+        # Validate. Coverage alone is not enough: where the edge set is noise rather
+        # than structure -- the short-exposure stack, whose fast tiers see nothing
+        # outside the inner corona -- noise covers every azimuth and a meaningless
+        # circle scores a full 360 degrees. The SCATTER of the inliers about the
+        # circle is what separates them: measured on the reference set a real limb
+        # sits at 0.04 R and the noise-fitted circles at 0.16-0.23 R.
+        ang = np.arctan2(y - cy, x - cx)
+        bins = np.zeros(36, bool)
+        bins[((ang + np.pi) / (2 * np.pi) * 36).astype(int) % 36] = True
+        med = float(np.median(np.abs(np.hypot(x - cx, y - cy) - cR)))
+        if bins.mean() < 0.75 or med > max(0.10 * cR, 1.5):
+            return None
+        if not (0.008 * min(hs, ws) < cR < 0.48 * min(hs, ws)):
+            return None
+        return cy, cx, cR
+
+    # MORE THAN ONE SEED (0.32.0). The bright-mask centroid is a good start
+    # while the corona rings the disc evenly. With the Moon filling most of the
+    # frame and one limb much brighter (a big prominence, frames near a
+    # contact), it lands far towards that side and the loop settles on a
+    # smaller circle inside the disc: R 343 for 627 on a test frame, 300 px
+    # off. So the frame centre and the centroid of the strongest edges are
+    # tried as well. The first seed's circle stands unless another is larger
+    # and carries more edge all round -- the limb is the strongest and longest
+    # closed edge in the frame.
+    seeds = [(cy, cx), (hs / 2.0, ws / 2.0)]
+    _gq = float(np.percentile(g, 99.0))
+    gy_, gx_ = np.nonzero(g >= _gq)
+    if gy_.size >= 20:
+        seeds.append((float(gy_.mean()), float(gx_.mean())))
+    best, best_sc, _rough = None, -1.0, None
+    _a = np.linspace(0, 2 * np.pi, 360, endpoint=False)
+    for k, (sy, sx) in enumerate(seeds):
+        if best is not None and k > 0 and np.hypot(sy - best[0], sx - best[1]) < 0.05 * best[2]:
+            continue
+        r = _from_seed(sy, sx)
+        if r is None:
+            continue
+        py = np.round(r[0] + r[2] * np.sin(_a)).astype(int)
+        px = np.round(r[1] + r[2] * np.cos(_a)).astype(int)
+        ins = (py >= 0) & (py < hs) & (px >= 0) & (px < ws)
+        if ins.sum() < 90:
+            continue
+        # THE LIMB IS DARK INSIDE (0.32.0). In a long exposure the corona is
+        # clipped out to well past the limb, and the plateau's outer edge is a
+        # strong, larger closed edge too -- bright inside, dark outside. On a
+        # synthetic disc clipped to 1.17 R with a lopsided corona the larger-
+        # circle rule took it (R +6 %, centre 60 px off), and on a real 0.5 s
+        # tier that put two frames 160 px off. A candidate counts only when the
+        # light just outside it exceeds the light just inside on 3/4 of the rays.
+        _pi = np.round(r[0] + 0.95 * r[2] * np.sin(_a)).astype(int)
+        _xi = np.round(r[1] + 0.95 * r[2] * np.cos(_a)).astype(int)
+        _po = np.round(r[0] + 1.05 * r[2] * np.sin(_a)).astype(int)
+        _xo = np.round(r[1] + 1.05 * r[2] * np.cos(_a)).astype(int)
+        _ok = ((_pi >= 0) & (_pi < hs) & (_xi >= 0) & (_xi < ws)
+               & (_po >= 0) & (_po < hs) & (_xo >= 0) & (_xo < ws))
+        _dark_in = (_ok.sum() >= 90
+                    and float(np.mean(s[_po[_ok], _xo[_ok]] > s[_pi[_ok], _xi[_ok]])) >= 0.75)
+        if not _dark_in:
+            # NOT THROWN AWAY WHEN IT IS THE FIRST SEED'S (STACK_BUILD 12). The
+            # first seed's circle is a rough one and the limb fit that follows
+            # refines it: on a test set it came out 6-14 % too large and 20 px
+            # off on the middle exposures (the fit then gave the limb to 0.8 px
+            # rms). At 0.95 of such a radius the "inside" samples already lie
+            # in the corona, the test failed, and the frame was left with no
+            # disc at all: the Moon was placed per frame on 5 of 11 exposures
+            # instead of 11, the merged limb went from 4 to 6 px and the colour
+            # planes were not measured. It is kept as the fallback, used when
+            # no seed gives a circle that is dark inside.
+            if k == 0:
+                _rough = r
+            continue
+        # edge strength summed round the circle: the limb is the strongest AND
+        # the longest closed edge; a small bright knot has a strong edge too
+        sc = float(np.mean(g[py[ins], px[ins]])) * float(ins.mean()) * float(r[2])
+        # the first seed's circle stands unless another is LARGER and has more
+        # edge: the failure being repaired is a circle settled inside the limb
+        if best is None or (r[2] > 1.1 * best[2] and sc > best_sc):
+            best, best_sc = r, sc
+    if best is None:
+        best = _rough
+    if best is None:
         return None
-    if not (0.008 * min(hs, ws) < cR < 0.48 * min(hs, ws)):
-        return None
-    return cy * dec, cx * dec, cR * dec
+    return best[0] * dec, best[1] * dec, best[2] * dec
 
 
 def _limb_radius_from_gradient(g, cy, cx, R_hint):
@@ -882,7 +952,18 @@ MOONFREE_MIN_Q = 30.0
 # it and re-stacks. 1: patch links first for every cross-tier pair.
 # 4: HDR per bracket, a bracket with another Moon than the target's (bracketmode._moon_w_rows).
 # 5: the clipped mean grows its rejection around strong outliers (_grow_rejection).
-STACK_BUILD = 5
+# 6: intra-tier window sized to the disc, impossible frame shifts caught, find_disc
+#    tries more than one seed, one disc per tier (0.32.0).
+# 7: frame discs from the limb fit; bursts of one exposure no longer split brackets,
+#    so sets shot in bursts get the Moon placed per frame (0.32.0).
+# 8: the Moon's speed is measured only on tiers that span time (0.32.0).
+# 9: find_disc takes no circle that is bright inside (a clipped corona's edge),
+#    and the intra-tier guard acts only on trustworthy discs (0.32.0).
+# 10: large-Moon links; an exposure group with no link to the rest is tied in (0.32.0).
+# 11: large Moon only: colour planes not measured on exposures whose Moon moves across the stack.
+# 12: find_disc keeps the first seed's circle as the fallback (build 9 threw it away when it
+#     was rough, leaving middle exposures of a multi-bracket set without a disc).
+STACK_BUILD = 12
 # The same threshold for the "mixed" setting, which is the user asking for the
 # Moon wherever the corona is thin and the corona only where it is solid. The
 # criterion is the MEASURED coverage of the pair's common corona, not the
@@ -955,6 +1036,78 @@ def prep_corona(crop, sat, hp=25.0, erode=8):
     # pulls the peak toward it (measured: a per-frame weight left the lock a
     # third of the way to the Moon on a fast-tier pair; a common one does not).
     return x.astype(np.float32), good
+
+
+def _disc_consensus(lums, radii, centers, files, set_discs):
+    """Refit frames whose find_disc radius is off the tier's (or the set's)
+    median by more than 8 %, seeded with the agreeing frames' disc. Updates
+    `radii` and `centers` in place, adds the tier's agreeing discs to
+    `set_discs`, and returns the refitted frames."""
+    good = [p for p in files if p in radii]
+    rs = [radii[p] for p in good]
+    ref = None
+    if len(rs) >= 2:
+        # the largest group of frames that agree on the radius (ties: the
+        # larger disc -- a wrong fit settles INSIDE the limb, never outside)
+        def _grp(r):
+            return [q for q in good if abs(radii[q] - r) <= 0.08 * r]
+        Rm = max(rs, key=lambda r: (len(_grp(r)), r))
+        ok = _grp(Rm)
+        Rm = float(np.median([radii[q] for q in ok]))
+        if len(ok) >= 2:
+            ref = (float(np.median([centers[p][0] for p in ok])),
+                   float(np.median([centers[p][1] for p in ok])), Rm, ok)
+    if ref is None and set_discs:
+        a = np.array(set_discs, float)
+        Rm = float(np.median(a[:, 2]))
+        ok = [p for p in good if abs(radii[p] - Rm) <= 0.08 * Rm]
+        ref = (float(np.median(a[:, 0])), float(np.median(a[:, 1])), Rm, ok)
+    if ref is None:
+        return []
+    cy0, cx0, Rm, ok = ref
+    fixed = []
+    for p in files:
+        if p in ok:
+            continue
+        try:
+            f = fit_limb_rays(np.clip(lums[p], 0, None), cy0, cx0, Rm)
+        except Exception:
+            f = None
+        if f is None or abs(float(f[2]) - Rm) > 0.05 * Rm:
+            continue
+        centers[p] = (float(f[0]), float(f[1]))
+        radii[p] = float(f[2])
+        fixed.append(p)
+    for p in list(ok) + fixed:
+        set_discs.append((centers[p][0], centers[p][1], radii[p]))
+    return fixed
+
+
+def _intra_window(shape, R=None):
+    """Side of the intra-tier correlation window (half-res px).
+
+    1200 px used to be fixed. With the Moon filling most of the frame (a disc
+    of R 630 half-res on a test set) a 1200 px square round the disc is nearly
+    all Moon: the corona is left in its four corners, where the Hann taper is
+    zero, and the correlation has nothing to lock on. The window now reaches
+    1.6 R from the centre when the disc is that large, up to the frame."""
+    m = int(min(shape))
+    sz = 1200
+    if R is not None and R > 0:
+        sz = max(sz, int(3.2 * float(R)))
+    sz = min(sz, m)
+    return sz - (sz % 2)
+
+
+def _intra_guard_limit(R, span_s, sz):
+    """Largest believable distance (half-res px) between a frame's corona
+    shift and its disc shift inside one tier: the Moon's motion against the
+    Sun over the span (three times the fastest rate, as the run stop uses),
+    plus 3% R for the disc measurement, at least 8 px. None without a
+    radius: then there is nothing to judge by."""
+    if R is None or R <= 0:
+        return None
+    return max(8.0, float(R) * (0.03 + 3.0 * MOON_RATE_PER_R * float(span_s or 0.0)))
 
 
 def corona_shift(ref, mov, sat_ref, sat_mov, upsample=20, lock=None):
@@ -1343,6 +1496,10 @@ CROSS_BRACKET_GAP_S = 10.0    # tiers shot further apart than this are linked by
 CROSS_BRACKET_BANDS = ((6.0, 30.0), (4.0, 20.0))   # band-passes (px half-res); both must agree
 CROSS_BRACKET_AGREE = 2.0     # px half-res between the two bands
 CROSS_BRACKET_MAX_PAIRS = 5   # cross-bracket pairs measured (closest exposures first)
+#: LARGE MOON (0.32.0): the Moon's diameter as a fraction of the frame's short
+#: side from which the exposures are linked the large-Moon way (see run()).
+#: The sets this was measured against sit at 15-37 %, the one that needs it at 63 %.
+LARGE_MOON_FRAC = 0.5
 
 
 def _bracket_link_band(fa, fb, ma, mb, hi):
@@ -2053,8 +2210,8 @@ tier's frames aligned to each other and averaged, demosaiced, white-balanced,
 converted to sRGB primaries, and shifted into the common cross-tier frame.
 NOT tone mapped, NOT merged, NOT stretched.
 
-Every file carries an embedded ICC profile, so Photoshop, Affinity and
-PixInsight all interpret it the same way.
+Every file carries an embedded ICC profile, so image editors and
+astronomy software all interpret it the same way.
 {enc_note}
 
 Scale: pixel value 1.0 (65535) corresponds to {hi:.3f} x sensor saturation for
@@ -2067,7 +2224,7 @@ the data, not a bug.
 HOW TO USE THESE
 ----------------
 Load them as layers and blend them by hand (masks / luminosity masks), or feed
-the whole set to an HDR combine (Merge to HDR Pro, PixInsight HDRComposition).
+the whole set to an HDR combine (the HDR merge of an image editor or of astronomy software).
 
 DO NOT mean- or median-stack the set as if it were one exposure. Averaging a
 bracket averages blown frames with unblown ones; the result is dominated by the
@@ -2451,7 +2608,7 @@ def _fit_channel_floors(pmed, secs, iters=200, exposures=None):
     # `sv` free per tier is what the docstring above argues for, and on data
     # whose stated times are roughly right it is fine. On a FITS test set it is
     # not: its headers carry a synthetic 1.5^n ladder ("Manual group
-    # assignment" in Siril's own comment on the card) where the corner rates
+    # assignment" in the stacking program's own comment on the card) where the corner rates
     # measure ~1.25x per step, and the SHORT tiers have almost no sky in the
     # corner to constrain their own exposure. The fit then escapes into the
     # ladder -- +6001% on the shortest tier -- the guard below correctly refuses
@@ -2782,8 +2939,8 @@ _CHANNELS = ("R", "G", "B")
 def _linfit_mad(x, y, nmin=200, nmax=100000, rng=None):
     """Straight-line fit by MINIMISING MEAN ABSOLUTE DEVIATION. y = a + b*x.
 
-    This is what PixInsight's LinearFit actually does, and it is NOT least
-    squares. From the PCL class reference:
+    This is what the linear fit of a widely used astronomy package actually
+    does, and it is NOT least squares. From its class reference:
 
         "Robust straight line fitting by minimization of mean absolute
          deviation."
@@ -2814,14 +2971,14 @@ def _linfit_mad(x, y, nmin=200, nmax=100000, rng=None):
     sum(x*sign(residual)) is monotonic in b and bracketed and bisected from the
     least-squares solution.
 
-    CHECKED AGAINST THE REAL THING. PixInsight's LinearFit was run on two real
+    CHECKED AGAINST THE REAL THING. That package's linear fit was run on two real
     frames of the reference bracket (1/13 s as reference, 1/8 s as target) and
     this function on the same two files decoded to sensor channels:
 
-        channel   PixInsight    ours     difference
+        channel   reference     ours     difference
         G          0.625255   0.624724     -0.08%
 
-    Green is the honest comparison, because it is the one channel PixInsight's
+    Green is the honest comparison, because it is the one channel that package's
     RAW loading leaves closest to the sensor. Agreement to 0.08% on 44 million
     pixels says the ESTIMATOR is right.
 
@@ -2834,10 +2991,10 @@ def _linfit_mad(x, y, nmin=200, nmax=100000, rng=None):
         sensor channels, no demosaic          R/G 0.9988   B/G 0.9997
         VNG demosaic, no white balance        R/G 1.0069   B/G 0.9819
         VNG demosaic + camera white balance   R/G 1.0333   B/G 0.9835
-        PixInsight (VNG + camera WB)          R/G 1.0181   B/G 0.9721
+        reference (VNG + camera WB)           R/G 1.0181   B/G 0.9721
 
     The sensor channels show no colour difference at all. Demosaicing adds
-    some, white balance adds more, and PixInsight lands in the same region --
+    some, white balance adds more, and the reference lands in the same region --
     not on our exact figure, because its normalisation differs from dcraw's,
     but the mechanism is not in doubt. VNG is gradient-directed, so it
     interpolates R and B differently in two frames whose gradients differ, and
@@ -2847,8 +3004,8 @@ def _linfit_mad(x, y, nmin=200, nmax=100000, rng=None):
     THE CONSEQUENCE FOR WHERE WE APPLY IT. Because the reported per-channel
     slopes depend on the preprocessing, a fit run after a demosaic and a white
     balance is partly measuring those rather than a difference between the two
-    exposures. Anyone comparing our per-channel numbers against a LinearFit run
-    in PixInsight will find ours smaller, and this table is the reason. `_hill_chain` therefore fits in the sensor
+    exposures. Anyone comparing our per-channel numbers against a linear fit run
+    in that package will find ours smaller, and this table is the reason. `_hill_chain` therefore fits in the sensor
     channel domain, before white balance, where the three channels are
     independent measurements of the same photons. That is a deliberate choice
     and this is the evidence for it.
@@ -2911,7 +3068,7 @@ def _linfit_mad(x, y, nmin=200, nmax=100000, rng=None):
 
 
 def _linfit_clipped(x, y, iters=4, clip=3.0, nmin=200):
-    """Least squares y = k*x + q with sigma-clipping. PixInsight's LinearFit.
+    """Least squares y = k*x + q with sigma-clipping (a linear fit as astronomy software does it).
 
     Both parameters at once, and that is the whole point: a slope and an offset
     fitted one after the other are degenerate -- whichever is fitted first
@@ -2953,7 +3110,7 @@ def _linfit_clipped(x, y, iters=4, clip=3.0, nmin=200):
 # applies these before the fit; the PCL class documents no rejection at all, so
 # this is the process's own step and not part of the estimator.
 #
-# CONFIRMED against a real PixInsight installation: the tool opens with
+# CONFIRMED against a real installation of that package: the tool opens with
 # Reject low 0.000000 and Reject high 0.920000. Neither documentation page
 # states the defaults, so this came from the dialog itself.
 #
@@ -2981,7 +3138,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
         the talk accepts the propagation risk explicitly; we reference the middle
         tier instead, for a reason measured on a 14-tier bracket and set out
         at the chaining step below;
-      - the fit is PixInsight `LinearFit`: a slope AND an offset, PER COLOUR
+      - the fit is an astronomy package's linear fit: a slope AND an offset, PER COLOUR
         CHANNEL (the slide shows Y = 3.05x + -0.01);
 
     WHAT LinearFit ACTUALLY IS, from its own documentation rather than from an
@@ -3137,7 +3294,7 @@ def _hill_chain(bayer, sat_half, secs, links_good, cal, sat_level, pedestal,
             # 1.83x on the reference bracket).
             x = (pa[c][:_h, :_w][g][sub][_keep] - pedestal) / secs[i]
             y = (pb[c][:_h, :_w][g][sub][_keep] - pedestal) / secs[i + 1]
-            # MAD minimisation, as PixInsight's LinearFit does it -- not least
+            # MAD minimisation, as the reference linear fit does it -- not least
             # squares with clipping, which is what 0.22.43 used.
             k, q, _nk = _linfit_mad(x, y, rng=rs)
             if _mode == "slope":
@@ -3421,7 +3578,7 @@ def _per_channel_photometry(bayer, sat_half, secs, ref, links_good, cal,
         additive offset  pedestal    one number, shared by every tier
         azimuthal gain   LDIC k,q    fitted on luma, applied to all channels
 
-    The published method this is measured against -- PixInsight's LinearFit, as
+    The published method this is measured against -- an astronomy package's linear fit, as
     used in the published HDR eclipse workflow -- fits a slope AND an offset PER
     CHANNEL, chained from the longest exposure. Ours is more general in space
     (azimuthal, 60 segments, per tier; the published one is global) and strictly less general
@@ -3614,7 +3771,7 @@ def _per_channel_photometry(bayer, sat_half, secs, ref, links_good, cal,
     # This is the measurement the rest of the check rests on, and it is a
     # deliberate copy of the published method being compared against: a linear
     # fit of each exposure against its neighbour, with outlier rejection,
-    # yielding a slope and an offset -- PixInsight's LinearFit, as used in the
+    # yielding a slope and an offset -- an astronomy package's linear fit, as used in the
     # HDR eclipse workflow this pipeline is measured against.
     #
     # JOINTLY, because separately does not work. A synthetic bracket carrying a
@@ -4068,7 +4225,7 @@ def _feather_weight(w, valid, sigma, mode=None):
     # weight just outside a clipped island of radius 4/8/15/30/200 px: 0.93,
     # 0.74, 0.39, 0.10, 0.01. That step printed every prominence's outline
     # into the merge (the outlines and dark crescents that had been healed by hand in
-    # Photoshop). Rebuilt from that set's raws: the outlines are there with the
+    # an image editor). Rebuilt from that set's raws: the outlines are there with the
     # taper alone and gone with this; the limb profile is unchanged, because
     # at the limb the old taper is already the smaller of the two.
     # ECLIPSEFORGE_TAPER_NODIST=1 restores the taper alone.
@@ -4088,10 +4245,10 @@ def _write_tier_tiff(folder, sec, cal_s, sat_level, hi, rgb_norm, n_frames,
     so that is multiplied back out: the file holds the tier at its own real
     signal level, matching its EXIF exposure time.
 
-    Encoding: sRGB by default, because that is what Photoshop and Affinity
+    Encoding: sRGB by default, because that is what image editors
     expect and an untagged linear file shown through an sRGB decode is what
     made these look overstretched with a clipped histogram. `linear=True`
-    writes scene-linear instead, for PixInsight and for anyone doing their own
+    writes scene-linear instead, for astronomy processing software and for anyone doing their own
     HDR combine. Either way the matching ICC profile is embedded, so no host
     has to guess.
     """
@@ -4133,7 +4290,7 @@ _WMODE_SEEN = {}
 
 
 def _weight_exposure_mode(cal, progress):
-    """WHICH EXPOSURE THE MERGE WEIGHT ASKS (TODO 21, lab 0.24).
+    """WHICH EXPOSURE THE MERGE WEIGHT ASKS (TODO 21, 0.24).
 
     The weight is exposure^alpha. Normally the stated exposure (EXIF/FITS) is
     right and the photometric factors sit near 1 (the reference set and three
@@ -4164,7 +4321,7 @@ def _weight_exposure_mode(cal, progress):
 
 
 def subtract_sky(wd, cy, cx, R, stats, progress, write=True):
-    """THE SKY IS SUBTRACTED (TODO 22, lab 0.24).
+    """THE SKY IS SUBTRACTED (TODO 22, 0.24).
 
     Sky light scales with exposure exactly like the corona, so it passes
     through the merge untouched and arrives as a CONSTANT (a gently tilted
@@ -4190,7 +4347,7 @@ def subtract_sky(wd, cy, cx, R, stats, progress, write=True):
     identifiable. If the corona model still exceeds the fitted sky at 90 % of
     the largest radius in the frame, nothing is subtracted and the log says so.
     A negative fitted sky (an over-subtracted pedestal) is not subtracted either.
-    OFF BY DEFAULT (lab 0.24, after a run of 2026-10-06): on the reference
+    OFF BY DEFAULT (0.24, after a run of 2026-10-06): on the reference
     set it took the blue sky out with the gradient, its plane left the
     curved part of the sky behind (far-field brightness varying ~25 % around
     the Sun at 5-7 R, against 1-2 % with the multiplicative quadratic
@@ -4222,7 +4379,7 @@ def subtract_sky(wd, cy, cx, R, stats, progress, write=True):
         return None
     from scipy.optimize import lsq_linear
     # n from the luminance profile: power law plus a constant, best of a grid.
-    # BOTH CORONA TERMS NON-NEGATIVE (lab 0.24, the bench): unbounded, on a
+    # BOTH CORONA TERMS NON-NEGATIVE (0.24, the bench): unbounded, on a
     # frame reaching 2.5 R, the F term went negative to buy a brighter sky and
     # the blue corona came out NEGATIVE at 3 R (B/R -0.10).
     edges = np.arange(1.5, rmax, 0.05)
@@ -4265,7 +4422,7 @@ def subtract_sky(wd, cy, cx, R, stats, progress, write=True):
     coef = np.array(coef)                       # (3, 5): a, f, p0, p1, p2
     A = np.stack([rr ** -n, rr ** -NF, np.ones_like(rr), xs, ys], 1)
     # IS THE SKY MEASURED? Jackknife over 12 azimuth sectors: the streamers,
-    # not the noise, decide how well corona and sky separate. Bench (lab 0.24):
+    # not the noise, decide how well corona and sky separate. Bench (0.24):
     # 0.5 % and 0.7 % on two test sets' frames (12 R and 8 R), 52 % to
     # 350 % on frames reaching 2.5 R or filled by the corona.
     ang = np.arctan2(ys, xs)
@@ -4332,7 +4489,7 @@ def subtract_sky(wd, cy, cx, R, stats, progress, write=True):
     _sig = 1.4826 * float(np.median(np.abs(_res_l - np.median(_res_l))))
     floor = max(3.0 * _sig, 0.03 * b_l)
     info["neutral_floor"] = float(floor)
-    # IN THE CORONA'S COLOUR, NOT GREY (lab 0.24, reference test stack): the
+    # IN THE CORONA'S COLOUR, NOT GREY (0.24, reference test stack): the
     # corona of a low Sun is strongly reddened (R:G:B 1.59 : 0.88 : 0.44 of
     # luminance there), and a grey floor beside it is a hue edge wherever the
     # corona fades into it -- a brown ring in the picture. Same luminance, so
@@ -4722,7 +4879,7 @@ def measure_black_from_tiers(tiers, secs, min_ratio=1.4):
     measured-brightness grouping does, so noise in x does not bias k. Sky light
     scales with the exposure like the corona and does not enter b.
 
-    2026-10-13, a Siril FITS test set: the shared pedestal and the per-channel
+    2026-10-13, a FITS test set from a stacking program: the shared pedestal and the per-channel
     floor fit settled ~30 ADU low in every channel; 21 of 22 photometric links
     then leaned the same way (0.973, compounding to 0.55). Measured this way on
     five frame pairs from 1/82 s to 1/3 s the floors are R 96-108, G 103-122,
@@ -4934,12 +5091,24 @@ CPLANE_MIN_PX = 0.2         # below this in both channels: nothing to correct
 CPLANE_MAX_SPREAD = 1.0     # tiers must agree to this (px) or nothing is applied
 
 
-def measure_colour_planes(stacks_bayer, secs, demosaic_method, progress):
+def measure_colour_planes(stacks_bayer, secs, demosaic_method, progress, skip=None):
     """Offset of the red and blue camera channels against green, full-res px,
     as {0: (dy, dx), 2: (dy, dx), "tiers": [...], ...}, or None with a reason
-    logged. Positive dy = that channel's image sits lower than green's."""
+    logged. Positive dy = that channel's image sits lower than green's.
+    `skip`: exposures whose stack has no clean limb to measure on (large Moon
+    only, see the call); the next shortest ones take their place."""
     rows = []
-    for s in sorted(secs)[:CPLANE_TIERS]:
+    _cand = sorted(secs)
+    if skip:
+        _clean = [s for s in _cand if s not in skip]
+        if len(_clean) >= 2:
+            _left = [s for s in _cand[:CPLANE_TIERS] if s in skip]
+            if _left:
+                progress.log("colour planes: " + ", ".join(_exp_name(s) for s in _left)
+                             + " not measured on (the Moon moves across that stack), the next "
+                             "shortest exposure(s) instead", None)
+            _cand = _clean
+    for s in _cand[:CPLANE_TIERS]:
         try:
             rgb = _demosaic(stacks_bayer[s], demosaic_method)
             g = np.ascontiguousarray(rgb[:, :, 1])
@@ -5239,8 +5408,6 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                          "stack_combine": str(stack_combine),
                          "align_filter": str(align_filter),
                          "align_corr": str(align_corr),
-               "intra_lock": str(intra_lock),
-               "partialconv": bool(partialconv),
                          "intra_lock": str(intra_lock),
                          "partialconv": bool(partialconv),
                          "tier_mode": str(tier_mode),
@@ -5252,11 +5419,11 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
              "camera_info": read_camera_info(paths[0])}
 
     # FRAMES ANOTHER PROGRAM ALREADY REGISTERED (2026-10-13). Decided from the
-    # data: a registering writer (Siril, PixInsight) pads every frame it
+    # data: a registering writer (a stacking program) pads every frame it
     # shifted with a black border of that frame's own width -- see
     # simple.writer_registered. Such a set is stacked as written, in this path
     # as in the simple stack: re-aligning it only adds error (a FITS
-    # test set from Siril: a re-alignment moved the 6.5 s frame 6 px off a registration
+    # test set from a stacking program: a re-alignment moved the 6.5 s frame 6 px off a registration
     # that holds to ~2 px). "align" and "keep" overrule the detection.
     _am = str(align_mode or "auto").strip().lower()
     if _am not in ("auto", "align", "keep"):
@@ -5428,7 +5595,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     _pfm_ep = {p_: _epoch(meta[p_]["ts"]) for s_ in secs for p_ in tiers[s_]}
     _pfm_t = [v for v in _pfm_ep.values() if v is not None]
     _pfm_tref = 0.5 * (min(_pfm_t) + max(_pfm_t)) if _pfm_t else None
-    # WHERE THE SHOOT SITS IN TOTALITY (lab 0.28.1): with the site known, C2,
+    # WHERE THE SHOOT SITS IN TOTALITY (0.28.1): with the site known, C2,
     # mid-totality and C3 relative to the first frame (contacts.py), for the
     # report and the timeline; and the Moon's instant becomes mid-totality
     # when the shoot spans it (the symmetric choice, see contacts.py)
@@ -5470,6 +5637,20 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             # up to three middle tiers, combined by the median: one tier's
             # error is ~0.01-0.02 px/s, which over six minutes is 4-7 px
             _cand = [s_ for s_ in secs if len(tiers[s_]) >= 3]
+            # ONLY TIERS THAT SPAN TIME (0.32.0). A velocity is a distance over a
+            # time; a burst of three frames shot within 1 s gives a direction
+            # that is noise (measured on a test set: dy +0.93, dx -0.26 px/s from
+            # 1 s, against dy +0.27, dx -0.86 from 27 s and 70 s). The middle
+            # tiers are taken among those spanning at least half the longest span
+            # (and 10 s); the old choice stands when none does.
+            def _span(s_):
+                _e = [_pfm_ep.get(p_) for p_ in tiers[s_]]
+                _e = [e for e in _e if e is not None]
+                return (max(_e) - min(_e)) if len(_e) >= 2 else 0.0
+            _spmax = max((_span(s_) for s_ in _cand), default=0.0)
+            _long = [s_ for s_ in _cand if _span(s_) >= max(10.0, 0.5 * _spmax)]
+            if _long:
+                _cand = _long
             _k = len(_cand) // 2
             _vt = _cand[max(0, _k - 1):_k + 2] if len(_cand) >= 3 else _cand
             _got = []
@@ -5610,6 +5791,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         except Exception as _e:
             _black_meas = None
             progress.log(f"[warn] black level measurement skipped ({_e})", None)
+    _set_discs = []      # (cy, cx, R) half-res of frames whose disc agreed, all tiers so far
     for s in secs:
         files = tiers[s]
         lums, sats, bayers = {}, {}, {}
@@ -5667,7 +5849,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                 # DID THE FILE REPORT A BLACK LEVEL, or did we default to zero?
                 # LibRaw always reports one, so on a camera raw the metadata has
                 # already answered it. A FITS usually does not -- and since
-                # 0.23.3 fits.py no longer accepts Siril's OFFSET card as one,
+                # 0.23.3 fits.py no longer accepts the OFFSET card as one,
                 # because there OFFSET is the sensor GAIN OFFSET SETTING and is
                 # normally 0. The difference decides how far the shared pedestal
                 # fit below may travel: a few ADU of residue after a known black
@@ -5718,7 +5900,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     ("[odd] " if _ss == "observed" else "")
                     + f"saturation level {rf.sat_level:.0f} ADU above black, from "
                     + _sw, None)
-            # THE OBSERVED CEILING FROM THE WHOLE BRACKET (TODO 0-c, lab 0.24).
+            # THE OBSERVED CEILING FROM THE WHOLE BRACKET (TODO 0-c, 0.24).
             # color_info comes from the FIRST frame opened, the shortest
             # exposure -- the one least likely to reach saturation, so the
             # observed-ceiling cross-check in RawFile could never fire there.
@@ -5999,12 +6181,29 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         # quality
         scores = {}
         centers = {}
+        _radii = {}
         for p in files:
-            cy, cx = find_center(lums[p])
-            crop, y0, x0 = crop_around(lums[p], cy, cx, min(1200, min(lums[p].shape)))
+            _d = find_disc(lums[p])
+            if _d is not None:
+                cy, cx = _d[0], _d[1]
+                _radii[p] = float(_d[2])
+            else:
+                cy, cx = find_center(lums[p])
+            crop, y0, x0 = crop_around(lums[p], cy, cx,
+                                       _intra_window(lums[p].shape, _radii.get(p)))
             scrop = sats[p][y0:y0 + crop.shape[0], x0:x0 + crop.shape[1]]
             scores[p] = sharpness(crop, scrop)
             centers[p] = (cy, cx)
+        # ONE DISC PER TIER (0.32.0). Every frame of a tier shows the same Moon at
+        # the same size. find_disc seeds from the brightest pixels; with the Moon
+        # filling most of the frame and one limb brighter (frames near a
+        # contact), it can settle on a smaller circle: R 410-490 instead of 630
+        # half-res on a test set, the centre 200 px off. A frame whose radius
+        # disagrees with the others is refitted on the limb from their disc.
+        _fix = _disc_consensus(lums, _radii, centers, files, _set_discs)
+        if _fix:
+            progress.log(f"{_exp_name(s)}: disc refitted on {len(_fix)} frame(s) whose first "
+                         f"estimate did not match the other frames' disc", None)
         # --- drop frames that are not totality ---
         #
         # A partial-phase or diamond-ring frame is a different scene: the
@@ -6067,7 +6266,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         # good at. The coarse part comes from the centres, the fine part from
         # the correlation, and the two are simply added.
         cy, cx = centers[best]
-        _sz = min(1200, min(lums[best].shape))
+        _rt = [_radii[q] for q in use if q in _radii]
+        _rt = float(np.median(_rt)) if _rt else None
+        _sz = _intra_window(lums[best].shape, _rt)
+        # how far a frame's corona can sit from where its own disc says: the
+        # Moon's motion against the Sun over the tier's time span, plus slack
+        # for the disc measurement (see _intra_guard)
+        _tsp = [_pfm_ep.get(q) for q in use]
+        _tsp = [t for t in _tsp if t is not None]
+        _tsp = (max(_tsp) - min(_tsp)) if len(_tsp) >= 2 else 0.0
+        _glim = _intra_guard_limit(_rt, _tsp, _sz)
+        _guarded = []
         ref_crop, y0, x0 = crop_around(lums[best], cy, cx, _sz)
         acc_h = lums[best].copy()
         acc_b = bayers[best].copy()
@@ -6102,9 +6311,33 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             (dy, dx), err, _mode = corona_shift(ref_crop, crop, _sref, _smov,
                                                 lock=_intra_lock)
             # put the coarse re-centring back in
-            return dy + y0 - yp, dx + x0 - xp, _mode
+            dy, dx = dy + y0 - yp, dx + x0 - xp
+            # PLAUSIBILITY GUARD (0.32.0). The corona can only sit as far from
+            # where the frame's own disc puts it as the Moon moves against the
+            # Sun in the tier's time span. A correlation far outside that has
+            # locked on nothing: on a test set with the Moon filling most of
+            # the frame, two frames came back 425 px off while their discs
+            # agreed to 22 px, and were stacked there -- several Moons. Such a
+            # frame is placed on the lunar edge instead, then on the disc.
+            _ey, _ex = cy - centers[p][0], cx - centers[p][1]
+            # only where both discs are trustworthy: each frame's radius within
+            # 2 % of the tier's (a disc found on something else must not
+            # overrule the corona)
+            _trust = (_rt is not None and _radii.get(p) is not None and _radii.get(best) is not None
+                      and abs(_radii[p] - _rt) <= 0.02 * _rt and abs(_radii[best] - _rt) <= 0.02 * _rt)
+            if _trust and _glim is not None and np.hypot(dy - _ey, dx - _ex) > _glim:
+                _bad = float(np.hypot(dy - _ey, dx - _ex))
+                (my, mx), _e2 = pc_shift(ref_crop, crop)
+                my, mx = my + y0 - yp, mx + x0 - xp
+                if np.hypot(my - _ey, mx - _ex) <= _glim:
+                    dy, dx = my, mx
+                else:
+                    dy, dx = _ey, _ex
+                _guarded.append((os.path.basename(p), 2 * _bad))
+                return dy, dx, "moon"
+            return dy, dx, _mode
 
-        # FRAME BRIGHTNESS (transparency), lab 0.24. Haze or thin cloud passing,
+        # FRAME BRIGHTNESS (transparency), 0.24. Haze or thin cloud passing,
         # extinction changing with a low Sun, a bracket cycled across totality:
         # one frame of a tier can come out dimmer than the others, and the
         # tier-to-tier solve only sees the tier's average. Every frame is
@@ -6388,6 +6621,17 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                          f"{len(_intra_res)} moved by a further "
                          f"{min(_intra_res):.2f}-{max(_intra_res):.2f} px that "
                          f"even-pixel stacking rounded away", None)
+        # each frame's disc as found (half-res; diagnostics for the guard)
+        quality[s]["frame_discs"] = {os.path.basename(q): [round(float(centers[q][0]), 1),
+                                                           round(float(centers[q][1]), 1),
+                                                           (round(float(_radii[q]), 1) if q in _radii else None)]
+                                     for q in files if q in centers}
+        if _guarded:
+            quality[s]["intra_guarded"] = {n: round(v, 1) for n, v in _guarded}
+            progress.log(f"[warn] {_exp_name(s)}: {len(_guarded)} frame(s) did not lock on the corona "
+                         f"(came out up to {max(v for _, v in _guarded):.0f} px from where their disc "
+                         f"puts them, at most {2 * _glim:.0f} px is possible), placed on the lunar "
+                         f"edge instead", None)
         if _intra:
             quality[s]["intra_shift_px"] = [round(v, 1) for v in _intra]
             quality[s]["intra_lock"] = dict(_lock)
@@ -6485,7 +6729,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         progress.log(f"tier {s:g}s: best {quality[s]['best']}, {_n_added}/{len(files)} "
                      f"frames stacked (sharpness spread x{quality[s]['spread']:.2f})",
                      0.03 + 0.37 * n_done / len(secs))
-        del lums, sats, bayers
+        lums = sats = bayers = None      # freed; the names stay for the closures above
 
     if _pfm_tiers:
         # a tier stacked per frame holds the Moon of _pfm_tref, not of its own
@@ -6558,6 +6802,18 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         progress.log(f"[warn] brightness per bracket not measured ({_e})", None)
 
     # --- cross-tier alignment: lag-1 + lag-2 phase correlation, global LS ---
+    if os.environ.get("ECLIPSEFORGE_DUMP_TIERS", "") not in ("", "0"):
+        # lab diagnostics: the tiers as the cross-tier alignment receives them
+        try:
+            np.savez(os.path.join(wd, "tiers_dump.npz"),
+                     secs=np.array(secs, float),
+                     times=np.array([float(tier_time.get(s_, np.nan)) if isinstance(tier_time, dict)
+                                     else np.nan for s_ in secs]),
+                     **{f"lum_{i}": stacks_half[s_].astype(np.float32) for i, s_ in enumerate(secs)},
+                     **{f"sat_{i}": np.asarray(sat_half[s_], bool) for i, s_ in enumerate(secs)})
+            progress.log("tiers written to tiers_dump.npz (ECLIPSEFORGE_DUMP_TIERS)", None)
+        except Exception as _e:
+            progress.log(f"[warn] tiers dump failed ({_e})", None)
     progress.log("cross-tier alignment...", 0.42)
     mid = secs[len(secs) // 2]
     # Measure the disc ONCE, here, and use its radius as the seed everywhere
@@ -6577,6 +6833,28 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         progress.log("[warn] disc edge not detected: brightness centroid and "
                      "frame-fraction radius used", None)
     S = min(crop_pc, min(stacks_half[mid].shape))
+    # LARGE MOON (0.32.0). With the Moon filling most of the frame there is
+    # little corona, and it is faint: on a test set (diameter 63 % of the short
+    # side, exposures shot in bursts over two passes) the fine-band links read
+    # the sensor instead. Measured on that run's tier stacks: three long
+    # exposures were tied to each other at (0, 0) by patch links although the
+    # coarse corona puts them 2-5 px apart, and as a group they had no link to
+    # the other exposures at all (only five cross-bracket pairs are measured),
+    # so they sat about 10 px (half-res) from where they belong. The coarse,
+    # Moon-masked link (bracket_link) on the same pairs closes its loops to
+    # 0-1 px. So from LARGE_MOON_FRAC on, every pair is linked with it, the
+    # patch links are not used, and nothing else changes. Below it this code
+    # is not entered. ECLIPSEFORGE_LARGE_MOON=off / on overrides the size test.
+    _lm_env = os.environ.get("ECLIPSEFORGE_LARGE_MOON", "").strip().lower()
+    _lm_frac = (2.0 * float(_Rseed) / float(min(stacks_half[mid].shape))) if _dm is not None else 0.0
+    _bigmoon = (not _keep_reg and _lm_env != "off"
+                and (_lm_env == "on" or _lm_frac > LARGE_MOON_FRAC))
+    if _bigmoon:
+        progress.log(f"large Moon: its diameter is {100 * _lm_frac:.0f} % of the frame's short side "
+                     f"(the special handling starts at {100 * LARGE_MOON_FRAC:.0f} %): every pair of "
+                     "exposures is linked on the coarse corona clear of both Moons", None)
+    stats["large_moon"] = {"diameter_frac": round(_lm_frac, 3), "on": bool(_bigmoon),
+                           "switch": _lm_env or None}
     _, y0, x0 = crop_around(stacks_half[mid], cym, cxm, S)
 
     # Where to put each tier's correlation window.
@@ -6996,6 +7274,10 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         else:
             _xb_all = set()
         _xb_used, _xb_failed = [], []
+        _lm_used, _lm_failed = [], []
+        _xb_gap = set(_xb_all)          # pairs shot far apart in time
+        if _bigmoon:
+            _xb_all, _xb_pairs = set(), set()       # handled pair by pair below
 
         def _moon_of(t):
             if t in _tcm:
@@ -7004,6 +7286,21 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         for lag in (1, 2):
             for i in range(len(secs) - lag):
                 _a, _b = secs[i], secs[i + lag]
+                if _bigmoon:
+                    try:
+                        _xl = bracket_link(stacks_half[_a], stacks_half[_b], sat_half[_a], sat_half[_b],
+                                           _moon_of(_a), _moon_of(_b))
+                    except Exception as _e:
+                        progress.log(f"[warn] large-Moon link {_exp_name(_a)}<->{_exp_name(_b)} "
+                                     f"failed ({_e})", None)
+                        _xl = None
+                    if _xl is not None:
+                        _lm_used.append((_a, _b, _xl[0], _xl[1]))
+                        pairs.append((i, i + lag, _xl[0], 1.0 / (_xl[1] + 0.25)))
+                        continue
+                    _lm_failed.append((_a, _b))
+                    if (_a, _b) in _xb_gap:
+                        continue        # shot far apart: no other link can be trusted
                 if (_a, _b) in _xb_all:
                     if (_a, _b) not in _xb_pairs:
                         continue
@@ -7020,7 +7317,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     _xb_used.append((_a, _b, _xl[0], _xl[1]))
                     pairs.append((i, i + lag, _xl[0], 1.0 / (_xl[1] + 0.25)))
                     continue
-                if _patch_all:
+                if _patch_all and not _bigmoon:
                     _patch_tried.add((_a, _b))
                     _wl = _wide_link(_a, _b)
                     if _wl is not None:
@@ -7035,7 +7332,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                     # was then placed with a neighbour's shift and its clipping
                     # contour printed as a ring. Linked from patches over the
                     # whole frame instead (patch_link).
-                    _wl = None if (_a, _b) in _patch_tried else _wide_link(_a, _b)
+                    _wl = None if ((_a, _b) in _patch_tried or _bigmoon) else _wide_link(_a, _b)
                     if _wl is not None:
                         _wide_used.append((_a, _b, _wl[1], _wl[2]))
                         pairs.append((i, i + lag, _wl[0], 1.0 / (_wl[1] + 0.05)))
@@ -7125,6 +7422,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             stats["align_moonfree_links"] = {"used": _mf_used, "fell_back": _mf_fell,
                                              "no_corona": _mf_none, "weak": _mf_weak,
                                              "median_shift_px": round(_md, 3) if _mf_diff else None}
+        if _bigmoon:
+            _np = sum(len(secs) - l for l in (1, 2) if len(secs) > l)
+            progress.log(f"large Moon: {len(_lm_used)} of {_np} pairs linked on the coarse corona"
+                         + (f"; {len(_lm_failed)} gave no clear match ("
+                            + ", ".join(f"{_exp_name(x)}<->{_exp_name(y)}" for x, y in _lm_failed[:6])
+                            + (" ..." if len(_lm_failed) > 6 else "") + ")" if _lm_failed else ""), None)
+            stats["align_large_moon_links"] = [[_exp_name(x), _exp_name(y), round(float(sh[0]), 2),
+                                                round(float(sh[1]), 2), round(float(d_), 2)]
+                                               for x, y, sh, d_ in _lm_used]
         if _wide_used:
             progress.log(f"cross-tier links from patches over the whole frame: {len(_wide_used)} of "
                          f"{sum(len(secs) - l for l in (1, 2) if len(secs) > l)} pairs"
@@ -7175,6 +7481,9 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             _pl_tiers = set(_wl_tiers)          # tiers tied by a patch link
         except NameError:
             _pl_tiers = set()
+        if _bigmoon:
+            # tied on the corona clear of the Moon: no prominence link either
+            _pl_tiers |= {x for x, _, _, _ in _lm_used} | {y for _, y, _, _ in _lm_used}
         try:
             cov = {s: align.signal_coverage(stacks_half[s], sat_half[s],
                                             (slice(y0, y0 + S), slice(x0, x0 + S)))
@@ -7323,6 +7632,95 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         # Every link is checked before it can enter the solve. One non-finite shift
         # or weight makes the whole least-squares problem unsolvable, and the error
         # LAPACK raises names neither the tier nor the reason.
+        # A GROUP OF EXPOSURES WITH NO LINK TO THE REST (0.32.0). Least squares
+        # hands a group that hangs together but is tied to nothing else its
+        # minimum-norm answer -- zero -- which looks like a result and is not: on
+        # a test set three long exposures sat about 10 px (half-res) off that
+        # way, without a word in the log. Such a group is now tied in with one
+        # measured link to the main network (the coarse, Moon-masked link, the
+        # nearest exposures first); if none holds it takes the shift of the tier
+        # nearest in time, and the log says so. A network that is connected --
+        # every set this was checked on -- is not touched.
+        _bridges = []
+        try:
+            def _valid(L_):
+                return [(i, j, sh, w) for i, j, sh, w in L_ if np.isfinite(w) and np.isfinite(sh).all()]
+
+            def _comps(L_):
+                par = list(range(n))
+
+                def _f(x):
+                    while par[x] != x:
+                        par[x] = par[par[x]]
+                        x = par[x]
+                    return x
+                for i, j, _, _ in L_:
+                    par[_f(i)] = _f(j)
+                return [_f(k_) for k_ in range(n)]
+            _tried = set()
+            for _round in range(n):
+                _lk = _valid(pairs + _bridges + prom_links)
+                _touch = sorted({i for i, _, _, _ in _lk} | {j for _, j, _, _ in _lk})
+                if len(_touch) < 2:
+                    break
+                _cp = _comps(_lk)
+                _sizes = {}
+                for k_ in _touch:
+                    _sizes[_cp[k_]] = _sizes.get(_cp[k_], 0) + 1
+                _main = _cp[ref] if ref in _touch else max(_sizes, key=_sizes.get)
+                _grp = {}
+                for k_ in _touch:
+                    if _cp[k_] != _main:
+                        _grp.setdefault(_cp[k_], []).append(k_)
+                if not _grp:
+                    break
+                _made = False
+                for _g in _grp.values():
+                    _cn = sorted((abs(i - j), i, j) for i in _g for j in _touch if _cp[j] == _main)
+                    _got = None
+                    for _, i, j in _cn[:6]:
+                        lo, hi = min(i, j), max(i, j)
+                        if (lo, hi) in _tried:
+                            continue
+                        _tried.add((lo, hi))
+                        try:
+                            _xl = bracket_link(stacks_half[secs[lo]], stacks_half[secs[hi]],
+                                               sat_half[secs[lo]], sat_half[secs[hi]],
+                                               _moon_of(secs[lo]), _moon_of(secs[hi]))
+                        except Exception:
+                            _xl = None
+                        if _xl is not None and np.isfinite(_xl[0]).all():
+                            _got = (lo, hi, np.asarray(_xl[0], float), 1.0 / (float(_xl[1]) + 0.25))
+                            break
+                    _names = ", ".join(_exp_name(secs[k_]) for k_ in _g)
+                    if _got is not None:
+                        _bridges.append(_got)
+                        progress.log(f"exposure group {_names} had no link to the other exposures: tied in "
+                                     f"through {_exp_name(secs[_got[0]])}<->{_exp_name(secs[_got[1]])} "
+                                     f"({_got[2][0]:+.1f}, {_got[2][1]:+.1f}) px", None)
+                        stats.setdefault("align_bridged", []).append(
+                            [_names, _exp_name(secs[_got[0]]), _exp_name(secs[_got[1]]),
+                             round(float(_got[2][0]), 2), round(float(_got[2][1]), 2)])
+                        _made = True
+                    else:
+                        _mn = [k_ for k_ in _touch if _cp[k_] == _main]
+                        if _tt_real and all(tier_time.get(secs[t]) is not None for t in _mn + _g):
+                            i, j = min(((a_, b_) for a_ in _g for b_ in _mn),
+                                       key=lambda q: (abs(tier_time[secs[q[0]]] - tier_time[secs[q[1]]]),
+                                                      abs(q[0] - q[1])))
+                        else:
+                            i, j = min(((a_, b_) for a_ in _g for b_ in _mn), key=lambda q: abs(q[0] - q[1]))
+                        _bridges.append((min(i, j), max(i, j), np.zeros(2), 1.0))
+                        progress.log(f"[warn] {_names}: no usable alignment link, shift taken from "
+                                     f"{_exp_name(secs[j])} (the group had no link to the other exposures)", None)
+                        stats.setdefault("align_floating", []).append(_names)
+                        _made = True
+                if not _made:
+                    break
+        except Exception as _e:
+            _bridges = []
+            progress.log(f"[warn] check for unlinked exposure groups failed ({_e})", None)
+        pairs = pairs + _bridges
         _links = [(i, j, sh, w) for i, j, sh, w in pairs + prom_links
                   if np.isfinite(w) and np.isfinite(sh).all()]
         _drop = len(pairs) + len(prom_links) - len(_links)
@@ -8072,7 +8470,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     #
     #                      tier factors      fitted g   limb fit rms
     #   from the CR2s      0.944 .. 1.015      ~1.00       0.95 px
-    #   Lightroom TIFFs    0.251 .. 2.328      ~1.49      10.32 px
+    #   converted TIFFs    0.251 .. 2.328      ~1.49      10.32 px
     #
     # A factor of 9.3 across the bracket where the raws give 1.08, and a limb
     # that stops being a circle -- "looks like a potato".
@@ -8513,11 +8911,12 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             _feather / 2.0, progress, advise_only=True)
         if np.isfinite(_fratio):
             stats["feather_ratio"] = round(_fratio, 4)
+            # (2026-11-16) plain info: the trial's estimator is not trusted to
+            # choose (the report says why), so the log no longer reads as advice
             progress.log(
-                ("[odd] " if _adv != _fm else "")
-                + f"merge weight: {FEATHER_NAMES.get(_fm, _fm)} (setting); trial: "
-                f"plain feather {100 * _fratio:.0f}% of leak-free at 1.02 R, "
-                f"suggests '{_adv}' (advisory)", None)
+                f"merge weight: {FEATHER_NAMES.get(_fm, _fm)} (setting); trial: "
+                f"plain feather {100 * _fratio:.0f}% of leak-free at 1.02 R "
+                f"(recorded for the report, not a recommendation)", None)
         else:
             progress.log(f"[warn] merge weight: {FEATHER_NAMES.get(_fm, _fm)} "
                          f"(setting); trial ratio not measurable", None)
@@ -8539,7 +8938,15 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     if str(colour_planes) == "auto":
         progress.log("colour planes: measuring R/B offset against G on the "
                      "lunar limb...", None)
-        _cp = measure_colour_planes(stacks_bayer, secs, demosaic_method, progress)
+        # LARGE MOON (0.31.2): an exposure whose frames were placed on the Moon
+        # one by one has no clean limb in its stack. On a test set the two
+        # shortest exposures gave the same offsets to 0.05 px (red +1.57/+1.15,
+        # blue -1.05/-0.79 px, along the dispersion direction), the third --
+        # its Moon moving 40 px across the stack -- read red +2.78/+0.14, and
+        # that one reading vetoed the correction: 3.3 px between red and blue
+        # stayed in the picture. Below LARGE_MOON_FRAC nothing changes.
+        _cp = measure_colour_planes(stacks_bayer, secs, demosaic_method, progress,
+                                    skip=(set(_pfm_tiers) if (_bigmoon and _pfm_tiers) else None))
         if _cp is not None:
             stats["colour_planes"] = {k: v for k, v in _cp.items()
                                       if not isinstance(k, int)}
@@ -8964,6 +9371,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     # that no amount of stretching can repair. The fix for the picture is a
     # shorter tier at the top of the bracket; the report says so.
     _nfill = 0
+    _nowt = None            # the filled pixels, when there are any
     if _fill_idx is not None and _fill_idx.size and _fill_rgb is not None:
         _sel = wsum.ravel()[_fill_idx] <= 0.0
         _nfill = int(_sel.sum())
@@ -8988,7 +9396,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
         return {"hdr": hdr, "wsum": wsum, "crop": (tuple(crop_origin), _kh, _kw),
                 "offset": stats.get("bracket_offset"),
                 "photometry": stats.get("photometry_applied")}
-    # THE MERGE'S OWN NOISE (TODO 1e, lab 0.24). detail.photon_floor models the
+    # THE MERGE'S OWN NOISE (TODO 1e, 0.24). detail.photon_floor models the
     # noise as C/sqrt(L) with one C from the far field, i.e. as if every pixel
     # had been exposed like the far field. Near the limb the merge is carried
     # by the SHORT tiers and holds far fewer photons than its brightness says:
@@ -8999,10 +9407,6 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     _lmerge = (0.2126 * hdr[:, :, 0] + 0.7152 * hdr[:, :, 1] + 0.0722 * hdr[:, :, 2])
     _relnoise = np.where(_lmerge > 0, np.sqrt(np.maximum(_vmerge, 0)) / np.maximum(_lmerge, 1e-12), 0.0)
     del vacc, _vmerge, _lmerge
-    try:
-        _nowt
-    except NameError:
-        _nowt = None
     # (_kh, _kw) can differ from (H2, W2) with crop_origin still (0,0) when the
     # trim is bottom/right only. The tier TIFFs were already being sliced in
     # that case while the render was not, so the two came out different sizes
@@ -9386,7 +9790,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
             neutralise_corona_colour(wd, cyf, cxf, R, stats, progress)
         except Exception as e:
             progress.log(f"[warn] corona white balance skipped ({e})", None)
-    # THE SKY, SUBTRACTED (TODO 22, lab 0.24): an additive sky plane fitted
+    # THE SKY, SUBTRACTED (TODO 22, 0.24): an additive sky plane fitted
     # with the corona's own fall-off. Where it is applied it also takes the
     # sky's gradient (the plane's tilt), so the multiplicative gradient fit
     # below is not run on top of it -- on a sky-free far field it would fit noise.
@@ -9413,7 +9817,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
     # so the profile has to describe that picture and not the one before it.
 
     # --- how well did the tiers actually land on each other? ---
-    # Photoshop's 'Variance' stack mode, as a number. Aligned tiers disagree
+    # An image editor's 'Variance' stack mode, as a number. Aligned tiers disagree
     # only where the signal is genuinely different; misaligned ones disagree in
     # a broad ring around the limb, because that is where the image gradient is
     # steepest and a sub-pixel error shows up as a large brightness difference.
@@ -9722,7 +10126,7 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                             lum.shape[0], lum.shape[1], progress)
     except Exception as _e:
         progress.log(f"[warn] prominence layer stack not built ({_e})", None)
-    del stacks_bayer, stacks_half
+    stacks_bayer = stacks_half = None    # freed; the names stay for the closures above
 
     # --- detail layers ---
     # prom_geom must be on disk BEFORE build_layers reads geometry.json. It was

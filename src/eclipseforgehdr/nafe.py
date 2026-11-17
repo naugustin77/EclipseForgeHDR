@@ -289,7 +289,7 @@ def nafe_vn(A, sigma_sp=30.0, K=128, w=0.2, gamma=3.0, noise_sigma=None,
             C[-1], [yy.ravel(), xx.ravel()], order=1,
             mode="nearest").reshape(x.shape)
         E = c_mid / np.maximum(tot, 1e-6)
-    del C
+    C = None                # freed (the name stays for _at above)
     E = np.clip(E, 0, 1).astype(np.float32)
 
     # --- output conditioning (added in 0.11.1) ---------------------------

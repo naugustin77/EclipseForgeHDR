@@ -861,8 +861,8 @@ def mgn(L, floor_map=None, scales=(1.25, 2.5, 5, 10, 20, 40),
 # width is s * r / r_max -- narrow near the limb, growing outwards. The kernel
 # therefore averages ALONG a streamer and not across it, by a margin that
 # increases with radius. The published recipe: "you'll have poor noise performance in the outer
-# corona in particular ... the difference between an image that's sharpened like
-# this and just a highpass filter in Photoshop is that polar transformation."
+# corona in particular"; what sets this apart from a plain high-pass filter is
+# the polar transformation.
 #
 # The ACHF note below measured a DIFFERENT kernel -- Druckmullerova's, whose
 # arc-length term makes the tangential width a constant physical distance, which
@@ -2601,7 +2601,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
         progress.log(f"ring statistics follow the limb (oval +-{np.abs(_dr).max():.1f} px), "
                      f"a circle beyond {LIMB_REL_FADE[1]:g} R", None)
 
-    # THE MERGE'S OWN NOISE (TODO 1e, lab 0.24): where the propagated noise of
+    # THE MERGE'S OWN NOISE (TODO 1e, 0.24): where the propagated noise of
     # the merge is larger than C/sqrt(L) -- near the limb, where the short tiers
     # carry the merge -- it is the floor. See merged_noise_floor.
     nf, _ = merged_noise_floor(wd, lum, r, R, progress=progress, lstats=lstats)
@@ -2736,7 +2736,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
     # its own now has holes where the prominences are.
     _pm = prominence_mask(wd, geo, (H, W), r, R, progress=progress)
     valid_stat = valid if _pm is None else (valid & ~_pm)
-    # PIXELS NO TIER COULD HOLD (TODO 0-b, lab 0.24): filled from the shortest
+    # PIXELS NO TIER COULD HOLD (TODO 0-b, 0.24): filled from the shortest
     # tier as a lower bound, not a measurement -- left out of the statistics
     # (3 px margin). Measured on one test crop: half the ring power.
     _nwp = os.path.join(wd, "nowt_mask.npy")
@@ -3402,7 +3402,7 @@ def build_layers(wd, progress, denoise="off", earthshine=False,
         # ...and how much of it survives the disc mask. A prominence flagged
         # UNDER the mask contributes nothing to the picture, so a report that
         # counts it is telling the user they have prominences they cannot see.
-        # Measured on an imported HDR (a Siril stack of 327 frames):
+        # Measured on an imported HDR (a stack of 327 frames from another stacking program):
         # 60 px flagged, every one of them between 0.97 and 1.01 R -- at or
         # inside the limb -- and 0 px visible. Beyond 1.02 R the highest
         # R/(G+B)/2 anywhere out to 1.3 R is 1.33 against a 1.35 threshold, so
@@ -3760,8 +3760,8 @@ def _pellett(wd, lum, r, cy, cx, R, disc, blur_deg=6.0, na=2880, outer_blur=None
     ATTRIBUTION IS UNVERIFIED. The report credits "Druckmuller 2009, ApJ 706,
     1605, sec. 5.1, after Pellett". ApJ 706, 1605 is the phase-correlation
     paper, and neither the 2006 paper nor the thesis attributes this filter to
-    Pellett -- both trace it to Espenak (2000), from Photoshop's Radial Blur /
-    Spin. That paper is not in the literature folder, so this is flagged rather
+    Pellett -- both trace it to Espenak (2000), from an image editor's radial
+    (spin) blur. That paper is not in the literature folder, so this is flagged rather
     than corrected.
     """
     from skimage.transform import warp_polar

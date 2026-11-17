@@ -1,6 +1,6 @@
 """Repeated brackets: which frames were shot together (2026-10-14).
 
-A capture program -- SetNC, Umbra, Solar Eclipse Workbench -- or a patient
+A capture program -- an eclipse automation app -- or a patient
 photographer runs the same exposure ladder again and again through totality.
 Typical sets run from a few brackets of a dozen or more exposures in about
 a minute and a half to fifteen brackets over about 4 minutes.
@@ -14,16 +14,15 @@ downstream by itself; the pipeline records the result and reports it, and the
 per-bracket steps (photometry, Moon, drift) build on it.
 
 THE RULE. Walk the frames in shooting order. A bracket ends when an exposure
-time comes round again that the bracket already holds, or when the gap to the
-next frame is far longer than the usual interval. That is order-free -- it
+time comes round again that the bracket already holds (after other exposures:
+a burst of one exposure is one step), or when the gap to the next frame is far
+longer than the usual interval. That is order-free -- it
 works for ladders shot short-to-long, long-to-short or back and forth -- and
 needs no knowledge of the ladder in advance.
 
-A set shot TIER BY TIER (all 1/500 s frames, then all 1/250 s, ...) gives
-"brackets" of one exposure each under that rule. That is not a repeated
-bracket, so it is recognised and reported as a single pass: repeated brackets
-need at least two of them, holding a median of at least three distinct
-exposures each.
+A set shot TIER BY TIER (all 1/500 s frames, then all 1/250 s, ...) is one
+pass under that rule: no exposure comes round again. Repeated brackets need at
+least two runs holding a median of at least three distinct exposures each.
 """
 import os
 import re
@@ -66,9 +65,17 @@ def find_brackets(paths, sec, epoch, gap_factor=5.0, gap_min_s=10.0):
     gap_lim = max(gap_min_s, gap_factor * med_gap)
 
     groups, cur, seen = [], [], set()
+    last = None
     for i, p in enumerate(order):
         k = _key(sec[p])
-        split = k in seen
+        # A BURST IS ONE STEP (0.32.0). Several frames of one exposure in a
+        # row are one rung of the ladder, not a new bracket: on a test set shot
+        # in bursts of 2-5 frames per exposure, every second frame started a
+        # "bracket", the set read as shot exposure by exposure, and the Moon
+        # was not placed per frame although each exposure held frames 50 s
+        # apart. A bracket ends when an exposure comes round AGAIN after others.
+        split = k in seen and k != last
+        last = k
         if not split and have_t and i > 0 and gaps[i - 1] > gap_lim:
             split = True
         if split and cur:

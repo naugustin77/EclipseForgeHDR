@@ -12,8 +12,8 @@ can only be confirmed by test data that does not appear is a bug nobody is watch
      bracket then had every longer tier declared clipped through its inner
      corona and dropped from the merge, silently.
 
-  2. RGB FITS IMPORT. read_fits returns planes-first (3, H, W) -- what Siril
-     and PixInsight write. The guard tested shape[2], which is the WIDTH, so it
+  2. RGB FITS IMPORT. read_fits returns planes-first (3, H, W) -- what stacking
+     programs write. The guard tested shape[2], which is the WIDTH, so it
      passed, and a[:, :, :3] produced a (3, H, 3) array that failed much later
      as "could not find the lunar limb".
 

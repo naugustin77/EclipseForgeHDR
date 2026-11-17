@@ -326,7 +326,7 @@ pipeline. It uses:
   a different and arguably better matched filter for this. Independent
   confirmation of item 1.
 - **Linear fits of each exposure to a reference** for the HDR combine — the
-  same family as LDIC and as the talk's PixInsight LinearFit (§6), and confirmation that
+  same family as LDIC and as the talk's LinearFit (§6), and confirmation that
   a per-image affine transform is the standard approach rather than one scalar.
 - **Enhanced unsharp masking with partial convolution**, kernels excluding
   Moon-contaminated pixels — we do this in MGN already.
@@ -356,12 +356,12 @@ Source: "Advanced Solar Eclipse Photography" (conference talk, on YouTube; full
 reference in the README). Described below in our own words; nothing from it is reproduced
 here.
 
-The talk's combine is PixInsight `LinearFit` of each exposure against its
+The talk's combine is a `LinearFit` of each exposure against its
 neighbour, plus a trapezoid weight. Three things about it that the earlier
 summary missed:
 
 - The fit returns a **slope and an offset**, not a slope alone.
-- PixInsight's `LinearFit` is **per channel**. Three slopes, three offsets.
+- That `LinearFit` is **per channel**. Three slopes, three offsets.
 - The reference is the **longest** exposure, and the chain runs 2→1, 3→2, 4→3 rather
   than fitting everything to the reference, accepting the risk of propagating an
   error down the chain because adjacent frames overlap best.

@@ -70,9 +70,10 @@ OPTIONS = [
                "at this position angle (from solar north when the star match gives it)."),
     dict(id="turn", label="Solar north up", type="check", default=True,
          title="Turns the frames so that solar north is up (needs the star match or north by hand)."),
-    dict(id="pace", label="Pace", type="select", default="normal",
-         values=[["slow", "slow (0.8 s per bracket)"], ["normal", "normal (0.45 s)"], ["fast", "fast (0.25 s)"]],
-         title="How long each bracket stays in the loop; between two brackets a short dissolve."),
+    dict(id="pace", label="Speed", type="select", default="0.2",
+         values=[[x, f"{x} s per bracket"] for x in ("0.1", "0.15", "0.2", "0.3", "0.45", "0.8")],
+         title="How long each bracket stays in the loop (GIF and MP4); between two brackets a short dissolve. "
+               "Shorter: the movement reads as motion; longer: each bracket can be looked at."),
     dict(id="size", label="Size", type="select", default="1200",
          values=[["800", "800 px"], ["1200", "1200 px"], ["1800", "1800 px"]],
          title="The whole corona: the loop's size (square). Quadrants and zooms: the largest size; smaller "
@@ -85,7 +86,15 @@ OPTIONS = [
 ]
 NEEDS_RERUN = ("the brackets on disk are reduced copies from an older run: stack again in the mode "
                "'HDR per bracket' to keep them at full size")
+# seconds per bracket; the old names still read from saved settings (2026-11-17)
 PACE = {"slow": 0.8, "normal": 0.45, "fast": 0.25}
+
+
+def _pace(v):
+    try:
+        return min(2.0, max(0.05, float(v)))
+    except (TypeError, ValueError):
+        return PACE.get(v, 0.2)
 SIGMA = {"fine": 0.006, "normal": 0.012, "coarse": 0.025}       # high pass, in solar radii
 CONTRAST = {"low": 7.0, "normal": 5.0, "high": 3.5}             # +- this many robust sigma to black/white
 
@@ -541,8 +550,10 @@ def motion(wd, geo, folder, v, out_base, prog=None, preview=False):
         return st0, [], f"preview: {len(frames)} of the brackets"
     # the loops: hold, then a short dissolve into the next, back to the first
     fps = 20
-    hold = max(1, int(round(PACE.get(v.get("pace", "normal"), 0.45) * fps)))
-    nx = max(1, int(round(0.12 * fps)))
+    hold_s = _pace(v.get("pace", "0.2"))
+    hold = max(1, int(round(hold_s * fps)))
+    # the dissolve never longer than half the hold (0.12 s at most)
+    nx = max(1, int(round(min(0.12, 0.5 * hold_s) * fps)))
     paths = []
     still = None
     for vi, (nm, dy, dx, hf, Sv) in enumerate(views):

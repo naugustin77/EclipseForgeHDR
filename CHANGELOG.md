@@ -5,6 +5,121 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.32.0
+
+**Re-stack once:** 0.31.0 caches are not reused (the stack changed for sets
+shot in bursts and for very large Moons). The Moon layer is rebuilt on the next
+Start.
+
+**Desktop apps**
+- A Mac app (Apple silicon and Intel, as a drag-and-drop .dmg) and a Windows
+  installer, built for every release on GitHub and attached to the release
+  page. No Python needed. The version is in the window title and the file
+  names. The apps are not signed: macOS asks once under Privacy & Security
+  (Open Anyway), Windows SmartScreen once (More info, Run anyway).
+- packaging/build_app.py builds the same app on your own machine.
+
+**Simpler first contact**
+- Tab 2: "Settings for this set" lists what the pre-check of the frames set.
+  Those settings (Tier combine for one frame per exposure, Tiers by measured
+  brightness for mixed ISO) are now applied by themselves, on controls still
+  at their defaults; a choice made by hand always wins and is named. Loading
+  another folder puts the pre-check's settings back first, so nothing is
+  carried over from another folder. The twenty stacking controls fold under
+  "Expert settings"; saving and loading a processing recipe moved inside.
+- Tab 3: the look picker and six plain controls (Brightness, Corona reach,
+  Detail, Colour temperature, Earthshine, Prominences) on top; every other
+  group folds under "Show all controls", remembered. The first result of a
+  session opens on the look Clean Steel M4 ("EFHDR as loaded" stays in the
+  list). Values, resets and saved settings are unchanged.
+- All looks: every look on your own picture, side by side (a quick draft
+  each, cut to the corona round the Moon); a click puts that look on.
+- A/B: the first click keeps the look as A; after changing the look each
+  click switches between A and the look you have now. Shift-click keeps a
+  new A.
+- Undo and Redo for the look: buttons under the picture, Ctrl+Z /
+  Ctrl+Shift+Z (Cmd on a Mac). A new result starts a new history.
+- Observing site and time: a coloured line says at a glance what is set
+  (green: position, date, time, inside the path, length of totality; amber:
+  what to check; grey: not set), a chip says the same when the section is
+  folded, and a small map shows the place with the path of totality (a click
+  opens the map picker).
+- Copy log and Save log in the Run box; the log text is selectable again.
+- The status line shows its whole text (two lines, full text on hover). After
+  an export, an Extras job or a crop the Start button no longer stays on
+  "Running…"; while such a job runs it says which job it is.
+- Start screen: all five steps shown. A reloaded browser tab gets the folder,
+  the result or the running job back.
+
+**Picture check**
+- New module ringguard.py: rings round the Moon measured on the picture as
+  the export renders it (full resolution round the Moon, out to 2.2 R), a few
+  seconds after the look stops changing; shown in tab 3 and in tab 4. When it
+  finds rings it renders once more with the look's detail off and says
+  whether the look makes them or the stack holds them. It takes turns with a
+  full-size export or Extras job, so two full-size renders never run at once.
+
+**Pre-check (How this was shot)**
+- Sharpness measured on the raw files: each raw is read once, the limb fitted
+  and the width of the Moon's edge measured; frames clearly wider than the
+  sharp ones are proposed off, with the measured width on the card. A frame
+  is compared with the sharpest frame of its own exposure or a longer one (the
+  edge widens with the exposure), so long exposures are no longer proposed off
+  just for being long. An exposure is never emptied; contact frames are left
+  alone.
+- Frames an earlier pre-check switched off are measured again and offered
+  back ("Switch N frames back on").
+- "Check again" runs the pre-check afresh.
+- The frames panel says why each frame is off ("by you", or the pre-check's
+  reason).
+- Blended edge is no longer suggested before a run; the tip lives in "Check
+  your result", only when the run measured the exposures disagreeing at the
+  limb.
+
+**Stack**
+- Bursts: frames of one exposure in a row are one step, and a bracket ends
+  when an exposure comes round again after others. Sets shot in bursts over
+  several passes are now read as brackets, so the Moon is placed per frame.
+- The Moon's speed is measured only on exposures whose frames span enough
+  time.
+- Disc finder: more than one seed (the brightest pixels, the frame centre,
+  the strongest edges), a circle counts only when it is dark inside and bright
+  outside, and each frame's disc comes from a limb fit. One disc per
+  exposure: a frame whose disc disagrees with its exposure is refitted.
+- A Moon that fills most of the frame: the window for registering frames of
+  one exposure reaches 1.6 R; a frame whose corona shift is further from its
+  disc than the Moon can move is placed on the lunar edge; from a Moon
+  diameter of half the frame's short side the exposures are linked on the
+  coarse corona with the Moon masked; colour planes are measured on exposures
+  stacked on the corona; a lone blurred frame next to a sharp exposure is
+  proposed off. None of this acts below that size.
+- Every set: a group of exposures with no link to the rest is tied in with
+  one measured link, or takes the shift of the nearest exposure in time with a
+  warning.
+- Prominence cores: where H-alpha leaves the merge's green at zero the corona
+  is filled, so no black spots inside prominences. The short-exposure stack
+  blends into the merge where its coverage is thin.
+- Run note "Sky below black" needs 0.5 % of the samples.
+
+**Moon layer (earthshine)**
+- Detail out to the rim: the inner disc as before, the edge from a second
+  pass that runs out to 0.995 R with what runs along the limb taken off; no
+  dark band along the rim, no rim band opposite bright patches.
+- Compact dark or bright patches along the inside of the limb fade softly to
+  the plain disc instead of showing as holes.
+- "Not needed: earthshine confirmed." The layer takes about twice as long.
+
+**Extras**
+- Corona in motion: the speed is on the card, 0.1–0.8 s per bracket (default
+  0.2 s); the dissolve is never longer than half the hold. Saved settings with
+  the old names still read.
+- The Limb panorama is no longer offered: the polar map shows the corona
+  unrolled already.
+
+**Code**
+- No lint errors; other programs are named by kind (image editor, stacking
+  program, astronomy software).
+
 ## 0.31.0
 
 **Re-stack once:** 0.30.x caches are not reused (the stack changed: rejection,
@@ -476,7 +591,7 @@ and in the prominence short-frame stack.
 - **Alignment setting** (Automatic / Always align / Keep frames as they are),
   both paths. Automatic keeps a set whose frames a registering program already
   shifted (each carries a black border of its own width) and aligns anything
-  else. On a Siril-registered FITS test set a re-alignment had moved the 6.5 s frame 6 px
+  else. On a FITS test set registered by a stacking program a re-alignment had moved the 6.5 s frame 6 px
   off a registration that holds to about 2 px. The cache is compared on the
   decision, so an older stack is reused only when it was made the same way.
 - **Tiers: By measured brightness.** Frames are chained by the slope of each
@@ -492,7 +607,7 @@ and in the prominence short-frame stack.
 - **FITS clipping per plane:** a 3-plane FITS's ceiling is found per plane and
   per frame (a spike in the histogram); a pixel clipped in any plane is set to
   the frame's ceiling in the re-mosaiced CFA so the saturation test flags it.
-  Siril's planes clipped at 59889 / 65520 / 65535, and clipped red had entered
+  The stacking program's planes clipped at 59889 / 65520 / 65535, and clipped red had entered
   the merge.
 - **Prominence short-frame stack:** the reference loses the same clipped
   pixels as each frame before they are matched (matches 0.81-0.91 instead of
@@ -662,7 +777,7 @@ masks 15) and run from the cached merge without a re-stack.
 - **Denoise defaults to Off.** The detail layers normalise by local spread, so
   removing the 1–2 px grain makes them amplify the 4–16 px scales (+20–35 %
   blotch noise in the finished picture); a dedicated denoiser on the export
-  does better (measured with NoiseXTerminator: a third fewer sky blotches).
+  does better (measured with a noise-reduction plug-in: a third fewer sky blotches).
   Changing Denoise now rebuilds only the layers from the cached merge.
 - **NAFE removed.** With Denoise Off its rank equalisation turned noise near
   the limb into 4-sigma blobs (18 between 1.02 and 1.47 R on the reference set),
@@ -725,7 +840,7 @@ the requested value (or "no key differs -- please report this").
 **New export option: prominence layer (RGBA TIFF).** Tick "Also export
 prominence layer" and the export writes `<name>_prominences_16bit.tif` beside
 the composite: same grid, size (full/50 %) and orientation, the prominences in
-colour and their mask in the alpha channel, for blending in Photoshop
+colour and their mask in the alpha channel, for blending in an image editor
 (Normal + Blend If). Composite view only. Why a layer: every attempt to merge
 the sharp prominence stack into the composite failed on the picture (clipped
 cores, flat red blobs). How it is built (promlayer.py), each step measured on
@@ -902,7 +1017,7 @@ shows it. The noise controls added along the way are kept as opt-ins.
   weight 0 (0.5 + 0.75·k·E) is overlaid on the composite at opacity = slider:
   multiply below mid grey, screen above, bounded, so nothing clips and the
   added contrast tapers toward white — what a high-pass layer does in
-  Photoshop. The base stretch now affects the view alone.
+  an image editor. The base stretch now affects the view alone.
 - **Defaults reset to what the reference set settled on**, judged the way
   the talk shows them: masks on mid grey, half size. Radial smoothing and gate
   OFF (`ECLIPSEFORGE_HILL_RADIAL=2` turns both back on), Noise threshold 0,
@@ -1100,8 +1215,8 @@ Its limit is stated in the report and in the README: one number per frame cannot
 follow a sky that varies across the frame, so on a wide field expect colour
 blotches in the far outer corona. Judge it by eye.
 
-**A FITS black level is no longer read from `OFFSET`.** In Siril, INDI and
-SharpCap headers `OFFSET` is the sensor GAIN OFFSET SETTING — a configuration
+**A FITS black level is no longer read from `OFFSET`.** In the headers of common capture and
+stacking programs `OFFSET` is the sensor GAIN OFFSET SETTING — a configuration
 number, normally 0 — not a pedestal in ADU. Reading it as a black level told the
 rest of the pipeline the black level was KNOWN and zero when it was unknown and,
 on one test set, 142 ADU. `PEDESTAL`, `BLKLEVEL` and `BLACKLEV` are still
@@ -1708,7 +1823,7 @@ That warning would have identified this in one line instead of an afternoon.
   TIFFs now count only when there is no raw or FITS file in the folder, so the
   TIFF-bracket path still works.
 - **ICC v4 parametric curves were unreadable**, so every profile macOS,
-  Windows 10+, Lightroom and Affinity actually embeds fell through to "this
+  Windows 10+ and common photo editors actually embed fell through to "this
   image carries no colour profile" and the only way past it was to rename the
   file. `para` types 0-4 are parsed; the sRGB curve is recognised by its
   parameters rather than by name.
@@ -1747,7 +1862,7 @@ That warning would have identified this in one line instead of an afternoon.
 - **Export tagging.** The sRGB profile is an RGB profile and was being written
   into grayscale TIFFs and mode-L JPEGs; it now goes only on RGB. The 16-bit
   PNG carried no profile at all — the exact untagged case the tagging exists to
-  prevent, and the one PixInsight reads as linear — so an `iCCP` chunk is
+  prevent, and the one astronomy software reads as linear — so an `iCCP` chunk is
   inserted after IHDR.
 - **A fully saturated crop scored NaN** for sharpness, so "best" and "best half"
   ordered frames by an arbitrary comparison over NaN and looked like they had
@@ -1898,7 +2013,7 @@ The attenuation is measured per work directory, since it depends on plate scale.
   `copy=True`, here and in `neutralise_corona_colour`, which only worked by
   statement order.
 - **RGB FITS import produced a (3, H, 3) array.** `read_fits` returns
-  planes-first — what Siril and PixInsight write — and the guard passed because
+  planes-first — what stacking programs write — and the guard passed because
   `shape[2]` is the width. Failed later as "could not find the lunar limb".
 - **A rejected Start hung the page forever.** `startRun` threw the reply away,
   so a bad import path left the spinner running with Start disabled and no error
@@ -2098,11 +2213,11 @@ the existing stack rather than re-stacking.
 
 **VNG comes off the toolbar.** Tried on the reference bracket: no visible
 advantage over Malvar-He-Cutler, and the colour runs into the limb slightly
-less smoothly -- which is what docs/PIXINSIGHT_COMPARISON.md predicted, since
+less smoothly -- which is what a comparison with astronomy software predicted, since
 VNG is gradient-directed and the steepest gradient in the frame is the limb.
 
 The implementation stays. It is verified against LibRaw to 1.5 counts in 65535
-over 44 million pixels, and matching PixInsight's interpolation is the whole
+over 44 million pixels, and matching other software's interpolation is the whole
 reason it exists, so it is now selected by dropping a file named
 `vng_demosaic.txt` in the folder of raws -- the same way the linear-fit photometry
 chain is selected. Off the toolbar, out of the way, still there.
@@ -2337,7 +2452,7 @@ about 8x at the limb. Measured on an impulse at two radii, sigma_radial 8.00 px
 at both, sigma_tangential 1.07 px at 0.12 r_max and 5.92 px at 0.74 r_max,
 against 0.98 and 5.90 predicted. That is the anisotropy the earlier note said
 was not there, and it is why the talk says the polar transform is the whole
-difference between its result and a Photoshop high-pass.
+difference between its result and an image editor's high-pass.
 
 Implementation notes: partial convolution as (w.f * C) / (w * C) with the same
 kernel on the mask, per the talk's slide; only the blurred component makes the polar
@@ -2411,7 +2526,7 @@ Malvar path's time on a full frame.
 
 Malvar-He-Cutler stays the default: it has lower interpolation error, and it is
 what every render up to 0.22.62 was made with. VNG is there so a render can be
-compared with PixInsight's on equal terms.
+compared with astronomy software's on equal terms.
 
 ### Also
 
@@ -2787,7 +2902,7 @@ gain in outer contrast, cancelled.
 The stack already records what it left behind: the grey pedestal and the sky's
 own pixel noise, the latter from neighbouring-pixel differences so the corona's
 gradient cannot inflate it. The black point now comes from those two numbers,
-three sigma below the pedestal. Same shape of rule as PixInsight's STF
+three sigma below the pedestal. Same shape of rule as the screen stretch of astronomy software
 autostretch, which clips 1.25 sigma below the median; ours is looser because
 nothing here may crush sky to black.
 
@@ -2830,7 +2945,7 @@ deficit over half the frame; reported as an olive disc. Tuning the weights
 could not have fixed it.
 
 Subtract the sky properly and that error lands on a part of the picture that
-is now nearly black. This is why PixInsight's DBE is subtractive and needs no
+is now nearly black. This is why background extraction in astronomy software is subtractive and needs no
 masks, and this follows it: a smooth model per channel, fitted beyond the
 corona, taken out of the merged image before any layer is built.
 
@@ -3105,7 +3220,7 @@ The scale now comes from the file's declared type — full scale for its
 bit depth for integers, and for floating point the established 0-to-1
 convention, falling back to the image's own maximum if it exceeds that.
 
-Files written by PixInsight were never affected: its TIFF and FITS
+Files written by astronomy software were never affected: its TIFF and FITS
 readers normalise floating-point data to 0–1 on the way out, so what it
 writes always took the correct branch. If you have previously imported a
 floating-point image, or a very dark 16-bit one, clear that folder's
@@ -3114,7 +3229,7 @@ cache once so it is re-read.
 ## 0.22.44
 
 Corrects how the new photometric mode fits its line, after reading
-PixInsight's own documentation rather than assuming.
+the method's own documentation rather than assuming.
 
 `LinearFit` is **not** least squares. Its developer reference describes it
 as "robust straight line fitting by minimization of mean absolute
@@ -3132,7 +3247,7 @@ oddities are stars, prominences and alignment residue along steep edges
 as documented.
 
 The brightness limits are 0 and 0.92 of full scale, confirmed against a
-real PixInsight installation rather than taken from documentation —
+real installation rather than taken from documentation —
 neither documentation page states them. For comparison, the merge weight
 here already falls to zero above 0.97 of saturation and begins its
 rolloff at 0.87, so the published limit sits between the two.
@@ -3149,7 +3264,7 @@ the app has always used. **Off by default — a normal run is unchanged.**
 
 The app corrects each exposure with a single brightness factor, plus one
 additive offset shared by the whole bracket. The established method, as
-used in PixInsight and described in a published HDR eclipse workflow, instead
+described in a published HDR eclipse workflow, instead
 fits a straight line between each pair of neighbouring exposures — a
 slope *and* an offset, for each colour channel separately, with outlier
 rejection — and chains those from the longest exposure. That workflow states that
@@ -3367,7 +3482,7 @@ products are identical to 0.22.33's, so neither is reusable.
 ## 0.22.34
 
 Identifies the ring artifact's source: set C (a body LibRaw reports
-under a different model name from the one on the camera) run through 0.22.33 from CR2s and Lightroom DNGs of the
+under a different model name from the one on the camera) run through 0.22.33 from CR2s and raw-converter DNGs of the
 same nine frames:
 
 ```
@@ -3871,7 +3986,7 @@ clipping tier loses a feather-sigma-wide band inside its contour.
 
 ## 0.22.18
 
-Reprocessing set C from Lightroom TIFF
+Reprocessing set C from raw-converter TIFFs
 exports instead of raw files produced a non-round sun/moon and
 non-functioning flats — one cause, unflagged through nine pages of
 plausible numbers.
@@ -3881,7 +3996,7 @@ Same nine frames, both ways:
 ```
                      tier factors      photometric links   limb fit rms
 from the CR2s        0.944 .. 1.015    no systematic tilt     0.95 px
-Lightroom TIFFs      0.251 .. 2.328    7 of 7 leaning up     10.32 px
+Converter TIFFs       0.251 .. 2.328    7 of 7 leaning up     10.32 px
 ```
 
 A factor of 9.3 across the bracket where the raws give 1.08, and a limb
@@ -5168,7 +5283,7 @@ printed `disc mask at R+0.0 px` when it was actually R+22.0.
 **Prominence gate.** Unfixed by the above: 60 px flagged, all between
 0.97-1.01 R, under the mask, invisible. Beyond 1.02 R the highest
 R/(G+B)/2 to 1.3 R is 1.33 against a 1.35 threshold — no excess left.
-The embedded Siril header explains why: 327 frames, background
+The embedded header explains why: 327 frames, background
 neutralization, colour calibration, two GHS stretches (pivot 0.001
 amount 145.65, pivot 0.079 amount 7.57), two background subtractions,
 full-strength SCNR. The report now states this instead of implying 60
@@ -5488,7 +5603,7 @@ meaningless answer.
 **Import of a finished HDR.** Pointing a new box at one 16-bit TIFF or
 FITS runs the disc fit, sky-gradient fit and every detail layer,
 exporting exactly as a stack does. The tone curve is read from the file,
-not guessed: a Photoshop mean stack of this app's own exports measured
+not guessed: an image editor's mean stack of this app's own exports measured
 corona log-log slope -1.72 against -3.38 scene-linear (ratio 0.510 vs
 ~0.45 for sRGB); inverting the embedded ICC profile brought it to -3.17,
 within
@@ -5624,8 +5739,7 @@ the atmosphere; a radial model explains 0.0% of it on the reference set.
 ## 0.12.0
 
 Folders of FITS frames now work as input, for capture software that
-writes it instead of camera raw — INDI/EKOS, SharpCap, N.I.N.A.,
-FireCapture. Colour (CFA + `BAYERPAT`), monochrome, and debayered
+writes it instead of camera raw (astronomy capture programs). Colour (CFA + `BAYERPAT`), monochrome, and debayered
 3-plane cubes are supported; Bayer pattern rolls to RGGB as with camera
 raw, and `XBAYROFF`/`YBAYROFF` are respected. No new dependency:
 `astropy.io.fits` is used if installed, then `fitsio`, then a built-in
@@ -5928,7 +6042,7 @@ except where noted.
 
 **Colour management**
 
-- Composite export carried no ICC profile; PixInsight decoded it wrong.
+- Composite export carried no ICC profile; astronomy software decoded it wrong.
   16-bit/8-bit TIFF and JPEG exports now embed sRGB.
 - Black level now subtracted per channel, not as a four-channel mean; the
   leftover offset had landed on the outer corona after white-balance gain.
@@ -5992,7 +6106,7 @@ disc mask radius.
 ## 0.9.9
 
 - Tier TIFF export now embeds an ICC profile — sRGB by default, or scene-linear
-  via a PixInsight checkbox. Untagged linear data was decoded as sRGB, clipping
+  via a checkbox in astronomy software. Untagged linear data was decoded as sRGB, clipping
   histograms.
 - Fixed the export normaliser: it divided by sensor saturation after white
   balance, after the colour matrix pushed red/blue above it, clipping
@@ -6023,7 +6137,7 @@ disc mask radius.
   added to the build filename, an efhdr alias added, version now dynamic from
   one source (had drifted: 0.7.1 vs 0.8.0).
 - Export of aligned exposure tiers as 16-bit TIFFs, for stacking or blending in
-  PixInsight, Photoshop or Affinity.
+  astronomy software or an image editor.
 
 ## 0.9.3
 
@@ -6300,7 +6414,7 @@ together in one weighted least-squares network:
   A prominence link is used only while its anchors agree with each other.
 
 Alignment quality is measured and reported: tier-to-tier coefficient of
-variation in the limb and corona annuli (the same view as Photoshop's
+variation in the limb and corona annuli (the same view as an image editor's
 "Variance" stack mode), the width of the disagreement rim just outside the
 limb, and the 20-80% transition width of the merged limb.
 

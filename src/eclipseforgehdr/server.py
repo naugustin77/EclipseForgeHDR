@@ -47,6 +47,22 @@ def _busy():
     return None
 
 
+# ONE FULL-SIZE RENDER AT A TIME (2026-11-17). A full-size render of a 24 MP
+# set peaks at about 5.6 GB; an export or an Extras product started while the
+# picture check was rendering made two of them at once, and that took an 8 GB
+# machine out of memory (the app vanished). The check, the export and the
+# Extras now take turns: a job waits for a running check, and the check is
+# not started while a job runs.
+_HEAVY = threading.Lock()
+
+
+def _heavy(fn):
+    def run():
+        with _HEAVY:
+            fn()
+    return run
+
+
 def _gui_html():
     here = os.path.dirname(__file__)
     return open(os.path.join(here, "gui.html"), encoding="utf-8").read()
@@ -80,7 +96,11 @@ def app_icon():
 def version():
     from . import __version__
     from .brand import APP_NAME, LAB
-    return jsonify({"version": __version__, "app": APP_NAME, "lab": LAB})
+    # (2026-11-16) the page asks for this on every load: a reload of the tab
+    # gets the folder (and the finished result, or the running job) back
+    return jsonify({"version": __version__, "app": APP_NAME, "lab": LAB,
+                    "folder": STATE.get("folder"), "ready": STATE.get("layers") is not None,
+                    "busy": bool(_busy())})
 
 
 # ---------- file browser ----------
@@ -182,8 +202,12 @@ def set_folder():
         return jsonify({"ok": False, "error": f"not a folder: {folder}"}), 400
     from .raw import list_raws
     raws = list_raws(folder)
+    # "keep": the page was reloaded on the folder already open; the result in
+    # memory stays, so the page can show it again without a Start
+    _keep = bool(request.json.get("keep")) and STATE.get("folder") == folder
     STATE["folder"] = folder
-    STATE["layers"] = None
+    if not _keep:
+        STATE["layers"] = None
     # "cached" has to mean Start will actually reuse it, and Start also checks
     # the build. Reporting a stale-version cache as reusable was a small lie.
     from . import __version__
@@ -322,8 +346,10 @@ def frames_api():
                 n = it.get("name")
                 if n and not str(n).startswith("tier "):
                     why = ("" if it.get("used") else
-                           ("no match, corr %.2f" % it["corr"]) if it.get("corr") is not None else
-                           ("error: " + str(it["error"])) if it.get("error") else "Moon not found")
+                           ("last run: its prominences did not match the picture's (match %.2f, 0.30 needed)"
+                            % it["corr"]) if it.get("corr") is not None else
+                           ("last run: error: " + str(it["error"])) if it.get("error") else
+                           "last run: the Moon's edge was not found in it")
                     prom[n] = (bool(it.get("used")), why)
         except Exception:
             pass
@@ -388,7 +414,7 @@ def frames_api():
                 pr = prop.get(n) if (role == "lights" and home and k not in sel["off"]) else None
                 frs.append({"key": k, "name": n, "sec": sec, "ts": ts,
                             "home": home, "moved": bool(home and role != "lights"),
-                            "prop": pr,
+                            "prop": pr, "why": (sel.get("why") or {}).get(k),
                             "state": ("off" if k in sel["off"] else
                                       "force" if (forceable and k in sel["force"]) else "auto"),
                             "status": status, "note": note,
@@ -457,6 +483,12 @@ def frames_set():
         rc = {str(k): str(v) for k, v in (data.get("role") or {}).items() if k in idx}
         if rc:
             n_moved = _fs.set_roles(f, rc)
+        # the reason for each change, shown on the card: the page sends the
+        # survey's reason when its proposal is applied, "by you" otherwise
+        wy = data.get("why") or {}
+        touched = [k for k in list((data.get("set") or {})) + list(rc) if k in idx]
+        if touched:
+            _fs.set_why(f, {k: str(wy.get(k) or "") for k in touched})
         return jsonify({"ok": True, "n_off": len(off), "n_force": len(force - off), "n_moved": n_moved})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -559,9 +591,11 @@ def checklist():
         # 3. flats, from the field if one is typed there
         fq = (request.args.get("flat") or "").strip()
         fd = None if fq.lower() in ("off", "none") else (fq if fq and os.path.isdir(fq) else find_flat_dir(f))
-        add("ok" if fd else "warn", "Flats",
+        # (2026-11-16) information, not a warning: most sets have no flats, and
+        # the only "!" in the checklist made a normal folder look wrong
+        add("ok" if fd else "info", "Flats",
             f"{len(list_raws(fd))} in {os.path.basename(fd)}/" if fd else
-            "none: vignetting and dust are not corrected", {"field": "flatDir"})
+            "none (optional): vignetting and dust are not corrected", {"field": "flatDir"})
         # 4. short exposures and contact frames
         sd = find_short_dir(f)
         # with the frames of the image folder given that role in the Frames panel
@@ -626,8 +660,34 @@ def survey_api():
             if r.get("role") in _fs.MOVE_ROLES and sel["roles"].get(n) == r.get("role"):
                 continue
             pend[n] = r
+        # STALE PROPOSALS (2026-11-16). A frame the pre-check once proposed off
+        # as blurred, and that was switched off on that proposal, stays off when
+        # a later pre-check (a changed rule) no longer finds it blurred. Those
+        # are offered back -- only frames whose recorded reason is the
+        # pre-check's own, never a choice made by hand.
+        # (survey.sharp_stage measures them again: "sharp_on" = frame -> edge px)
+        for n, w in (st.get("sharp_on") or {}).items():
+            if n in sel["off"] and str((sel.get("why") or {}).get(n) or "").startswith("survey: "):
+                pend[n] = {"role": "on", "why": f"the Moon's edge is {w:.0f} px wide, within the "
+                           "frames shot the same way"}
         st["roles_pending"] = pend
         return jsonify(st)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"survey: {e}"})
+
+
+@app.post("/api/survey/reset")
+def survey_reset():
+    """Tab 1, "Check again": the survey is run afresh, its cache dropped."""
+    f = STATE.get("folder")
+    if not f:
+        return jsonify({"ok": False, "error": "no folder"})
+    if _busy():
+        return jsonify({"ok": False, "error": "a run is going on; check again when it has finished"})
+    try:
+        from . import survey as _sv
+        _sv.reset(workdir(f))
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": f"survey: {e}"})
 
@@ -1070,12 +1130,9 @@ def recipecheck():
         # edge fails at the limb (limb ramp, magenta ring; see the CHANGELOG);
         # with wide steps Exact edge can print clipping contours as rings.
         if not simple and maxstep >= 2.0:
-            if o.get("feather") == "taper":
-                add("info", "Merge weight", f"Exact edge, steps up to {maxstep:.1f} EV between exposures: if rings "
-                    "show around the limb or bright prominences, try Blended edge (new stack) and compare; it can "
-                    "leave the corona just outside the limb too dark and a magenta ring round the disc",
-                    fix("feather", "plain", "Try Blended edge"))
-            elif o.get("feather") == "plain":
+            # Exact edge (the default): no tip before the run (2026-11-15); the
+            # run says so in 3 Check your result when it measures rings' cause
+            if o.get("feather") == "plain":
                 add("info", "Merge weight", "Blended edge: if the corona just outside the limb is too dark or a "
                     "magenta ring shows round the disc, go back to Exact edge (new stack)",
                     fix("feather", "taper", "Use Exact edge"))
@@ -1471,7 +1528,7 @@ def start_run():
         stack_combine = "clip"
     # Repeated brackets: stack each exposure across the brackets, then merge
     # (the default), or merge each bracket on its own and stack the HDRs
-    # (bracketmode.py, lab 2026-10-16).
+    # (bracketmode.py, 2026-10-16).
     bracket_mode = (request.json.get("bracketMode", "tiers")
                     if request.is_json else "tiers")
     if bracket_mode not in ("tiers", "hdr"):
@@ -1514,17 +1571,17 @@ def start_run():
     partialconv = (bool(request.json.get("partialConv", True))
                    if request.is_json else True)
     # VNG IS NO LONGER A TOOLBAR CHOICE. It was added in 0.22.63 so a render
-    # could be compared with PixInsight's on equal terms, and that comparison
+    # could be compared with an astronomy package's on equal terms, and that comparison
     # has now been made on the reference bracket: no visible advantage, and the
     # colour runs into the limb slightly less smoothly -- which is exactly what
-    # docs/PIXINSIGHT_COMPARISON.md predicted, since VNG is gradient-directed
+    # the comparison predicted, since VNG is gradient-directed
     # and the steepest gradient in the frame is the limb.
     #
     # The implementation stays (raw.demosaic_vng, verified against LibRaw to
     # 1.5 counts in 65535) and is selected by dropping a file named
     # `vng_demosaic.txt` in the folder of raws, the same way the linear-fit
     # photometry chain is. Off the toolbar, out of the way, still there for the
-    # next person who wants to check us against PixInsight.
+    # next person who wants to check us against other software.
     # STATE["folder"] rather than `folder`, which is not bound until below
     demosaic_method = "vng" if os.path.exists(os.path.join(
         STATE["folder"] or "", "vng_demosaic.txt")) else "mhc"
@@ -1976,7 +2033,7 @@ def start_run():
                     except Exception as _e:
                         prog.log(f"[warn] partial-convolution masks built, not recorded in "
                                  f"report ({_e})", None)
-            # THE MOON LAYER (lab 0.24): built on its own, about a minute, when
+            # THE MOON LAYER (0.24): built on its own, about a minute, when
             # missing or older than the merge -- no re-stack, no layer rebuild
             try:
                 from . import moonlayer as _ml
@@ -2895,6 +2952,104 @@ def do_crop():
         return jsonify({"ok": False, "error": f"crop failed: {e}"}), 500
 
 
+RING_BOX = 2200              # px: the side of the full-resolution box the ring check renders at most (memory)
+
+
+def _ring_render(ly, params, cache_key):
+    """Full-resolution render of the box round the Moon the ring check reads,
+    and the Moon's centre in it. (The picture-wide numbers come from a preview
+    render of the whole frame, as for the 1:1 crop.)"""
+    from .render import crop_layers as _crop
+    cache = STATE.setdefault("crop_pin", {})
+    if cache.get("key") != cache_key or cache.get("lyid") != id(ly):
+        pin = {}
+        render(ly, params, preview=True, view="composite", pin=pin)
+        cache.clear(); cache.update(key=cache_key, pin=pin, lyid=id(ly))
+    pin = dict(cache["pin"])
+    cy, cx, R = ly.geometry(1)
+    H, W = ly.full["bg"].shape
+    h = int(min(2.4 * R, RING_BOX // 2))
+    y0, y1 = max(int(cy) - h, 0), min(int(cy) + h, H)
+    x0, x1 = max(int(cx) - h, 0), min(int(cx) + h, W)
+    C = _crop(ly, y0 - CROP_MARGIN, y1 + CROP_MARGIN, x0 - CROP_MARGIN, x1 + CROP_MARGIN)
+    cy0, cy1, cx0, cx1 = C.crop_box
+    rgb = render(C, params, preview=False, view="composite", pin=pin)
+    rgb = np.asarray(rgb, np.float32)[y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0]
+    Y = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+    return np.clip(Y, 0, 1), cy - y0, cx - x0, R
+
+
+@app.post("/api/savelog")
+def save_log():
+    """The log as a text file (2026-11-17): in the window of the desktop app
+    the log could not be selected and copied. Written beside the exports
+    (eclipseforge_output/ of the folder), or in the home folder when no
+    folder is open; the page shows where."""
+    import time as _t
+    data = request.json if request.is_json else {}
+    text = str(data.get("text") or "")
+    if not text.strip():
+        return jsonify({"ok": False, "error": "the log is empty"}), 400
+    base = (os.path.join(STATE["folder"], "eclipseforge_output") if STATE.get("folder")
+            else os.path.expanduser("~"))
+    try:
+        os.makedirs(base, exist_ok=True)
+        path = os.path.join(base, "eclipseforge_log_" + _t.strftime("%Y%m%d-%H%M%S") + ".txt")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text if text.endswith("\n") else text + "\n")
+    except OSError as e:
+        return jsonify({"ok": False, "error": f"could not write the log ({e})"}), 500
+    return jsonify({"ok": True, "path": path})
+
+
+@app.post("/api/ringcheck")
+def ring_check():
+    """THE RING GUARD (see ringguard.py): rings in the picture as the current
+    look renders it. When there are, the look's detail is turned off once to
+    tell whether the look makes them or the stack holds them."""
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "expected a JSON body"}), 415
+    _b = _busy()
+    if _b:
+        return jsonify({"ok": False, "error": f"{_b} is still running"}), 400
+    ly = STATE["layers"]
+    if ly is None:
+        return jsonify({"ok": False, "error": "run the pipeline first"}), 400
+    from . import ringguard as _rg
+    import time as _t
+    t0 = _t.time()
+    params = dict((request.json or {}).get("params") or {})
+    key = json.dumps({k: v for k, v in params.items() if k != "orient"}, sort_keys=True, default=str)
+    old = STATE.get("ringcheck") or {}
+    if old.get("key") == key and old.get("lyid") == id(ly):
+        return jsonify(old["out"])
+    if not _HEAVY.acquire(blocking=False):
+        return jsonify({"ok": False, "error": "an export or an Extras product is rendering"}), 400
+    try:
+        rmask = float(getattr(ly, "Rmask", 0.0) or 0.0)
+        Y, cy, cx, R = _ring_render(ly, params, key)
+        res = _rg.measure(Y, cy, cx, R, rmask=rmask)
+        hits = _rg.found(res)
+        source = None
+        if hits:
+            p2 = dict(params); p2.update(_rg.DETAIL_OFF)
+            k2 = json.dumps({k: v for k, v in p2.items() if k != "orient"}, sort_keys=True, default=str)
+            Y2, cy2, cx2, R2 = _ring_render(ly, p2, k2)
+            h2 = _rg.found(_rg.measure(Y2, cy2, cx2, R2, rmask=rmask))
+            # the look makes them when they go (or fall to under half) without its detail
+            strong = {(b, z): f for b, z, _, _, _, f in h2}
+            source = "look" if all(strong.get((b, z), 0) < 0.5 * f for b, z, _, _, _, f in hits) else "stack"
+        out = {"ok": True, "level": "warn" if hits else "ok",
+               "rings": [{"band": b, "zone": z, "amp": a, "coh": c, "at": at} for b, z, a, c, at, _ in hits],
+               "source": source, "seconds": round(_t.time() - t0, 1), "measured": res}
+        STATE["ringcheck"] = {"key": key, "lyid": id(ly), "out": out}
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"ring check failed: {e}"}), 500
+    finally:
+        _HEAVY.release()
+
+
 def _polar_angles(po):
     """The by-hand solar north (deg cw from image up, or None) and the fine
     turn (deg) from the polar options; blank or bad text means not set."""
@@ -3205,7 +3360,7 @@ def do_export():
             export(ly, params, fmt, path, view=view, size=size, notes=_notes,
                    thumb=_thumb_path(path), keep=_keep)
             json.dump(params, open(path + ".params.json", "w"), indent=1)
-            # PICTURE QUALITY (lab 0.24): graded measurements of what was just written
+            # PICTURE QUALITY (0.24): graded measurements of what was just written
             _pq = None
             if _keep is not None and _keep.get("rgb") is not None:
                 try:
@@ -3234,7 +3389,7 @@ def do_export():
                         # THE 0.24 LAYER: the RGBA file holds exactly what the
                         # preview lays over the picture, and the corona it goes
                         # on is written beside it, so the pair rebuilds the
-                        # composite in Photoshop (layer on top, Normal)
+                        # composite in an image editor (layer on top, Normal)
                         _cb = ("_corona_16bit".join(_st.rsplit("_16bit", 1))
                                if "_16bit" in os.path.basename(_st) else _st + "_corona") + ext
                         _kc = {}
@@ -3261,7 +3416,7 @@ def do_export():
                                       "sharp edges")
                 except Exception as _e:
                     _notes.append(f"[warn] prominence layer not written ({_e})")
-            # the Moon as its own RGBA layer, on the same grid (lab 0.24)
+            # the Moon as its own RGBA layer, on the same grid (0.24)
             if moon_layer and view == "composite" and _keep.get("rgb") is not None:
                 try:
                     from .render import export_moon_layer
@@ -3337,7 +3492,7 @@ def do_export():
             prog.error = str(e)
             prog.done = True
 
-    t = threading.Thread(target=work, daemon=True, name="the export")
+    t = threading.Thread(target=_heavy(work), daemon=True, name="the export")
     STATE["busy"] = t
     t.start()
     return jsonify({"ok": True, "path": (base + "_polar." + ("tif" if fmt in ("tif16", "tif8") else fmt)
@@ -3480,7 +3635,7 @@ def extra_generate():
             prog.error = f"{kind}: {e}"
         prog.done = True
 
-    t = threading.Thread(target=work, daemon=True, name="the extras")
+    t = threading.Thread(target=_heavy(work), daemon=True, name="the extras")
     STATE["busy"] = t
     t.start()
     return jsonify({"ok": True, "base": base})

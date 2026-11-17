@@ -1,8 +1,8 @@
 """Minimal ICC v2 profile builder (sRGB primaries, choosable tone curve).
 
 Why this exists: a 16-bit TIFF with no colour information is a guess for every
-program that opens it.  Photoshop assigns its working space (sRGB), Affinity
-does something similar, PixInsight assumes linear.  We write *scene-linear*
+program that opens it.  Image editors assign their working space (sRGB);
+astronomy processing software assumes linear.  We write *scene-linear*
 data, so a host that applies an sRGB decode to it is wrong by the whole
 transfer function -- which is exactly the "overstretched, clipped histogram"
 symptom you get from an untagged linear TIFF.

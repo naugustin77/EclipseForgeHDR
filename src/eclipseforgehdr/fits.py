@@ -1,6 +1,6 @@
 """FITS input, for capture software that writes it rather than camera raw.
 
-INDI/EKOS, SharpCap, N.I.N.A., FireCapture and most observatory control systems
+Capture programs for astronomy cameras and most observatory control systems
 save FITS. The format matters here because a FITS frame is already linear and
 already black-subtracted by the driver -- so it arrives without the two things
 `raw.py` normally gets from LibRaw, a black level and a saturation ceiling, and
@@ -180,8 +180,8 @@ def _orient(data, hdr):
     # with no ROWORDER card and reading back R=3000, G=2000, B=1000.
     #
     # Only files that reach this branch were ever affected: a cube carrying
-    # ROWORDER='TOP-DOWN' returns above and never flipped. Siril writes that
-    # card, so its exports are clean; the FITS default is bottom-up, so a
+    # ROWORDER='TOP-DOWN' returns above and never flipped. Stacking programs write
+    # that card, so their exports are clean; the FITS default is bottom-up, so a
     # writer that omits ROWORDER was not.
     # the ROW axis of a 3-D image: planes-first (3, H, W) is the FITS
     # convention, but an (H, W, 3) array (NAXIS1 = 3) was flipped along its
@@ -322,8 +322,8 @@ def plane_clip_mask(rgb, min_px=64):
     """Pixels clipped in ANY plane of a 3-plane (H, W, 3) image, and the
     ceiling found per plane (None where the plane shows none).
 
-    A writer that scales the planes (white balance, Siril's debayer) moves the
-    clip level per plane: one FITS test set's Siril frames clip at 59889 in red, 65520
+    A writer that scales the planes (white balance, a stacking program's debayer) moves the
+    clip level per plane: one FITS test set's frames clip at 59889 in red, 65520
     in green and 65535 in blue, and a few hot pixels sit above the red one. So
     one ceiling for the frame (the bit depth, 65535) misses the red clip, and
     clipped red entered the merge as data (2026-10-13). The ceiling is found as
@@ -394,10 +394,10 @@ class FitsFrame:
 
         # a pedestal the driver added, if it says so.
         #
-        # OFFSET IS NOT ON THIS LIST, and was until 0.23.3. In Siril, INDI and
-        # SharpCap headers OFFSET is the camera's GAIN OFFSET SETTING -- a
-        # configuration number, often 0 -- and not a pedestal in ADU. Siril says
-        # so in the card's own comment: `OFFSET = 0 / Sensor gain offset`.
+        # OFFSET IS NOT ON THIS LIST, and was until 0.23.3. In the headers of
+        # common capture and stacking programs OFFSET is the camera's GAIN OFFSET SETTING -- a
+        # configuration number, often 0 -- and not a pedestal in ADU. The card's
+        # own comment says so: `OFFSET = 0 / Sensor gain offset`.
         # Reading it as a black level told the rest of the pipeline that the
         # black level was KNOWN and equal to zero, when in fact it was unknown
         # and, on a FITS test set, 142 ADU. Everything downstream is sized for a
@@ -409,8 +409,8 @@ class FitsFrame:
         if ped is None and "OFFSET" in hdr:
             # RESCUE, so a writer that genuinely puts an ADU pedestal in OFFSET
             # is not silently dropped: take it only when the card's own comment
-            # does NOT describe a camera setting. Siril writes
-            # "Sensor gain offset"; INDI and SharpCap write similar. A writer
+            # does NOT describe a camera setting. Capture and stacking
+            # programs write "Sensor gain offset" or similar. A writer
             # meaning a pedestal says "pedestal", "bias" or "black", or says
             # nothing at all -- and a bare OFFSET with no comment is still not
             # trusted, because the setting is the commoner meaning.

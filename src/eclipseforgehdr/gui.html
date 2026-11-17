@@ -90,7 +90,7 @@ button{font:13px system-ui;font-weight:500;padding:8px 12px;border-radius:4px;
   border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer}
 button.primary{background:var(--gold);border-color:var(--gold);color:#151006}
 button:disabled{opacity:.45;cursor:default}
-.log{background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:8px;
+.log{-webkit-user-select:text;user-select:text;background:#0e1013;border:1px solid var(--line);border-radius:4px;padding:8px;
   font:11px ui-monospace,monospace;color:var(--muted);height:var(--logh);min-height:60px;resize:vertical;overflow:auto;white-space:pre-wrap;margin-top:8px}
 .log .lv-ok{color:#72d48f}.log .lv-warn{color:#f0a640}.log .lv-fail{color:#ff6161;font-weight:600}
 .log .lv-odd{color:#ff82d0}.log .lv-step{color:#9ec4ff}
@@ -179,6 +179,44 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
 .hint{color:var(--muted);font-size:12px}
 .brw{padding:7px 9px;font-size:12px}
 
+/* ---- tab 3 simple first (2026-11-16): the look and a few controls on top,
+   everything else folded under "fine tuning" ---- */
+body.finehide .rail .group.fine{display:none !important}
+body.finehide #views .vbtn:not([data-view="composite"]){display:none}
+.finebtn{width:100%;margin:2px 0 6px 0}
+/* observing site (2026-11-16): a status you can see at a glance, and the place on a small map */
+/* the look gallery (2026-11-17) */
+.galbox{position:absolute;inset:0;z-index:30;background:rgba(7,8,10,.94);display:flex;flex-direction:column;padding:14px 18px;overflow:hidden}
+.galhead{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.galhead b{color:var(--gold);letter-spacing:.06em;text-transform:uppercase;font-size:12px}
+.galhead .mini{margin-left:auto}
+.galgrid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;align-content:start}
+.galcell{background:#0e1115;border:1px solid #20252d;border-radius:10px;padding:6px;cursor:pointer;display:flex;flex-direction:column;gap:5px}
+.galcell:hover{border-color:var(--gold)}
+.galcell.on{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.galcell canvas{position:static;inset:auto;margin:0;max-width:none;max-height:none;box-shadow:none;cursor:pointer;width:100%;height:auto;aspect-ratio:1;border-radius:6px;background:#05060a;display:block}
+.galcell span{font-size:12px;color:#cfd5de;text-align:center}
+#abbtn.on{box-shadow:0 0 0 1px var(--gold) inset;color:var(--gold)}
+.sitechip{display:inline-block;margin-left:8px;padding:1px 8px;border-radius:10px;font:600 11px system-ui;letter-spacing:0;text-transform:none;background:#3a3f48;color:#cfd5de}
+.sitechip.ok{background:rgba(76,175,125,.22);color:#7fd3a4}
+.sitechip.warn{background:rgba(230,150,40,.22);color:#f0b35a}
+.sitestat{margin:4px 0 8px;padding:8px 10px;border-radius:8px;font-size:12.5px;line-height:1.45;background:rgba(255,255,255,.04)}
+.sitestat.ok{background:rgba(76,175,125,.12);border-left:3px solid #4caf7d}
+.sitestat.warn{background:rgba(230,150,40,.14);border-left:3px solid #e0992f}
+.sitestat.none{border-left:3px solid #555c66}
+.sitemini{position:static;inset:auto;max-width:none;max-height:none;box-shadow:none;display:block;width:100%;height:260px;margin-top:10px;border-radius:8px;background:#0e1116;cursor:pointer}
+.sitemattr{font-size:10.5px;margin-top:2px;opacity:.7}
+button.accent{background:linear-gradient(180deg,#4f8fe0,#3a76c8);border-color:#3a76c8;color:#fff;box-shadow:0 2px 10px rgba(70,130,210,.25)}
+button.accent:hover:not(:disabled){filter:brightness(1.08)}
+#grp-finebar{padding-top:8px;padding-bottom:8px}
+#grp-finebar .hint{margin:0}
+body:not(.finehide) #finenote{display:none}
+.rgline{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.04);font-size:12px;line-height:1.35}
+.rgline.ok{background:rgba(80,180,110,.12)}
+.rgline.warn{background:rgba(230,150,40,.16)}
+.rgline.busy{opacity:.8}
+.xrg{margin:6px 0 0 0;font-size:12px}
+.xrg.warn{color:var(--gold)}
 /* ---- workflow tabs (2026-11-08) ---- */
 .tabbar{display:flex;align-items:center;gap:12px;padding:6px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex:none;min-width:0}
 .tabbar h1{font-size:16px;font-weight:600;margin:0 6px 0 0;color:var(--gold);white-space:nowrap;display:flex;align-items:center;gap:8px}
@@ -217,7 +255,7 @@ label.opt.changed .optname::before,label.optchk.changed::before,div.opt.changed 
 .p2split #page2 .log, #page2 .p2run .log{height:max(var(--logh), 440px)}
 @media (max-width:1100px){ .p1split,.p2split{grid-template-columns:minmax(0,1fr)} }
 #page2 .optpanel{border-top:0;padding:0;background:transparent}
-#page2 .optpanel.closed{display:block}
+#page2 .optpanel.closed{display:none}
 .runrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
 .runrow .runbtns{margin-left:0}
 .p2opts{display:none}
@@ -525,7 +563,7 @@ body.nofolder #next1{display:none}
 .p1go svg{width:16px;height:16px}
 #p1import{background:transparent;border-color:transparent;color:var(--muted)}
 #p1import:hover{color:var(--text);background:transparent !important;border-color:transparent !important;text-decoration:underline}
-.p1steps{display:grid;grid-template-columns:repeat(4,minmax(140px,200px));gap:12px;margin-top:30px}
+.p1steps{display:grid;grid-template-columns:repeat(5,minmax(130px,190px));gap:12px;margin-top:30px}
 .p1steps>div{background:var(--card);border:1px solid #20252d;border-radius:12px;padding:16px 12px 14px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative}
 .p1steps svg{width:22px;height:22px;color:var(--gold);margin:2px 0 6px}
 .p1steps .sn{position:absolute;top:8px;left:11px;font:11px ui-monospace,monospace;color:#5d6571}
@@ -625,6 +663,10 @@ label.optchk.nondef{color:var(--gold2)}
 .xmeta:empty{display:none}
 .xmeta span{font:11px ui-monospace,monospace;color:#9aa3b0;background:#0d1014;border:1px solid #20252d;border-radius:5px;padding:2px 7px}
 .tabstatus{background:#0e1115;border:1px solid #20252d;border-radius:999px;padding:4px 12px 4px 10px;max-width:520px;margin-left:auto}
+/* the status line in full (2026-11-17): it takes the room the tabs leave and
+   wraps to a second line instead of being cut off after a few words */
+.tabstatus{max-width:none;border-radius:12px;padding:3px 12px 3px 10px}
+.tabstatus .status{white-space:normal;overflow:hidden;text-overflow:clip;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:11px;line-height:1.35;word-break:break-word}
 </style>
 </head>
 <body>
@@ -671,7 +713,7 @@ label.optchk.nondef{color:var(--gold2)}
     <button class="tabbtn" data-tab="2" title="Stacking options, observing site, Start and the log"><span class="tn"><i>2</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></span><span class="tl"><b>Processing</b><small id="tsub2"></small></span></button>
     <button class="tabbtn" data-tab="3" title="The result: preview, look and adjustments"><span class="tn"><i>3</i></span><span class="ticon"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></svg></span><span class="tl"><b>Result</b><small id="tsub3"></small></span></button>
     <button class="tabbtn" data-tab="4" title="Export the picture and the extra products"><span class="tn"><i>4</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg></span><span class="tl"><b>Export</b><small id="tsub4"></small></span></button>
-    <button class="tabbtn" data-tab="5" title="Extras: posters, overlays, panoramas and more, made from the result"><span class="tn"><i>5</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg></span><span class="tl"><b>Extras</b><small id="tsub5"></small></span></button>
+    <button class="tabbtn" data-tab="5" title="Extras: overlays, posters, clips and sound, made from the result"><span class="tn"><i>5</i></span><span class="ticon"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg></span><span class="tl"><b>Extras</b><small id="tsub5"></small></span></button>
   </nav>
   <div class="tabstatus">
         <span class="sdot" id="sdot" title="Grey: no folder. Green: Start loads the cache. Amber: an option changed, Start re-stacks. Gold: running. Red: failed."></span>
@@ -691,7 +733,8 @@ label.optchk.nondef{color:var(--gold2)}
       <div><span class="sn">1</span><svg viewBox="0 0 16 16"><rect x="2" y="4.5" width="9" height="9" rx="1.5"/><path d="M5 2.5h7.5a1 1 0 0 1 1 1V11"/><circle cx="6.5" cy="9" r="2"/></svg><b>Images</b><small>load the folder, check frames and calibration</small></div>
       <div><span class="sn">2</span><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg><b>Processing</b><small>options, observing site, Start</small></div>
       <div><span class="sn">3</span><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3"/></svg><b>Result</b><small>shape the look on the live preview</small></div>
-      <div><span class="sn">4</span><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg><b>Export</b><small>the picture and the extra products</small></div>
+      <div><span class="sn">4</span><svg viewBox="0 0 16 16"><path d="M3 10v3h10v-3"/><path d="M8 2.5v8M5 5.5l3-3 3 3"/></svg><b>Export</b><small>the picture, the stack and the polar map</small></div>
+      <div><span class="sn">5</span><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg><b>Extras</b><small>posters, overlays, clips and sound</small></div>
     </div>
   </div>
   <section class="psec p1src">
@@ -757,7 +800,7 @@ label.optchk.nondef{color:var(--gold2)}
     </div>
   </section>
   <section class="psec rawonly" id="svsec" style="display:none">
-    <h3 class="ptitle" title="Read from the frames' own data and from the camera's small preview inside each raw file, before anything is stacked."><span class="sico"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/></svg></span>How this was shot <span class="hint" id="svnote"></span></h3>
+    <h3 class="ptitle" title="Read from the frames' own data and from the camera's small preview inside each raw file, before anything is stacked."><span class="sico"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/></svg></span>How this was shot <span class="hint" id="svnote"></span><button class="mini" id="svrefresh" style="margin-left:auto;letter-spacing:0;text-transform:none" title="Read all frames again and redo the checks, for example after frames were added, removed or switched off.">Check again</button></h3>
     <div class="svverdict" id="svverdict"></div>
     <div class="svgrid">
       <div class="svcol" id="svdo"></div>
@@ -783,8 +826,13 @@ label.optchk.nondef{color:var(--gold2)}
 </div>
 <div class="page" id="page2">
   <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></div><div class="phtx"><h2>Processing</h2><p>How the stack is made, where it was shot, and the run itself. A gold dot marks a setting you changed from its default.</p></div><button class="nextbtn" data-goto="3" id="next2">Next: Result <span class="arr">&rarr;</span></button></div>
+  <section class="psec p2auto" id="p2auto">
+    <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M8 1.8l5 2v4c0 3-2.2 5.2-5 6.4C5.2 13 3 10.8 3 7.8v-4z"/><path d="M5.8 8l1.6 1.6 3-3"/></svg></span>Settings for this set</h3>
+    <div id="p2autotx" class="hint">Load a folder in 1 Images: the check of the frames sets what this set needs.</div>
+  </section>
   <section class="psec p2optsec">
-    <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></span>Stacking options <span class="hint" id="optnote"></span></h3>
+    <h3 class="ptitle"><span class="sico"><svg viewBox="0 0 16 16"><path d="M2.5 4h11M2.5 8h11M2.5 12h11"/><circle cx="6" cy="4" r="1.5" class="f"/><circle cx="10.5" cy="8" r="1.5" class="f"/><circle cx="5" cy="12" r="1.5" class="f"/></svg></span><span id="optsTitle" style="cursor:pointer">Expert settings</span>
+      <button class="mini accent" id="optsToggle2" type="button" style="margin-left:12px">Show</button> <span class="hint" id="optnote"></span></h3>
       <div class="optpanel" id="optpanel">
         <div class="optgrid">
       <label class="optchk"
@@ -837,7 +885,7 @@ label.optchk.nondef{color:var(--gold2)}
           <option value="frame">Per frame (ignore grouping)</option>
         </select></label>
       <label class="opt"
-        title="Whether EFHDR aligns the frames. Automatic keeps frames that another program (Siril, PixInsight) already registered — recognised by the black border it leaves on every shifted frame — and aligns everything else. Always align ignores that; Keep frames as they are never aligns. Re-stacks.">
+        title="Whether EFHDR aligns the frames. Automatic keeps frames that another program (a stacking program) already registered — recognised by the black border it leaves on every shifted frame — and aligns everything else. Always align ignores that; Keep frames as they are never aligns. Re-stacks.">
         <span class="optname">Alignment</span>
         <select id="alignMode" class="sel">
           <option value="auto" selected>Automatic</option>
@@ -913,7 +961,7 @@ label.optchk.nondef{color:var(--gold2)}
         title="Also writes each aligned tier as a 16-bit TIFF to eclipseforge_output/aligned_tiers/ for external HDR combining. Not merged or tone mapped.">
         <input type="checkbox" id="exportTiers"> Export aligned tier TIFFs</label>
       <label class="optchk"
-        title="Writes the tier TIFFs scene-linear with a linear ICC profile. On for PixInsight, off for Photoshop and Affinity.">
+        title="Writes the tier TIFFs scene-linear with a linear ICC profile. On for astronomy processing software, off for image editors.">
         <input type="checkbox" id="tierLinear"> &nbsp;&#8627; scene-linear</label>
 
         </div>
@@ -934,6 +982,8 @@ label.optchk.nondef{color:var(--gold2)}
         title="Stops the running job at its next step. A cancelled stack leaves no cache; the next Start runs it again.">Cancel</button>
       <button id="clearcache" disabled
         title="Deletes this folder's cache so the next Start reprocesses from the raw files. Raws, flats and exports are not touched.">Clear cache</button>
+      <button id="logcopy" style="margin-left:auto" title="Copy the whole log to the clipboard">Copy log</button>
+      <button id="logsave" title="Save the whole log as a text file beside the exports (eclipseforge_output)">Save log</button>
       <button id="framesbtn" disabled style="display:none"
         title="Every frame found in the folder: brackets, short exposures, contact frames, flats, darks, bias. Switch single frames off, or force a bracket frame in past the automatic checks.">Frames</button>
         </div>
@@ -950,7 +1000,8 @@ label.optchk.nondef{color:var(--gold2)}
     </div>
    </div>
    <div class="p2side">
-      <details id="siteBox" open><summary class="ptitle" style="cursor:pointer"><span class="sico"><svg viewBox="0 0 16 16"><path d="M8 14.2s4.5-4.3 4.5-7.6a4.5 4.5 0 0 0-9 0c0 3.3 4.5 7.6 4.5 7.6z"/><circle cx="8" cy="6.6" r="1.6"/></svg></span>Observing site and time <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">optional, for the star catalogue</span></summary>
+      <details id="siteBox" open><summary class="ptitle" style="cursor:pointer"><span class="sico"><svg viewBox="0 0 16 16"><path d="M8 14.2s4.5-4.3 4.5-7.6a4.5 4.5 0 0 0-9 0c0 3.3 4.5 7.6 4.5 7.6z"/><circle cx="8" cy="6.6" r="1.6"/></svg></span>Observing site and time <span class="sitechip" id="siteChip">not set</span> <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">optional, for the stars and the polar map</span></summary>
+        <div class="sitestat" id="siteStat"></div>
         <span class="hint" style="display:block;margin:4px 0 6px">Where and when totality was shot. It puts the star catalogue at its exact place and corrects for atmospheric refraction, so stars are confirmed tighter and fainter. It does not change the stack. Saved beside the frames; used by the next Start (on a stacked set: stars re-checked and detail layers rebuilt, no re-stack).</span>
         <div class="optgrid">
           <label class="opt" title="Total eclipses with a built-in list of places in the path of totality (NASA eclipse elements, GeoNames places)."><span class="optname">Eclipse</span><div class="inrow"><select id="siteEcl" class="sel"><option value="">(type the site below)</option></select></div></label>
@@ -963,6 +1014,8 @@ label.optchk.nondef{color:var(--gold2)}
           <label class="opt"><span class="optname">UTC offset (h)</span><div class="inrow"><input type="text" id="siteTz" placeholder="+2" spellcheck="false"></div></label>
         </div>
         <div class="inrow" style="margin-top:6px"><button id="siteMap" class="mini" title="A map with the path of totality: click the place you shot from to fill in position, date, local time and UTC offset. The map needs an internet connection.">Pick on map&hellip;</button><button id="siteSave" class="mini">Save</button><button id="siteClear" class="mini">Clear</button><span class="hint" id="siteMsg"></span></div>
+        <canvas id="siteMini" class="sitemini" title="The place on the map, with the path of totality. Click to open the map picker."></canvas>
+        <div class="hint sitemattr" id="siteMiniAttr"></div>
       </details>
     <div class="rail-like"><div class="group"><div class="grouphead"><span class="gico"></span><h2>Processing recipe</h2><button class="mini reset" title="Reset this group to its defaults">&#8634; reset</button><span class="tog">&#9662;</span></div>
       <div class="export">
@@ -999,6 +1052,7 @@ label.optchk.nondef{color:var(--gold2)}
       <div class="xgo"><button class="primary" id="export" disabled>Export selected</button></div>
     </div>
     <div class="xline"><span class="hint" id="xsum">Tick the products to export, or use the Export button on one card.</span><span class="hint" id="xprog"></span></div>
+    <div class="xrg hint" id="xrg"></div>
   </section>
   <section class="psec">
     <div class="xgrid" id="xgrid">
@@ -1008,7 +1062,7 @@ label.optchk.nondef{color:var(--gold2)}
           <div class="xhead"><label><input type="checkbox" class="xinc" checked> <b>Picture</b></label><span class="xtag" data-fmt="1"></span></div>
           <p class="xdesc">The finished picture with the look from tab 3, in the format and size chosen above.</p>
           <div class="xmeta" data-meta="rgb"></div>
-          <label class="xopt" title="Also writes the prominences as a 16-bit RGBA TIFF (name_prominences_16bit.tif) and the corona without them (name_corona_16bit.tif), for layering in Photoshop."><input type="checkbox" id="expprom"> + prominence layer pair (RGBA TIFF)</label>
+          <label class="xopt" title="Also writes the prominences as a 16-bit RGBA TIFF (name_prominences_16bit.tif) and the corona without them (name_corona_16bit.tif), for layering in an image editor."><input type="checkbox" id="expprom"> + prominence layer pair (RGBA TIFF)</label>
           <label class="xopt" title="Also writes the Moon disc as a 16-bit RGBA TIFF (name_moon_16bit.tif) on the same grid, its soft edge as transparency."><input type="checkbox" id="expmoon"> + Moon layer (RGBA TIFF)</label>
           <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
         </div>
@@ -1047,7 +1101,7 @@ label.optchk.nondef{color:var(--gold2)}
         <div class="xthumb xwide"><img alt=""><span class="xtnote">base + overlay, shown together</span></div>
         <div class="xbody">
           <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Polar map in layers</b></label><span class="xtag">2 &times; TIFF 16-bit</span></div>
-          <p class="xdesc">The labelled polar map as two files on the same canvas: the <b>base</b> (the map at its own resolution, no labels) and a transparent <b>overlay</b> (axes, numbers, N/E/S/W, grid, Earth). Denoise or retouch the base, lay the overlay on top (Normal) &mdash; in Photoshop, Affinity or GIMP. Uses the options of the Polar map card.</p>
+          <p class="xdesc">The labelled polar map as two files on the same canvas: the <b>base</b> (the map at its own resolution, no labels) and a transparent <b>overlay</b> (axes, numbers, N/E/S/W, grid, Earth). Denoise or retouch the base, lay the overlay on top (Normal). Uses the options of the Polar map card.</p>
           <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
         </div>
       </div>
@@ -1063,7 +1117,7 @@ label.optchk.nondef{color:var(--gold2)}
   </section>
 </div>
 <div class="page" id="page5">
-  <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg></div><div class="phtx"><h2>Extras</h2><p>Products made from the result: overlays, posters and panoramas, all drawn from the picture, its geometry and the star match. Nothing is added that is not in the data. Files land in eclipseforge_output/extras/.</p></div></div>
+  <div class="phead"><div class="phico"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.4 4.4 1.6-4.4 1.6L8 13.5 6.4 9.1 2 7.5l4.4-1.6z"/><path d="M13 1.5v3M11.5 3h3"/></svg></div><div class="phtx"><h2>Extras</h2><p>Products made from the result: overlays, posters, clips and sound, all drawn from the picture, its geometry and the star match. Nothing is added that is not in the data. Files land in eclipseforge_output/extras/.</p></div></div>
   <section class="psec xbar">
     <div class="xbarrow">
       <label class="xf xname"><span class="optname">File name</span><input type="text" id="exname" value="eclipseforge_render" spellcheck="false" title="The start of every file name; each product adds its own ending, and a number when the name is taken."></label>
@@ -1082,6 +1136,9 @@ label.optchk.nondef{color:var(--gold2)}
     <div class="stalebar" id="stalebar" style="display:none"><span id="staletext"></span>
       <button class="mini" id="stalego">Go to 2 Processing</button></div>
     <div class="canvaswrap"><canvas id="cv" width="4" height="4"></canvas>
+      <div id="galbox" class="galbox" style="display:none"><div class="galhead"><b>All looks on your picture</b>
+        <span class="hint" id="galnote"></span><button class="mini" id="galclose" title="Close (Esc)">&#10005;</button></div>
+        <div class="galgrid" id="galgrid"></div></div>
       <div id="cropmark"></div>
       <div id="croppanel"><div class="cropbar"><b>1:1 crop</b><span id="cropinfo"></span>
         <button class="mini" id="cropagain" title="Render this window again with the current sliders">&#8635; refresh</button>
@@ -1106,11 +1163,23 @@ label.optchk.nondef{color:var(--gold2)}
     <!-- the 1:1 crop button lives in the bar under the preview so it is always in reach (2026-10-16) -->
     <button id="cropbtn" class="cropvbtn" disabled
       title="Press, then click a point on the preview: a 600 px window of the full-resolution picture is rendered with the current sliders, through the export path (final sharpening, stars, prominences), and shown at 1:1. About 2 s. Esc cancels; the window can be refreshed after moving a slider.">1:1 crop…</button>
+    <button id="galbtn" class="cropvbtn" disabled title="Every look on your own picture, side by side; click one to use it">&#9638; All looks</button>
+    <button id="abbtn" class="cropvbtn" disabled title="Compare two looks: the first click keeps the look as it is now as A; every click after that switches between A and the look you have now (B). Shift-click: keep the current look as the new A.">A/B</button>
+    <button id="undobtn" class="cropvbtn" disabled title="Undo the last change to the look (Ctrl+Z, on a Mac ⌘Z)">&#8630; Undo</button>
+    <button id="redobtn" class="cropvbtn" disabled title="Redo the change (Ctrl+Shift+Z, on a Mac ⌘⇧Z)">&#8631; Redo</button>
     <div id="credit" class="credit"></div>
     </div>
   </div>
   <div class="railgrip" id="railgrip" title="Drag to resize the panel"></div>
   <aside class="rail"><div class="railinner">
+    <div class="group" data-tab="3" id="grp-quick"><div class="grouphead"><span class="gico"></span><h2>Look</h2><span class="tog">&#9662;</span></div>
+      <div id="lookhome"></div>
+      <div id="g-quick"></div>
+      <div class="rgline" id="rgline"><span id="rgtext">Picture check: waits for the result</span>
+        <button class="mini" id="rgbtn" disabled title="Renders the picture at full resolution round the Moon, as the export will, and looks for rings round the Moon (12-20 s).">Check now</button></div>
+    </div>
+    <div class="group" data-tab="3" id="grp-finebar"><button class="finebtn accent" id="finebtn" type="button">Show all controls (fine tuning)</button>
+      <div class="hint" id="finenote">The look and the few controls above are all most pictures need. The rest are the building blocks the looks are made of.</div></div>
     <div class="group" data-tab="3" id="rnsec" style="display:none"><div class="grouphead"><span class="gico"></span><h2>Check your result</h2><span class="tog">&#9662;</span></div>
       <div class="hint" style="margin-bottom:6px">This run finished, but the log noted things that can show in the picture. Each says what to look for and what to try.</div>
       <div id="rnlist"></div></div>
@@ -1290,7 +1359,7 @@ let P = {}, GEO = null, L = {}, ready = false;
 //
 // Temperature, Tint and Saturation are stored, exported and saved as what the
 // render uses: two colour gains (R*t, B/t; G*tint) and an exponent on the
-// chroma. On screen they read the way Camera Raw's do: 0 is "as stacked",
+// chroma. On screen they read the way a raw converter's do: 0 is "as stacked",
 // Temperature runs -300..+150 (blue..yellow), Tint -150..+150 (green..magenta,
 // + is magenta = LESS green), Saturation -100..+100. The map is logarithmic,
 // which is what a gain should be, and symmetric: +100 is x1.5, -100 is x1/1.5;
@@ -1298,7 +1367,7 @@ let P = {}, GEO = null, L = {}, ready = false;
 // at -100, which is monochrome (0.23.8: it used to stop at 0.5, and the
 // exponent sat before the balance, so its floor was a flat WB-coloured
 // frame rather than a grey one). Temperature reaches further
-// down than Camera Raw's -150 because a corona a few degrees above the
+// down than a raw converter's -150 because a corona a few degrees above the
 // horizon is reddened by the atmosphere far more than any daylight scene:
 // on the reference test set the picker wanted below -150 and clamped.
 //
@@ -1664,20 +1733,25 @@ function drawFrames(){
       let meta = (f.sec ? tlExp(f.sec) : "") + (f.ts ? " · " + String(f.ts).split(/[ T]/)[1] : "");
       let line2 = "";
       if (st) line2 += `<span class="fpst" style="background:${st[1]};color:#111" title="${f.note || ""}">${f.status === "clock" && f.note ? f.note : st[0]}</span> ` +
-                       (f.status === "promunused" && f.note ? `<span>${f.note}</span>` : "");
+                       (f.status === "promunused" && f.note ? `<span style="white-space:normal">${f.note}</span>` : "");
       if (f.gain != null && f.status !== "stacked") line2 += `${f.gain < 1 ? "" : "+"}${Math.round((f.gain - 1) * 100)} % `;
       if (f.sharp != null) line2 += `<span title="Sharpness of the last run, relative to the tier's sharpest frame">sharp ${Math.round(f.sharp * 100)} %</span>`;
       // a frame lying in the image folder can be given another role (not moved)
       const ro = (v, lab) => `<option value="${v}"${g.role === v ? " selected" : ""}>${lab}</option>`;
       const roleSel = f.home ? `<select class="fprole${f.moved ? " moved" : ""}" title="What this frame is used for. Bracket frame: stacked into the HDR. Short exposure: prominence layer only. Contact frame: camera clock only (diamond ring, beads). The file stays where it is.">` +
         ro("lights", "bracket frame") + ro("short", "short exposure") + ro("contact", "contact frame") + `</select>` : "";
-      const PL = {contact: ["contact frame?", "make it one"], short: ["short exposure?", "make it one"], off: ["smeared?", "switch off"]};
+      const PL = {contact: ["contact frame?", "make it one"], short: ["short exposure?", "make it one"], off: ["blurred?", "switch off"]};
+      // WHY a frame is off or holds another role (2026-11-15): by you, the
+      // survey's reason, or not recorded (choices saved before reasons were)
+      const chosen = f.state === "off" || f.state === "force" || f.moved;
+      const whyTx = !chosen ? "" : (f.why || "reason not recorded (set before reasons were saved)");
+      const whyHtml = chosen ? `<div class="fpmeta" style="white-space:normal;opacity:.85">${f.state === "off" ? "off" : f.state === "force" ? "forced" : "role"}: ${svEsc(whyTx)}</div>` : "";
       const propHtml = f.prop && PL[f.prop.role] ? `<div class="fpprop" title="From the survey (How this was shot): ${String(f.prop.why || "").replace(/"/g, "&quot;")}"><span>survey: ${PL[f.prop.role][0]}</span><button class="mini" data-prop="1">${PL[f.prop.role][1]}</button></div>` : "";
       h += `<div class="fpcard ${f.state === "auto" ? "" : f.state}${f.prop ? " prop" : ""}" data-k="${f.key}" data-r="${g.role}">` +
            `<img loading="lazy" src="${fpUrl(f.key, "thumb")}" alt="" title="Open larger">` +
            `<span class="fpflag" title="Forced in by you">&#9873; forced</span><span class="fpoffx" title="Switched off by you">off</span>` +
            `<div class="fpname" title="${f.key}">${f.name}</div><div class="fpmeta">${meta}</div><div class="fpmeta">${line2}</div>` +
-           `<div class="fpseg">${fpSegHtml(g, f)}</div>${roleSel}${propHtml}</div>`;
+           `${whyHtml}<div class="fpseg">${fpSegHtml(g, f)}</div>${roleSel}${propHtml}</div>`;
     }
     h += "</div></div>";
   }
@@ -1685,7 +1759,8 @@ function drawFrames(){
 }
 async function fpSet(changes){
   try {
-    const body = Object.assign({set: changes}, Object.fromEntries(new URLSearchParams(fpQuery())));
+    const why = {}; for (const [k, v] of Object.entries(changes)) if (v !== "auto") why[k] = "by you";
+    const body = Object.assign({set: changes, why}, Object.fromEntries(new URLSearchParams(fpQuery())));
     const j = await (await fetch("/api/frames", {method: "POST", headers: {"Content-Type": "application/json"},
                                                   body: JSON.stringify(body)})).json();
     if (!j.ok){ $("fpsum").textContent = j.error; return false; }
@@ -1723,9 +1798,10 @@ $("fpbody").addEventListener("click", e => {
 });
 // ANOTHER ROLE FOR A FRAME OF THE IMAGE FOLDER (2026-11-13): saved in the same
 // file as the switches; the frame leaves or rejoins the bracket at the next Start
-async function fpRole(roles, set){
+async function fpRole(roles, set, why){
   try {
-    const body = Object.assign({set: set || {}, role: roles}, Object.fromEntries(new URLSearchParams(fpQuery())));
+    if (!why){ why = {}; for (const [k, v] of Object.entries(roles || {})) if (v !== "lights") why[k] = "by you"; }
+    const body = Object.assign({set: set || {}, role: roles, why}, Object.fromEntries(new URLSearchParams(fpQuery())));
     const j = await (await fetch("/api/frames", {method: "POST", headers: {"Content-Type": "application/json"},
                                                   body: JSON.stringify(body)})).json();
     if (!j.ok){ $("fpsum").textContent = j.error; return false; }
@@ -1735,12 +1811,13 @@ async function fpRole(roles, set){
   } catch (e){ $("fpsum").textContent = "could not save: " + e; return false; }
 }
 function fpApply(frames){
-  const roles = {}, set = {};
+  const roles = {}, set = {}, why = {};
   for (const f of frames){
     if (!f.prop) continue;
     if (f.prop.role === "off") set[f.key] = "off"; else roles[f.key] = f.prop.role;
+    why[f.key] = "survey: " + (f.prop.why || "");
   }
-  if (Object.keys(roles).length || Object.keys(set).length) fpRole(roles, set);
+  if (Object.keys(roles).length || Object.keys(set).length) fpRole(roles, set, why);
 }
 $("fpbody").addEventListener("change", e => {
   const sel = e.target.closest(".fprole"); if (!sel) return;
@@ -1792,6 +1869,7 @@ let TAB = 1;
 function setTab(n){
   n = Math.max(1, Math.min(5, +n || 1));
   TAB = n;
+  try { syncStartLabel(); } catch (e) {}
   document.body.classList.remove("t1", "t2", "t3", "t4", "t5");
   document.body.classList.add("t" + n);
   document.querySelectorAll(".tabbtn").forEach(b => b.classList.toggle("on", +b.dataset.tab === n));
@@ -1856,6 +1934,14 @@ async function loadSurvey(){
     if (j.pending) SV_T = setTimeout(loadSurvey, j.waiting ? 5000 : 1200);
   } catch (e){ off(); }
 }
+$("svrefresh").addEventListener("click", async () => {
+  const b = $("svrefresh"); b.disabled = true;
+  try {
+    const j = await (await fetch("/api/survey/reset", {method: "POST"})).json();
+    if (!j.ok){ $("svnote").textContent = j.error || "not possible now"; return; }
+    SV = null; loadSurvey();
+  } catch (e){} finally { b.disabled = false; }
+});
 // the settings the survey suggests that differ from what is set in tab 2
 function svOpen(){
   const g = (SV && SV.guide) || {};
@@ -1866,11 +1952,13 @@ function drawSurvey(){
   const j = SV; if (!j) return;
   const sec = $("svsec"); sec.style.display = "";
   const g = j.guide || {settings: [], frames: {}, expect: [], limits: []};
+  svAutoApply(j, g);
   const pend = j.roles_pending || {};
   const nC = Object.values(pend).filter(r => r.role === "contact").length;
   const nO = Object.values(pend).filter(r => r.role === "off").length;
+  const nOn = Object.values(pend).filter(r => r.role === "on").length;
   const open = svOpen();
-  const nDo = open.length + (nC ? 1 : 0) + (nO ? 1 : 0);
+  const nDo = open.length + (nC ? 1 : 0) + (nO ? 1 : 0) + (nOn ? 1 : 0);
   // the verdict
   const V = $("svverdict");
   let cls, ic, tt, tx;
@@ -1884,10 +1972,12 @@ function drawSurvey(){
     tx = "Nothing to change in the settings, but the set itself limits the result: see below.";
   } else {
     cls = "ok"; ic = "\u2713"; tt = "Ready to stack";
-    tx = (g.settings || []).length ? "The settings that matter for this set are already right."
+    tx = (g.settings || []).length ? "The settings that matter for this set are set (2 Processing lists them). Press Start."
                                    : "Nothing in this set needs a setting different from the defaults.";
   }
-  if (j.pending && j.items.length) tx += (tx ? " " : "") + "Still reading the camera previews: this may change.";
+  if (j.pending && j.items.length) tx += (tx ? " " : "") + (j.phase === "raw"
+    ? "Still measuring each frame's sharpness on the raw files: blurred frames to switch off may follow."
+    : "Still reading the camera previews: this may change.");
   V.className = "svverdict " + cls;
   V.innerHTML = `<span class="svic">${ic}</span><div><b>${tt}</b>${tx ? `<span>${tx}</span>` : ""}</div>`;
   // what to do
@@ -1904,9 +1994,12 @@ function drawSurvey(){
   if (nC) h += `<div class="svrow"><div class="svtx"><b>${nC} frame${nC > 1 ? "s" : ""} as contact frame${nC > 1 ? "s" : ""}</b>` +
        `<span class="svwhy">They look like diamond ring or beads, so they leave the stack and set the camera clock instead. Marked on their cards in Frames below.</span></div>` +
        `<button class="mini" data-svframes="contact">Apply</button></div>`;
-  if (nO) h += `<div class="svrow"><div class="svtx"><b>Switch off ${nO} smeared frame${nO > 1 ? "s" : ""}</b>` +
-       `<span class="svwhy">The Moon's edge is blurred against the other frames at the same exposure (shake, wind). Check them in Frames below.</span></div>` +
+  if (nO) h += `<div class="svrow"><div class="svtx"><b>Switch off ${nO} blurred frame${nO > 1 ? "s" : ""}</b>` +
+       `<span class="svwhy">The Moon's edge is much wider in them than in the sharp frames (shake, wind, seeing); each card in Frames below gives the measured width. Every exposure keeps at least one frame.</span></div>` +
        `<button class="mini" data-svframes="off">Apply</button></div>`;
+  if (nOn) h += `<div class="svrow"><div class="svtx"><b>Switch ${nOn} frame${nOn > 1 ? "s" : ""} back on</b>` +
+       `<span class="svwhy">An earlier check switched ${nOn > 1 ? "them" : "it"} off as blurred; measured against the frames shot the same way, ${nOn > 1 ? "they are" : "it is"} fine.</span></div>` +
+       `<button class="mini" data-svframes="on">Apply</button></div>`;
   if (nDo > 1) h += `<div class="svall"><button class="mini" id="svapplyall">Apply all ${nDo}</button></div>`;
   $("svdo").innerHTML = h ? `<h4>Before you start</h4>${h}` : "";
   // what to expect
@@ -1917,6 +2010,8 @@ function drawSurvey(){
   // hurt depending on the set, so they are not changed up front. Each says
   // what to look for, what to try, and when to go back.
   const tr = g.tries || [];
+  if (!j.pending) eh += `<h4>After the run</h4><div class="svrow"><div class="svtx"><span class="svwhy">`
+    + `3 Check your result lists what the run measured that may show in the picture, what to look for, and what to change only if you see it.</span></div></div>`;
   if (tr.length){
     eh += `<h4>If the result shows a problem</h4>`;
     for (const t of tr){
@@ -1939,7 +2034,7 @@ function drawSurvey(){
   box._items = j.items;
   $("svcount").textContent = `(${j.items.length})`;
   $("svnote").textContent = j.pending
-    ? (j.waiting ? "· waits for the run to finish" : (j.total ? `· reading the previews ${j.done}/${j.total}` : "· reading…"))
+    ? (j.waiting ? "· waits for the run to finish" : (j.total ? (j.phase === "raw" ? `· measuring sharpness on the raw files ${j.done}/${j.total}` : `· reading the previews ${j.done}/${j.total}`) : "· reading…"))
     : "";
   SV_N = nDo + (g.limits || []).length; tab1Badge();
 }
@@ -1948,13 +2043,68 @@ async function svApplySetting(id, v){
   if (el.type === "checkbox") el.checked = v === "True"; else el.value = v;
   el.dispatchEvent(new Event("change", {bubbles: true}));
 }
+// SETTINGS FROM THE CHECK, APPLIED (2026-11-16). What the check of the frames
+// finds a set needs (Tier combine for one frame per exposure, Tiers by
+// measured brightness for mixed ISO) used to wait for an Apply that a user
+// in a hurry never pressed. Now it is set by itself -- but only on a control
+// still at its default, so a choice made by hand is never overruled -- and
+// marked; loading another folder puts those controls back to their defaults
+// first (a Tiers setting left over from another folder once doubled the Moon).
+let SV_AUTO = false;
+function optDefault(el){ return el.tagName === "SELECT" ? (([...el.options].find(o => o.defaultSelected) || el.options[0]) || {}).value : el.defaultChecked; }
+function svAutoApply(j, g){
+  // the settings come from the frames' metadata, known before the previews are read
+  if (!j) { svAutoText(); return; }
+  for (const x of (g && g.settings) || []){
+    const el = $(x.id); if (!el || el.value === x.value) continue;
+    if (el.dataset.byHand) continue;                                        // chosen by hand
+    if (el.value !== optDefault(el) && !el.dataset.byCheck) continue;      // set before (recipe, earlier folder)
+    SV_AUTO = true;
+    try { el.value = x.value; el.dataset.byCheck = x.name + ": " + x.label + " \u2014 " + x.why;
+          el.dispatchEvent(new Event("change", {bubbles: true})); } finally { SV_AUTO = false; }
+  }
+  svAutoText();
+}
+function svAutoRevert(){
+  document.querySelectorAll("#optpanel [data-by-check]").forEach(el => {
+    SV_AUTO = true;
+    try { el.value = optDefault(el); delete el.dataset.byCheck; el.dispatchEvent(new Event("change", {bubbles: true})); }
+    finally { SV_AUTO = false; }
+  });
+  svAutoText();
+}
+function svAutoText(){
+  const t = $("p2autotx"); if (!t) return;
+  const set = [...document.querySelectorAll("#optpanel [data-by-check]")].map(el => el.dataset.byCheck);
+  // suggestions the user overruled by hand: said, not hidden
+  const kept = (((SV && SV.guide) || {}).settings || []).filter(x => { const el = $(x.id); return el && el.dataset.byHand && el.value !== x.value; })
+    .map(x => `${x.name}: the check suggests ${x.label}; your own choice is kept`);
+  const hand = [...document.querySelectorAll("#optpanel select, #optpanel input[type=checkbox]")]
+    .filter(el => !el.dataset.byCheck && (el.tagName === "SELECT" ? el.value !== optDefault(el) : el.checked !== optDefault(el))).length;
+  if (!$("folder").value.trim()){ t.innerHTML = "Load a folder in 1 Images: the check of the frames sets what this set needs."; return; }
+  t.innerHTML = (set.length ? "<b>Set by the check of the frames:</b><ul class=\"svbul\">" + set.map(s => `<li>${svEsc(s)}</li>`).join("") + "</ul>"
+                           : (kept.length ? "" : "<b>Nothing in this set needs a setting different from the tested defaults.</b> "))
+    + (kept.length ? "<ul class=\"svbul\">" + kept.map(s => `<li>${svEsc(s)}</li>`).join("") + "</ul>" : "")
+    + (hand ? ` ${hand} expert setting${hand > 1 ? "s" : ""} changed by you (gold dot).` : " All other settings are at their tested defaults.")
+    + " Press Start.";
+}
+$("optpanel").addEventListener("change", e => {
+  if (SV_AUTO) return;
+  // a choice made by hand -- even back to the default -- is never overruled
+  const el = e.target; if (!el || !el.dataset) return;
+  el.dataset.byHand = "1";
+  if (el.dataset.byCheck) delete el.dataset.byCheck;
+  svAutoText();
+});
 async function svApplyFrames(kind){
-  const pend = (SV && SV.roles_pending) || {}, roles = {}, set = {};
+  const pend = (SV && SV.roles_pending) || {}, roles = {}, set = {}, why = {};
   for (const [n, r] of Object.entries(pend)){
     if (kind && r.role !== kind) continue;
+    if (r.role === "on"){ set[n] = "auto"; why[n] = ""; continue; }
     if (r.role === "off") set[n] = "off"; else roles[n] = r.role;
+    why[n] = "survey: " + (r.why || "");
   }
-  if (Object.keys(roles).length || Object.keys(set).length){ await fpRole(roles, set); await loadSurvey(); }
+  if (Object.keys(roles).length || Object.keys(set).length){ await fpRole(roles, set, why); await loadSurvey(); }
 }
 $("svsec").addEventListener("click", async e => {
   const b = e.target.closest("[data-svset]");
@@ -2054,10 +2204,11 @@ $("fpstretch").addEventListener("change", () => {
   if (FPV) fpViewDraw();
 });
 
-async function loadFolder(){
+async function loadFolder(keep){
+  if (keep !== true) svAutoRevert();
   const r = await fetch("/api/folder", {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({path: $("folder").value})});
+    body: JSON.stringify({path: $("folder").value, keep: keep === true})});
   const j = await r.json();
   if(!j.ok){ $("status").textContent = j.error; return; }
   $("flatDir").placeholder = j.flat_dir
@@ -2391,6 +2542,9 @@ function runStop(mark, note){
   $("stepnote").className = "";
   $("stepnote").textContent = note ? "· " + note : "";
   RUN_BASE = null;
+  // (2026-11-16) an export, an Extras product or a crop never refreshed the
+  // Start button: it kept "Running…" and the dot kept blinking after the job
+  try { syncStartLabel(); } catch (e) {}
 }
 
 /* ONE DROPPED POLL USED TO HANG THE INTERFACE FOR GOOD.
@@ -2512,10 +2666,19 @@ function drawRunNotes(){
   const sec = $("rnsec"); if (!sec) return;
   const n = (GEO && GEO.runNotes) || [];
   sec.style.display = n.length ? "" : "none";
-  $("rnlist").innerHTML = n.map(x => `<div class="svrow"><div class="svtx"><b>${svEsc(x.title)}</b>`
-    + `<span class="svwhy">${svEsc(x.text)}</span>`
-    + `<span class="svwhy" style="opacity:.7;font-size:11px">log: ${svEsc(x.line)}</span></div></div>`).join("");
+  $("rnlist").innerHTML = n.map(x => {
+    const a = x.act, el = a && $(a.id), on = el && el.value === a.value;
+    const btn = a && el ? (on ? `<span class="svok">set; start a new stack to see it</span>`
+                              : `<button class="mini" data-rnset="${svEsc(a.id)}" data-v="${svEsc(a.value)}">${svEsc(a.label)}</button>`) : "";
+    return `<div class="svrow"><div class="svtx"><b>${svEsc(x.title)}</b>`
+      + `<span class="svwhy">${svEsc(x.text)}</span>`
+      + `<span class="svwhy" style="opacity:.7;font-size:11px">log: ${svEsc(x.line)}</span></div>${btn}</div>`;
+  }).join("");
 }
+$("rnlist").addEventListener("click", async e => {
+  const b = e.target.closest("[data-rnset]"); if (!b) return;
+  await svApplySetting(b.dataset.rnset, b.dataset.v); drawRunNotes();
+});
 /* ---- FORCE EARTHSHINE (2026-11-14) ------------------------------------
    The earthshine goes into the picture only when its pattern matches a map
    of the real Moon well above chance. The box below the Earthshine slider
@@ -2550,7 +2713,11 @@ function syncEarthForce(){
     note = `Can use the earthshine from ${f.source}: match ${(+c.best).toFixed(2)} against `
       + `${(+c.random_mean).toFixed(2)} for chance. Above chance, not confirmed.`;
   } else if (f.why){
-    note = "Not available: " + f.why + ".";
+    // "not needed: ..." and "nothing to use: ..." say it themselves
+    note = /^(not needed|nothing to use)/.test(f.why)
+      ? (/earthshine is confirmed|earthshine confirmed/.test(f.why) ? "Not needed: earthshine confirmed."
+                                                                    : f.why.charAt(0).toUpperCase() + f.why.slice(1) + ".")
+                                                      : "Not available: " + f.why + ".";
   }
   $("earthForceNote").textContent = note;
 }
@@ -2618,7 +2785,8 @@ async function loadLayers(){
 
   if (VIEW !== "composite" && !GEO.hasHill && VIEW === "partialconv")
     VIEW = "composite";           // its button is about to be hidden
-  if (Object.keys(P).length === 0) buildSliders(GEO.defaults);
+  const _fresh = Object.keys(P).length === 0;
+  if (_fresh){ buildSliders(GEO.defaults); buildQuick(); }
   else syncNeedsLayer();
   // the partial-convolution group only exists for a workdir that actually has the masks
   { const g = $("grp-hill");
@@ -2732,6 +2900,7 @@ async function loadLayers(){
     L.wf[i] = _ss((r - 1.02*GEO.R)/(0.55*GEO.R));
   }
   ready = true; $("export").disabled = false; $("cropbtn").disabled = false;
+  try { histReset(); } catch (e) {}
   if (TAB === 4){ try { xRefreshThumbs(); } catch (e) {} }
   _poolInit(); $("credit").title = "Preview render: " + POOL.why;
   $("setsave").disabled = false;
@@ -2739,7 +2908,104 @@ async function loadLayers(){
   $("status").textContent = "ready — adjust and export";
   setTab(3);
   renderNow(); markDefaults();
+  // A GOOD FIRST LOOK (2026-11-16): the first result of a session opens on a
+  // finished look instead of the camera-coloured stack; the stack as loaded
+  // stays one choice in the list
+  if (_fresh && !$("lookpreset").value && LOOKS[DEFAULT_LOOK]){
+    $("lookpreset").value = DEFAULT_LOOK; $("lookpreset").dispatchEvent(new Event("change"));
+  }
+  RG.key = ""; RG.last = null; $("rgbtn").disabled = false;
+  rgShow("", "Picture check: starts in a moment"); rgSchedule(2500);
 }
+
+// ---- TAB 3, SIMPLE FIRST (2026-11-16) --------------------------------------
+// A first-time user met 73 sliders in ten groups, the first of them named
+// after the filters (Radial flatten, FNRGF share, MGN contrast), and the
+// looks three screens down. Now the look and six plain controls come first;
+// every other group folds under "fine tuning" (remembered). The controls are
+// the same elements, moved: their values, resets and saved settings are as
+// before.
+const DEFAULT_LOOK = "expM4";
+const QUICK = [["outGamma", "Brightness"], ["radialFlatten", "Corona reach (outer corona brighter)"],
+               ["detailGain", "Detail"], ["temp", "Colour temperature (blue \u2190 \u2192 yellow)"],
+               ["earthShine", "Earthshine on the Moon"], ["promLayer", "Prominences"]];
+let QUICK_BUILT = false;
+function buildQuick(){
+  if (QUICK_BUILT) return; QUICK_BUILT = true;
+  const lp = $("lookpreset").closest("label"); if (lp) $("lookhome").appendChild(lp);
+  for (const [k, name] of QUICK){
+    const el = $("s_" + k); if (!el) continue;
+    const row = el.closest(".ctl"); if (!row) continue;
+    const sp = row.querySelector("label > span");
+    if (sp){ row.title = sp.textContent + " (in fine tuning). Double-click to reset."; sp.textContent = name; }
+    $("g-quick").appendChild(row);
+  }
+  document.querySelectorAll('.rail .group[data-tab="3"]').forEach(g => {
+    if (!["grp-quick", "grp-finebar", "rnsec"].includes(g.id)) g.classList.add("fine"); });
+  let open = false; try { open = localStorage.getItem("efh.fine") === "1"; } catch (e) {}
+  setFine(open);
+}
+function setFine(open){
+  document.body.classList.toggle("finehide", !open);
+  $("finebtn").textContent = open ? "Hide the fine-tuning controls" : "Show all controls (fine tuning)";
+  try { localStorage.setItem("efh.fine", open ? "1" : "0"); } catch (e) {}
+}
+$("finebtn").addEventListener("click", () => setFine(document.body.classList.contains("finehide")));
+document.body.classList.add("finehide");
+
+// ---- THE PICTURE CHECK (2026-11-16, server ringguard.py) --------------------
+// Rings round the Moon, measured on the picture as the export will render it,
+// a few seconds after the look stops changing; shown here and in 4 Export.
+const RG = {busy: false, timer: null, key: "", last: null};
+function rgKey(){ try { return JSON.stringify(effParams()); } catch (e) { return ""; } }
+function rgShow(cls, txt){
+  $("rgline").className = "rgline " + cls; $("rgtext").textContent = txt;
+  const x = $("xrg"); if (x){ x.className = "xrg hint " + (cls === "warn" ? "warn" : ""); x.textContent = (cls === "ok" || cls === "warn") ? txt : ""; }
+}
+function rgSchedule(ms){
+  if (!ready) return;
+  if (RG.timer) clearTimeout(RG.timer);
+  RG.timer = setTimeout(() => { RG.timer = null; rgRun(false); }, ms == null ? 8000 : ms);
+}
+async function rgRun(force){
+  if (!ready || RG.busy) return;
+  const key = rgKey(); if (!force && key === RG.key) return;
+  RG.busy = true; $("rgbtn").disabled = true;
+  rgShow("busy", "Picture check: rendering round the Moon at full resolution\u2026");
+  try {
+    const r = await fetch("/api/ringcheck", {method: "POST", headers: {"Content-Type": "application/json"},
+                                             body: JSON.stringify({params: effParams()})});
+    const j = await r.json();
+    if (!j.ok){
+      // another job is rendering or running: the check comes back by itself afterwards
+      if (/rendering|still running/.test(j.error || "")){ rgShow("", "Picture check: waits for the job that is running"); RG.key = ""; rgSchedule(15000); return; }
+      rgShow("", "Picture check: " + (j.error || "not possible now")); return; }
+    RG.key = key; RG.last = j;
+    if (rgKey() !== key){ rgShow("", "Picture check: the look changed, checking again"); rgSchedule(3000); return; }
+    if (j.level === "ok"){ rgShow("ok", "Picture check: no rings round the Moon."); return; }
+    const at = j.rings.map(x => x.at.toFixed(2) + " R").filter((v, i, a) => a.indexOf(v) === i).join(", ");
+    const why = j.source === "look"
+      ? "The look makes them: lower Detail, or pick a softer look (the looks named \u201csoft\u201d)."
+      : "They are in the stack itself, where one exposure takes over from the next, so no look removes them. Check your result (above) says what to try.";
+    rgShow("warn", "Picture check: rings round the Moon at " + at + ". " + why);
+  } catch (e) { rgShow("", "Picture check: not possible now"); }
+  finally { RG.busy = false; $("rgbtn").disabled = !ready; }
+}
+$("rgbtn").addEventListener("click", () => rgRun(true));
+$("undobtn").addEventListener("click", () => histGo(-1));
+$("abbtn").addEventListener("click", abClick);
+$("galbtn").addEventListener("click", () => { if ($("galbox").style.display === "none") galOpen(); else galClose(); });
+$("galclose").addEventListener("click", galClose);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && $("galbox").style.display !== "none") galClose(); });
+$("redobtn").addEventListener("click", () => histGo(1));
+document.addEventListener("keydown", e => {
+  if (TAB !== 3 || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "TEXTAREA" || (tag === "INPUT" && !/^(range|checkbox|radio|button)$/.test(t.type)) || (t && t.isContentEditable)) return;
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey){ e.preventDefault(); histGo(-1); }
+  else if ((k === "z" && e.shiftKey) || k === "y"){ e.preventDefault(); histGo(1); }
+});
 
 const cv = $("cv"), ctx = cv.getContext("2d");
 const oc = document.createElement("canvas"), octx = oc.getContext("2d");
@@ -2906,7 +3172,7 @@ function detailAt(j){
   return [mg, fn, inEff];
 }
 // FINAL SHARPENING -- the preview's copy of render.final_sharpen. Same
-// recipe (a published Photoshop action: five high passes at 1.5-24 px scaled
+// recipe (a published image-editor action: five high passes at 1.5-24 px scaled
 // to the solar radius, median / minimum / maximum across the scales in Soft
 // Light, a per-band noise gate), on the decimated preview, with box-blur
 // Gaussians so a slider stays interactive. The export is the Python one.
@@ -3306,6 +3572,9 @@ function _parWork(t, S, ctl, K, rows){
 function _parRun(t, S){
   const H = S.H;
   const one = () => { if (t === "A") _stageA(S, 0, H); else if (t === "B") _stageB(S, 0, H); else _passApply(S, 0, H); };
+  // the look gallery's quick drafts run here, in one piece: on the worker pool
+  // some strips of a draft kept the previous look (seen on a Mac, 2026-11-17)
+  if (GAL_RENDER){ one(); return; }
   if (!_poolReady() || (t !== "P" && !(_isShared(S.V0) && _isShared(S.V1) && _isShared(S.V2) && _isShared(S.EG)))
       || (t === "P" && ((S.ID && S.ID.A && !_isShared(S.ID.A)) || (S.BD && S.BD.A && !_isShared(S.BD.A)))) || !_poolSync()){ one(); return; }
   _fsCancel();                                       // a sharpening still running is stale now
@@ -4053,7 +4322,79 @@ function _splitPair(t){
   if (k.length === 2 && k.every(x => /^[-+]?\d+([.,]\d+)?$/.test(x))) return k;
   return null;
 }
+// ---- THE SITE AT A GLANCE (2026-11-16) -------------------------------------
+// The site was easy to forget: a form of eight fields with the verdict in a
+// grey line under the buttons. Now a coloured status says what is set and
+// whether it fits the eclipse, a chip in the title says it when folded, and a
+// small map shows the place in the path of totality.
+const MINI = {tiles: new Map(), path: null, date: "", la: null, lo: null};
+function siteStatus(j){
+  const s = j.site || {}, pa = j.path, el = $("siteStat"), chip = $("siteChip");
+  const pos = s.lat != null ? `${Math.abs(s.lat).toFixed(4)}\u00b0 ${s.lat < 0 ? "S" : "N"}, ${Math.abs(s.lon).toFixed(4)}\u00b0 ${s.lon < 0 ? "W" : "E"}` : "";
+  let cls = "none", t = "", c = "not set";
+  if (!pos && !s.date){
+    t = "<b>Not set.</b> Optional: without it the stars are matched less tightly and the polar map has no solar north. Choose the eclipse and a place below, or pick it on the map.";
+  } else {
+    const parts = [pos + (s.height_m != null && s.height_m !== "" ? `, ${s.height_m} m` : ""),
+                   (s.date || "no date") + (s.time ? `, ${s.time} local` : ", no time") + (s.utc_offset_text ? ` (UTC${s.utc_offset_text})` : "")];
+    const bad = [];
+    if (!pos) bad.push("no position");
+    if (!s.date || !s.time) bad.push("date or time missing");
+    if (pa && !pa.total) bad.push("this position is outside the path of totality");
+    if (pa && pa.total && pa.time_diff_min != null && Math.abs(pa.time_diff_min) > 5) bad.push(`the time is ${Math.abs(pa.time_diff_min).toFixed(0)} min off mid-totality there`);
+    const inside = pa && pa.total ? ` \u00b7 inside the path, totality ${Math.floor(Math.round(pa.duration_s)/60)} min ${String(Math.round(pa.duration_s)%60).padStart(2,"0")} s` : "";
+    if (bad.length){ cls = "warn"; c = "check"; t = `<b>Check:</b> ${bad.join("; ")}.<br>${parts.join(" \u00b7 ")}${inside}`; }
+    else { cls = "ok"; c = "set"; t = `<b>\u2713 Set:</b> ${parts.join(" \u00b7 ")}${inside}`; }
+  }
+  if (el){ el.className = "sitestat " + cls; el.innerHTML = t; }
+  if (chip){ chip.className = "sitechip " + (cls === "none" ? "" : cls); chip.textContent = c; }
+  MINI.la = s.lat != null ? s.lat : null; MINI.lo = s.lon != null ? s.lon : null;
+  const d = s.date || (pa && pa.date) || "";
+  if (d && d !== MINI.date){
+    MINI.date = d; MINI.path = null;
+    fetch("/api/eclipsepath?date=" + encodeURIComponent(d)).then(r => r.json()).then(p => { if (p.ok && MINI.date === d){ MINI.path = p; miniDraw(); } }).catch(() => {});
+  }
+  miniDraw();
+}
+function miniDraw(){
+  const cv = $("siteMini"); if (!cv) return;
+  if (MINI.la == null || !isFinite(MINI.la)){ cv.style.display = "none"; $("siteMiniAttr").textContent = ""; return; }
+  cv.style.display = "";
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;   // hidden (another tab): drawn when it shows
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)){ cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = "#0e1116"; g.fillRect(0, 0, w, h);
+  const z = 6, n = Math.pow(2, z), [cx, cy] = _ll2w(MINI.la, MINI.lo, z), x0 = cx - w / 2, y0 = cy - h / 2;
+  for (let ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + h) / 256); ty++){
+    if (ty < 0 || ty >= n) continue;
+    for (let tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + w) / 256); tx++){
+      const k = `${z}/${((tx % n) + n) % n}/${ty}`;
+      let im = MINI.tiles.get(k);
+      if (!im){ im = new Image(); im._ok = false; im.onload = () => { im._ok = true; MINI.ok = (MINI.ok || 0) + 1; miniDraw(); };
+                im.onerror = () => { MINI.fail = (MINI.fail || 0) + 1;
+                  if (!MINI.ok && MINI.fail >= 4 && (MINI.src || 0) + 1 < MAP_SRC.length){ MINI.src = (MINI.src || 0) + 1; MINI.fail = 0; MINI.tiles.clear(); miniDraw(); } };
+                im.src = MAP_SRC[MINI.src || 0].url(z, ((tx % n) + n) % n, ty); MINI.tiles.set(k, im); }
+      if (im._ok){ g.globalAlpha = 0.75; g.drawImage(im, tx * 256 - x0, ty * 256 - y0); g.globalAlpha = 1; }
+    }
+  }
+  if (MINI.path){
+    try {
+      const P = _pathLL(MINI.path), W = _mw(z);
+      // the band's longitudes are continuous; shift by whole turns to sit by the site
+      const shift = la_lo => { let [la, lo] = la_lo; while (lo - MINI.lo > 180) lo -= 360; while (MINI.lo - lo > 180) lo += 360; return _ll2w(la, lo, z); };
+      g.beginPath(); P.R.forEach((p, i) => { const [x, y] = shift(p); i ? g.lineTo(x - x0, y - y0) : g.moveTo(x - x0, y - y0); }); g.closePath();
+      g.fillStyle = "rgba(240,170,60,.20)"; g.fill(); g.strokeStyle = "rgba(240,170,60,.75)"; g.lineWidth = 1.2; g.stroke();
+      g.beginPath(); P.C.forEach((p, i) => { const [x, y] = shift(p); i ? g.lineTo(x - x0, y - y0) : g.moveTo(x - x0, y - y0); });
+      g.strokeStyle = "rgba(240,170,60,.9)"; g.setLineDash([4, 3]); g.stroke(); g.setLineDash([]);
+    } catch (e) {}
+  }
+  g.beginPath(); g.arc(w / 2, h / 2, 6, 0, 2 * Math.PI); g.fillStyle = "#e8433b"; g.fill();
+  g.lineWidth = 2; g.strokeStyle = "#fff"; g.stroke();
+  $("siteMiniAttr").innerHTML = MAP_SRC[MINI.src || 0].attr + (MINI.path ? " \u00b7 path of totality (orange)" : "");
+}
 function _siteShow(j){
+  try { siteStatus(j); } catch (e) {}
   const s = j.site || {};
   $("siteLat").value = s.lat_text || ""; $("siteLon").value = s.lon_text || "";
   $("siteH").value = (s.height_m ?? "") === null ? "" : (s.height_m ?? "");
@@ -4358,6 +4699,13 @@ function mapOpen(){
 }
 function mapClose(){ $("mapPick").classList.remove("on"); MAP.drag = null; }
 $("siteMap").addEventListener("click", e => { e.preventDefault(); mapOpen(); });
+// the status line is cut off in the header: the whole text on hover (2026-11-17)
+try { new MutationObserver(() => { $("status").title = $("status").textContent; })
+        .observe($("status"), {childList: true, characterData: true, subtree: true}); } catch (e) {}
+$("siteMini").addEventListener("click", e => { e.preventDefault(); mapOpen(); });
+try { new ResizeObserver(() => { try { miniDraw(); } catch (e) {} }).observe($("siteMini")); }
+catch (e) { window.addEventListener("resize", () => { try { miniDraw(); } catch (e2) {} }); }
+$("siteBox").addEventListener("toggle", () => { try { miniDraw(); } catch (e) {} });
 $("mapCancel").addEventListener("click", mapClose);
 $("mapEcl").addEventListener("change", () => { mapLoadPath($("mapEcl").value).then(() => { if (!MAP.pick) mapFit(); }); });
 $("mapIn").addEventListener("click", () => mapZoom(1));
@@ -4658,6 +5006,137 @@ document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () =
   document.querySelectorAll(".vbtn").forEach(x => x.classList.toggle("primary", x===b));
   renderNow();
 }));
+// UNDO / REDO FOR THE LOOK (2026-11-17). Every state the look settles in
+// (0.7 s without a change) is kept: all of P and the look preset shown. Undo
+// steps back through them, Redo forward; a change after an Undo drops the
+// steps ahead, as everywhere. A new result starts a new history. Ctrl+Z /
+// Cmd+Z and Ctrl+Shift+Z / Cmd+Shift+Z (or Ctrl+Y) on tab 3, not while typing.
+var HIST = {s: [], i: -1, t: null, applying: false};
+function histState(){ return JSON.stringify({p: P, look: ($("lookpreset") || {}).value || ""}); }
+function histButtons(){
+  const u = $("undobtn"), r = $("redobtn"); if (!u || !r) return;
+  u.disabled = !(ready && HIST.i > 0); r.disabled = !(ready && HIST.i < HIST.s.length - 1);
+}
+function histRecord(){
+  HIST.t = null;
+  if (!ready || HIST.applying) return;
+  const st = histState();
+  if (HIST.s[HIST.i] === st) return;
+  HIST.s = HIST.s.slice(0, HIST.i + 1); HIST.s.push(st);
+  if (HIST.s.length > 200) HIST.s.shift();
+  HIST.i = HIST.s.length - 1; histButtons();
+}
+function histSoon(){
+  if (HIST.applying) return;
+  if (AB.showing){ AB.showing = false; abLabel(); }
+  if (HIST.t) clearTimeout(HIST.t); HIST.t = setTimeout(histRecord, 700);
+}
+function histReset(){
+  HIST.s = []; HIST.i = -1; if (HIST.t) clearTimeout(HIST.t); HIST.t = null; histSoon(); histButtons();
+  try { abReset(); GAL.done = false; $("galbtn").disabled = !ready; } catch (e) {}
+}
+// a kept state put back on P, the sliders and the look select, with no history step
+function histApply(st){
+  HIST.applying = true;
+  try {
+    const o = JSON.parse(st);
+    for (const k of Object.keys(P)) if (!(k in o.p)) delete P[k];
+    for (const k in o.p) P[k] = JSON.parse(JSON.stringify(o.p[k]));
+    applyParams(JSON.parse(JSON.stringify(o.p)));
+    if ($("lookpreset")) $("lookpreset").value = o.look;
+    try { markNonDefault(); } catch (e) {}
+  } finally { setTimeout(() => { HIST.applying = false; }, 0); }
+}
+function histGo(d){
+  if (HIST.t){ clearTimeout(HIST.t); histRecord(); }          // a change still settling counts first
+  const j = HIST.i + d; if (j < 0 || j >= HIST.s.length) return;
+  HIST.i = j; histApply(HIST.s[j]);
+  if (AB.showing){ AB.showing = false; abLabel(); }
+  histButtons();
+}
+
+// A/B COMPARE (2026-11-17). A is a kept look; the button switches the picture
+// between A and the look you have now (B). Changing anything while A is shown
+// makes that the look you have now.
+var AB = {a: null, b: null, showing: false};
+function abLabel(){
+  const b = $("abbtn"); if (!b) return;
+  b.disabled = !ready;
+  b.classList.toggle("on", AB.showing);
+  b.innerHTML = !AB.a ? "A/B" : (AB.showing ? "Showing A" : "Showing B");
+  b.title = !AB.a ? "Compare two looks: click to keep the look as it is now as A, then change the look and click again to switch between A and B. Shift-click keeps the current look as the new A."
+                  : "Click to switch between A and B (the look you have now). Shift-click keeps the current look as the new A.";
+}
+function abClick(e){
+  if (!ready) return;
+  if (!AB.a || e.shiftKey){ AB.a = histState(); AB.showing = false; abLabel();
+    $("status").textContent = "A/B: this look is kept as A. Change the look, then click A/B to compare."; return; }
+  if (!AB.showing){ AB.b = histState(); histApply(AB.a); AB.showing = true; }
+  else { histApply(AB.b || AB.a); AB.showing = false; }
+  abLabel();
+}
+function abReset(){ AB.a = null; AB.b = null; AB.showing = false; abLabel(); }
+
+// THE LOOK GALLERY (2026-11-17). Every look of the select, rendered on the
+// picture as a quick draft and cut to the corona round the Moon; a click puts
+// that look on. The tiles are kept until the next result.
+var GAL = {busy: false, done: false};
+function galCell(o){
+  const d = document.createElement("div"); d.className = "galcell"; d.dataset.look = o.value;
+  const c = document.createElement("canvas"); c.width = c.height = 260;
+  const sp = document.createElement("span"); sp.textContent = o.textContent;
+  d.append(c, sp); d.addEventListener("click", () => galPick(o.value));
+  return d;
+}
+function galMark(){ const v = $("lookpreset").value; document.querySelectorAll(".galcell").forEach(c => c.classList.toggle("on", c.dataset.look === v)); }
+function galPick(v){
+  if (GAL.busy) return;
+  $("lookpreset").value = v; $("lookpreset").dispatchEvent(new Event("change"));
+  galMark(); galClose();
+}
+function galClose(){ $("galbox").style.display = "none"; }
+async function galOpen(){
+  if (!ready || !GEO) return;
+  $("galbox").style.display = "";
+  if (GAL.done){ galMark(); $("galnote").textContent = "click one to use it"; return; }
+  if (GAL.busy) return;
+  GAL.busy = true;
+  const grid = $("galgrid"); grid.innerHTML = "";
+  const opts = [...$("lookpreset").options].filter(o => o.value);
+  const cells = opts.map(o => { const d = galCell(o); grid.appendChild(d); return d; });
+  if (AB.showing){ histApply(AB.b || AB.a); AB.showing = false; abLabel(); }
+  const saved = histState(), status = $("status").textContent;
+  try { _fsCancel(); } catch (e) {}                   // no final sharpening of the last picture landing in between
+  const _draw = draw; draw = function(){};            // the big picture stays as it is meanwhile
+  GAL_RENDER = true;
+  const _view = VIEW; VIEW = "composite";
+  try {
+    for (let i = 0; i < opts.length; i++){
+      if ($("galbox").style.display === "none") break;
+      $("galnote").textContent = `rendering ${i + 1} of ${opts.length}\u2026`;
+      HIST.applying = true;
+      $("lookpreset").value = opts[i].value; $("lookpreset").dispatchEvent(new Event("change"));
+      RENDER_DRAFT = true; RENDER_DRAFT_STEP = 2;
+      try { renderNow(); } finally { RENDER_DRAFT = false; }
+      const s = Math.max(16, Math.min(GEO.W, GEO.H, Math.round(5.6 * GEO.R)));
+      const x0 = Math.max(0, Math.min(GEO.W - s, Math.round(GEO.cx - s / 2)));
+      const y0 = Math.max(0, Math.min(GEO.H - s, Math.round(GEO.cy - s / 2)));
+      const c = cells[i].querySelector("canvas");
+      c.getContext("2d").drawImage(oc, x0, y0, s, s, 0, 0, c.width, c.height);
+      await new Promise(r => setTimeout(r, 0));
+    }
+    GAL.done = [...grid.querySelectorAll("canvas")].length === opts.length && $("galbox").style.display !== "none";
+  } finally {
+    GAL_RENDER = false; draw = _draw; VIEW = _view;
+    histApply(saved);
+    $("status").textContent = status;
+    GAL.busy = false;
+    galMark();
+    $("galnote").textContent = GAL.done ? "click one to use it" : "";
+  }
+}
+var GAL_RENDER = false;
+
 // RENDER SCHEDULING. One render per animation frame at most. While a control
 // is being moved (input in the last 150 ms) and a full render takes longer
 // than 60 ms, the frame is drawn as a draft at a half or a third of the resolution; the full picture
@@ -4665,6 +5144,8 @@ document.querySelectorAll(".vbtn").forEach(b => b.addEventListener("click", () =
 let raf = null, _lastInput = 0, _fullMs = 0, _fullTimer = null;
 function noteInput(){ _lastInput = performance.now(); }
 function scheduleRender(){
+  histSoon();
+  if (GAL_RENDER) return;
   if (raf) return;
   raf = requestAnimationFrame(() => {
     raf = null;
@@ -4675,6 +5156,7 @@ function scheduleRender(){
     try { renderNow(); } finally { RENDER_DRAFT = false; }
     if (!draft) _fullMs = performance.now() - t0;
     markDefaults();
+    if (!draft && ready && typeof RG !== "undefined") rgSchedule();
     if (_fullTimer){ clearTimeout(_fullTimer); _fullTimer = null; }
     if (draft) _fullTimer = setTimeout(() => { _fullTimer = null; _lastInput = 0; scheduleRender(); }, 180);
   });
@@ -4708,7 +5190,7 @@ cv.addEventListener("pointerup", e => { if (PICKWB){ pickEnd(e); return; } drag=
 cv.addEventListener("dblclick", () => { if (PICKWB) return; vz=1; vtx=vty=0; draw(); });
 
 /* ---- white point picker -----------------------------------------------
-   Photoshop's eyedropper, on the preview. The box's median chroma is taken
+   An image editor's eyedropper, on the preview. The box's median chroma is taken
    from the SAME ratio layer the render uses and pushed through the same
    chain up to the point where Warmth and Tint apply -- saturation, sky-cast
    and corona neutralise included -- and then those two sliders are solved
@@ -4963,6 +5445,7 @@ function cropAt(e){
   const dec = GEO.decim || 1;
   CROPAT = {x: Math.round(a[0] * dec), y: Math.round(a[1] * dec), size: 600};
   cropCancel(); cropMark(); cropFetch();
+  $("status").textContent = "1:1 crop shown over the preview (\u2715 closes it)";
 }
 $("cropbtn").addEventListener("click", () => { if (PICKCROP) cropCancel(); else cropBegin(); });
 $("cropagain").addEventListener("click", () => cropFetch());
@@ -4994,9 +5477,17 @@ $("ringload").addEventListener("click", async () => {
   };
   poll();
 });
-fetch("/api/version").then(r => r.json()).then(j => {
+fetch("/api/version").then(r => r.json()).then(async j => {
   applyBrand(j);
   $("credit").textContent = `${BRAND.app} ${j.version}`;
+  // A RELOADED TAB (2026-11-16): the server still has the folder, and maybe a
+  // finished result or a running job; the page used to come back empty
+  if (j.folder && !$("folder").value.trim() && !document.body.classList.contains("srcimport")){
+    $("folder").value = j.folder;
+    if (j.busy){ pollProgress(); return; }
+    await loadFolder(true);
+    if (j.ready){ loadTimeline(); await loadLayers(); }
+  }
 }).catch(() => {});
 
 /* ---- file / folder picker -----------------------------------------------
@@ -5325,17 +5816,26 @@ function markNonDefault(){
     else nd = el.checked !== el.defaultChecked;
     box.classList.toggle("nondef", !!nd); if (nd) n++;
   });
-  const on = $("optnote"); if (on) on.textContent = n ? `· ${n} changed from default` : "· all at their defaults";
+  const nc = document.querySelectorAll("#optpanel [data-by-check]").length, nh = n - nc;
+  const on = $("optnote"); if (on) on.textContent = !n ? "· all at their defaults"
+    : [nc ? `${nc} set by the check` : "", nh > 0 ? `${nh} changed by you` : ""].filter(Boolean).map(t => "· " + t).join(" ");
 }
 $("optpanel").addEventListener("change", markNonDefault);
 markNonDefault();
+// (2026-11-16) saving and loading a processing recipe is an expert's tool:
+// it lives inside Expert settings now
+{ const rcp = $("procsave") && $("procsave").closest(".rail-like");
+  if (rcp){ rcp.style.marginTop = "14px"; $("optpanel").appendChild(rcp); } }
 // 3. THE STEPS: each tab says where it stands (a line under its name), and a
 // finished step gets a check mark; the Next buttons follow the same state
 let XDONE = 0;
 function syncSteps(){
   const imp = document.body.classList.contains("srcimport");
   const hasFolder = imp ? !!$("importPath").value.trim() : (!!$("folder").value.trim() && (!!TL || $("cksec").style.display !== "none"));
-  const running = $("pbarwrap").classList.contains("run");
+  const busy = $("pbarwrap").classList.contains("run");
+  // (2026-11-16) an export or an Extras job is not the stack: tab 2 stays
+  // "stacked" and the tab doing the work says so
+  const running = busy && !["export", "extras"].includes(RUN_STARTED_KIND);
   // the welcome stays until there is something to work on, in either source
   // mode (a remembered Import HDR with no file chosen used to hide it a moment
   // after the page loaded)
@@ -5345,8 +5845,8 @@ function syncSteps(){
   sub(1, imp ? "finished HDR image" : (TL && TL.n ? `${TL.n} frames · ${(TL.exposures || []).length} exp.` : (hasFolder ? "folder loaded" : "choose a folder")));
   sub(2, running ? "running…" : (ready ? "stacked" : (hasFolder ? "ready to start" : "")));
   sub(3, ready ? "shape the look" : "after the stack");
-  sub(4, XDONE ? `${XDONE} written` : (ready ? "pick products" : ""));
-  sub(5, EDONE ? `${EDONE} made` : (ready ? "posters, overlays…" : ""));
+  sub(4, busy && RUN_STARTED_KIND === "export" ? "writing…" : (XDONE ? `${XDONE} written` : (ready ? "pick products" : "")));
+  sub(5, busy && RUN_STARTED_KIND === "extras" ? "making…" : (EDONE ? `${EDONE} made` : (ready ? "posters, overlays…" : "")));
   done(1, hasFolder); done(2, ready); done(4, XDONE > 0); done(5, EDONE > 0);
   const n1 = $("next1"), n2 = $("next2");
   if (n1) n1.disabled = !hasFolder;
@@ -6154,7 +6654,10 @@ function syncStartLabel(){
   const mark = ids => { for (const id in OPTMAP) { const el = $(id); const box = el && (el.closest("label") || el.closest(".opt")); if (box) box.classList.toggle("changed", ids.includes(id)); }
     for (const id of ["photometry","flatDir","simpleStack"]) { const el = $(id); const box = el && (el.closest("label") || el.closest(".opt")); if (box) box.classList.toggle("changed", ids.includes(id)); } };
   let main = "Start", sub = "", cls = "", kind = "";
-  if (RUN_BASE){ b.innerHTML = "Running\u2026"; dot.className = "sdot run"; return; }
+  if (RUN_BASE){
+    // an export or an Extras job is not a stack: say which job holds the button
+    const what = {export: "writing the export", extras: "making the extras", contact: "contact frames"}[RUN_STARTED_KIND] || "";
+    b.innerHTML = "Running\u2026" + (what ? '<span class="sub">' + what + '</span>' : ""); dot.className = "sdot run"; return; }
   if ($("importPath").value.trim() && $("srcimp").style.display !== "none"){ main = "Start"; sub = "import one HDR"; kind = "import"; cls = ""; mark([]); }
   else if (!$("folder").value.trim() || !CACHE){ mark([]); }
   else if (!CACHE.cached){ sub = "full stack from the raws"; kind = "stack"; cls = "restack"; mark([]); }
@@ -6167,6 +6670,10 @@ function syncStartLabel(){
     else { sub = "from cache"; kind = "cache"; cls = "ok"; }
   }
   RUN_KIND = kind;
+  // (2026-11-16) amber means "Start re-stacks": that is news on tabs 1-2. On
+  // the result, export and extras tabs a finished job next to an amber dot
+  // read as "not done"; there the dot says the stack is there (green)
+  if (cls === "restack" && TAB >= 3 && CACHE && CACHE.cached) cls = "ok";
   b.innerHTML = main + (sub ? '<span class="sub">' + sub + durNote(kind) + '</span>' : "");
   dot.className = "sdot" + (cls ? " " + cls : "");
   try { syncStale(); } catch (e) {}
@@ -6198,12 +6705,17 @@ try { if (localStorage.getItem("efh.srcmode") === "import") setSrcMode("import")
 // the processing options fold away; open until the first run is ready, then remembered
 function setOpts(open){
   $("optpanel").classList.toggle("closed", !open);
+  { const b2 = $("optsToggle2"); if (b2) b2.textContent = open ? "Hide" : "Show"; }
   $("optsToggle").querySelector(".chev").style.transform = open ? "" : "rotate(-90deg)";
   try { localStorage.setItem("efh.opts", open ? "1" : "0"); } catch(e){}
   updateZoom();
 }
 $("optsToggle").addEventListener("click", () => setOpts($("optpanel").classList.contains("closed")));
-try { if (localStorage.getItem("efh.opts") === "0") setOpts(false); } catch(e){}
+// EXPERT SETTINGS CLOSED BY DEFAULT (2026-11-16): the check in 1 Images sets
+// what a set needs (see SV auto below); the twenty controls are for experts
+{ let o = null; try { o = localStorage.getItem("efh.opts2"); } catch(e){} setOpts(o === "1"); }
+$("optsTitle").addEventListener("click", () => $("optsToggle2").click());
+$("optsToggle2").addEventListener("click", () => { const open = $("optpanel").classList.contains("closed"); setOpts(open); try { localStorage.setItem("efh.opts2", open ? "1" : "0"); } catch(e){} });
 // the rail: drag its left edge, 280 px to 70 % of the window, remembered
 (function(){
   const g = $("railgrip"); let drag = null;
@@ -6226,6 +6738,29 @@ try { if (localStorage.getItem("efh.opts") === "0") setOpts(false); } catch(e){}
   }).observe(log);
   const toggle = () => { log.classList.toggle("big"); $("logbig").textContent = log.classList.contains("big") ? "⤡ close" : "⤢ log"; if (log.classList.contains("big")) log.scrollTop = log.scrollHeight; };
   $("logbig").addEventListener("click", toggle);
+  // COPY AND SAVE THE LOG (2026-11-17): in the desktop app's window the log
+  // text could not be selected
+  const logText = () => $("log").innerText || "";
+  $("logcopy").addEventListener("click", async () => {
+    const t = logText(); let ok = false;
+    try { await navigator.clipboard.writeText(t); ok = true; } catch (e) {}
+    if (!ok){
+      try {
+        const ta = document.createElement("textarea"); ta.value = t;
+        ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta);
+        ta.select(); ok = document.execCommand("copy"); ta.remove();
+      } catch (e) {}
+    }
+    $("status").textContent = ok ? `Log copied (${t.split("\n").length} lines)` : "The log could not be copied here: use Save log";
+  });
+  $("logsave").addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/savelog", {method: "POST", headers: {"Content-Type": "application/json"},
+                                             body: JSON.stringify({text: logText()})});
+      const j = await r.json();
+      $("status").textContent = j.ok ? "Log saved: " + j.path : "Log not saved: " + j.error;
+    } catch (e) { $("status").textContent = "Log not saved: " + e; }
+  });
   addEventListener("keydown", e => { if (e.key === "Escape" && log.classList.contains("big")) toggle(); });
 })();
 // groups fold on their header; the state is remembered per group

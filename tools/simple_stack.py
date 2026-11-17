@@ -53,8 +53,8 @@ def _planes_direct(path):
     rest of the app can treat every input the same way, and `demosaic` then
     interpolates it back. That round trip is lossless for nothing: it throws
     three quarters of each channel away and guesses it again, and the guess is
-    gradient-directed, so it lands hardest exactly at the lunar limb. Siril and
-    PixInsight write RGB cubes, which is what most FITS anyone imports will be,
+    gradient-directed, so it lands hardest exactly at the lunar limb. Stacking programs
+    write RGB cubes, which is what most FITS anyone imports will be,
     and for those the planes are right there. Reading them directly is more
     accurate AND avoids pulling scipy in for a demosaic that should not happen.
     """
@@ -242,7 +242,7 @@ def main(argv=None):
 
     # ---- group by exposure. The HEADER value is used ONLY as a grouping key;
     # every photometric number below comes from the pixels. On a FITS test set
-    # the headers are Siril "manual group assignment" labels stepping a uniform
+    # the headers are a stacking program's "manual group assignment" labels stepping a uniform
     # 1.5x where the pixels measure 1.19 / 1.49 / 1.99 -- so as a label they are
     # perfectly good and as an exposure they are fiction.
     tiers = {}

@@ -3,7 +3,7 @@
 Grouping by the header's exposure time is the one place the stack trusts the
 metadata instead of measuring past it: two frames are averaged as one
 measurement only because their headers say they belong together. Usually they
-do. On a FITS test set the "exposure times" are labels typed in Siril
+do. On a FITS test set the "exposure times" are labels typed in a stacking program
 ("/ Manual group assignment"): the 23 groups step by exactly 1.5x while the
 pixels say 1.19x at the short end and 2.0x at the long end, and the group
 labelled 2.956 s holds frames at 0.85x, 0.98x, 1.0x and 1.5x of each other.

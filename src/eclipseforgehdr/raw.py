@@ -52,7 +52,7 @@ def _exif_via_tifffile(path):
     exp = tags.get("ExposureTime")
     if exp is None:
         raise ValueError(f"no ExposureTime metadata in {path} — "
-                         "TIFF exports must keep EXIF (e.g. Lightroom: include metadata)")
+                         "TIFF exports must keep EXIF (in the converter: include metadata)")
     sec = float(exp[0]) / float(exp[1]) if isinstance(exp, tuple) else float(exp)
     iso = tags.get("ISOSpeedRatings") or tags.get("PhotographicSensitivity") or 0
     if isinstance(iso, (tuple, list)):
@@ -292,7 +292,7 @@ def read_exif(path):
     exp = tags.get("EXIF ExposureTime") or tags.get("Image ExposureTime")
     if exp is None:
         raise ValueError(f"no ExposureTime metadata in {path} — "
-                         "TIFF exports must keep EXIF (e.g. Lightroom: include metadata)")
+                         "TIFF exports must keep EXIF (in the converter: include metadata)")
     v = exp.values[0]
     sec = float(v.num) / float(v.den)
     iso_tag = tags.get("EXIF ISOSpeedRatings") or tags.get("Image ISOSpeedRatings")
@@ -485,7 +485,7 @@ class RawFile:
         # black 512, and the pipeline is subtracting the right number. Read the
         # frame, not the metadata summary, and check the fit against a real run
         # before rewriting this again.
-        # NOT THE RAW MAXIMUM (TODO 0-c, lab 0.24): read before hot-pixel
+        # NOT THE RAW MAXIMUM (TODO 0-c, 0.24): read before hot-pixel
         # repair, one defective photosite at full scale would set the ceiling
         # above the true clip -- the mechanism that printed the rings. The
         # 99.999th percentile (of every third photosite) costs nothing where
@@ -628,8 +628,8 @@ def cfa_clip_max(cfa):
 
 # ---------------------------------------------------------------------------
 # VNG: "Interpolation using a Threshold-based Variable Number of Gradients"
-# (Chang, Cheng & Ward 1999). This is the algorithm PixInsight's RAW module
-# uses, so it is what someone comparing the two renders is comparing against.
+# (Chang, Cheng & Ward 1999). This is the algorithm a widely used astronomy package's
+# RAW module uses, so it is what someone comparing the two renders is comparing against.
 #
 # The two tables below were EXTRACTED from LibRaw's own misc_demosaic.cpp
 # rather than retyped, so they cannot have drifted in transcription. The
@@ -649,7 +649,7 @@ def cfa_clip_max(cfa):
 # NOT THE DEFAULT. Malvar-He-Cutler stays the default -- it has lower
 # interpolation error on the same data, and it is what every render up to
 # 0.22.62 was made with. This exists so a render can be compared with
-# PixInsight's on equal terms.
+# that package's on equal terms.
 _VNG_CHOOD = ((-1, -1), (-1, 0), (-1, 1), (0, 1),
               (1, 1), (1, 0), (1, -1), (0, -1))
 

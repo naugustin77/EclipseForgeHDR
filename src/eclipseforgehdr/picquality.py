@@ -1,4 +1,4 @@
-"""Picture quality: graded measurements of the FINISHED picture (lab 0.24).
+"""Picture quality: graded measurements of the FINISHED picture (0.24).
 
 Everything here is measured on the display-encoded composite as it is written,
 scale-free (radii in R), so the same thresholds hold for any set and size. Each
@@ -69,7 +69,7 @@ def grade(rgb, cy, cx, R, Rmask=None):
         out[k] = {"value": round(float(v), 4), "grade": g, "unit": unit, "note": note}
 
     rmax = float(min(np.max(rr), 3.4))
-    # THE LAST FULL CIRCLE (lab 0.24): beyond the nearest frame edge a ring is
+    # THE LAST FULL CIRCLE (0.24): beyond the nearest frame edge a ring is
     # only part of a circle, and the azimuthal median jumps where a side of the
     # corona drops out -- on a FITS test set that read as a 4 % "ring" at
     # 2.87 R, exactly the bottom edge. The ring and colour-step profiles stop there.

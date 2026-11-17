@@ -239,7 +239,7 @@ def choose_shift(prom_result, corona_shift, max_spread=2.0, min_anchors=2):
 
 def stack_variance(tiers_aligned, cy, cx, R):
     """Coefficient of variation across photometrically-normalized aligned
-    tiers -- the same thing Photoshop's 'Variance' stack mode shows. A tight,
+    tiers -- the same thing an image editor's 'Variance' stack mode shows. A tight,
     narrow rim at the limb means the tiers agree; a wide one means they do not.
 
     Returns (cov_map, stats dict).
@@ -300,7 +300,7 @@ def stack_variance(tiers_aligned, cy, cx, R):
                     out.get(f"tiers_{tag}", 0.0))
     # Width of the high-variance rim just outside the limb: how far the CoV
     # excess over the coronal baseline persists. This is the number the user
-    # reads off a Photoshop 'Variance' layer -- a misaligned stack smears the
+    # reads off an image editor's 'Variance' layer -- a misaligned stack smears the
     # limb disagreement outward, an aligned one keeps it to a few px.
     m = np.isfinite(cov) & (r >= R) & (r < 1.60 * R)
     if m.sum() > 500:

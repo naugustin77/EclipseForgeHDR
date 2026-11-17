@@ -44,7 +44,7 @@ SD_RANGE = (14.6 / 60.0, 17.0 / 60.0)    # lunar semi-diameter at a total eclips
 CLOCK_SPAN_H = 14.0
 MAG_PAIRS = 8.0                           # catalogue stars that may seed a hypothesis
 MAG_SCORE = 8.5                           # ... and that score a hypothesis
-# lab 0.28.1 (2026-10-18): the catalogue goes to V 10 (61k stars), but the
+# 0.28.1 (2026-10-18): the catalogue goes to V 10 (61k stars), but the
 # solution is still found and ranked on the stars to MAG_SCORE, so that the
 # denser faint catalogue cannot add chance alignments; only once the solution
 # is chosen, the remaining detections are matched to the stars to MAG_CONFIRM

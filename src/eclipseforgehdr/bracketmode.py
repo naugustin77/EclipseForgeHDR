@@ -496,7 +496,7 @@ def hdr_per_bracket(folder, wd, hdr, bracket_of, sec_of, epoch, run_kw, ref,
                  f"{100.0 * nrej / max(nsamp, 1):.3f}% of samples rejected "
                  f"(> {cut:.1f} sigma from the median of the brackets, outside the limb band); "
                  f"{time.time() - t_start:.0f} s", None)
-    del hm, wm
+    hm = wm = None          # the arrays freed (names kept for the closures above)
     # FOR THE EXTRAS TAB (corona activity, 0.30.0): every bracket's own
     # merge kept as reduced luminance (at most 1600 px wide, float32) with its
     # weight map, a few MB each, in brackets_lum/. The full-size merges go.

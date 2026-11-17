@@ -54,7 +54,7 @@ def load(folder):
     try:
         mt = os.stat(p).st_mtime_ns
     except OSError:
-        return {"off": set(), "force": set(), "dirs": {}, "roles": {}}
+        return {"off": set(), "force": set(), "dirs": {}, "roles": {}, "why": {}}
     c = _CACHE.get(p)
     if c and c[0] == mt:
         return c[1]
@@ -62,15 +62,20 @@ def load(folder):
         j = json.load(open(p))
         v = {"off": set(map(str, j.get("off") or [])), "force": set(map(str, j.get("force") or [])),
              "dirs": {str(k): str(d) for k, d in (j.get("dirs") or {}).items() if d},
-             "roles": {str(k): str(r) for k, r in (j.get("roles") or {}).items() if r in MOVE_ROLES}}
+             "roles": {str(k): str(r) for k, r in (j.get("roles") or {}).items() if r in MOVE_ROLES},
+             # why a frame is off or holds another role: "by you", or the
+             # survey's reason when its proposal was applied (0.32.0)
+             "why": {str(k): str(t)[:300] for k, t in (j.get("why") or {}).items() if t}}
     except Exception:
-        v = {"off": set(), "force": set(), "dirs": {}, "roles": {}}
+        v = {"off": set(), "force": set(), "dirs": {}, "roles": {}, "why": {}}
     _CACHE[p] = (mt, v)
     return v
 
 
-def save(folder, off, force, dirs=None, roles=None):
+def save(folder, off, force, dirs=None, roles=None, why=None):
     p = sel_path(folder)
+    if why is None:
+        why = load(folder).get("why") or {}
     if roles is None:
         roles = load(folder).get("roles") or {}
     roles = {k: v for k, v in roles.items() if v in MOVE_ROLES}
@@ -91,6 +96,9 @@ def save(folder, off, force, dirs=None, roles=None):
             doc["dirs"] = dict(sorted(dirs.items()))
         if roles:
             doc["roles"] = dict(sorted(roles.items()))
+        why = {k: t for k, t in (why or {}).items() if t and (k in off or k in force or k in roles)}
+        if why:
+            doc["why"] = dict(sorted(why.items()))
         json.dump(doc, open(tmp, "w"), indent=1)
         os.replace(tmp, p)
     _CACHE.pop(p, None)
@@ -176,6 +184,18 @@ def reassigned(folder, role, selected=True):
             continue
         out.append(p)
     return out
+
+
+def set_why(folder, changes):
+    """changes: {key: text | ""}: the reason shown on a frame's card."""
+    sel = load(folder)
+    why = dict(sel.get("why") or {})
+    for k, t in changes.items():
+        if t:
+            why[str(k)] = str(t)[:300]
+        else:
+            why.pop(str(k), None)
+    save(folder, sel["off"], sel["force"], sel.get("dirs"), sel.get("roles"), why)
 
 
 def set_roles(folder, changes):

@@ -1,7 +1,7 @@
 """Import a finished HDR and run the enhancement layers on it.
 
-For people who already have a merged corona image -- from Siril, PixInsight,
-Photoshop, AstroSurface, or from this app's own aligned tier TIFFs -- and want
+For people who already have a merged corona image -- from a stacking program,
+astronomy processing software, an image editor, or from this app's own aligned tier TIFFs -- and want
 MGN, FNRGF, NAFE-VN, the inner-corona layer, Pellett and the prominence gate
 without going through stacking again. It also sidesteps every stage that can
 fail on an awkward bracket, which is why it exists.
@@ -23,7 +23,7 @@ WHAT IT DOES NOT DO, and the report says so:
 LINEARITY is the one thing that has to be right. MGN, FNRGF and NAFE all work
 on log luminance and assume the value is proportional to coronal brightness. A
 display-gamma image has a corona whose falloff is roughly half as steep as the
-truth -- measured on a Photoshop stack of this app's own sRGB tier exports, the
+truth -- measured on an image editor's stack of this app's own sRGB tier exports, the
 log-log radial slope read -1.72 against -3.38 for the same scene linear, a
 ratio of 0.510 where sRGB predicts ~0.45.
 
@@ -62,7 +62,7 @@ def _icc_gamma(icc):
             return None, None
         # PARAMETRIC CURVES, THE ONES v4 PROFILES ACTUALLY USE (0.22.78). This
         # read `curv` only, so every ICC v4 profile -- which is what macOS,
-        # Windows 10+, Lightroom and Affinity embed -- fell through to
+        # Windows 10+ and common photo editors embed -- fell through to
         # "this image carries no colour profile", and the only way past it was
         # to rename the file. ICC 10.18: para type 0 is a pure power law, 1-4
         # add the sRGB-style linear toe. All values are s15Fixed16.
@@ -183,7 +183,7 @@ def read_image(path, progress=None, assume=None):
         # feeding it data off by 257x in either direction changes the RELATIVE
         # values, and no later normalisation puts those back.
         #
-        # PixInsight files never triggered it: its TIFF and FITS readers both
+        # Files from astronomy processing software never triggered it: its TIFF and FITS readers both
         # default to a float input range of [0,1] and rescale anything outside
         # it, so what it writes always landed on the right branch by luck.
         _isfloat = np.issubdtype(a.dtype, np.floating)
@@ -220,7 +220,7 @@ def read_image(path, progress=None, assume=None):
     if a.ndim == 2:
         a = np.stack([a] * 3, axis=-1)
     # PLANES FIRST, AS FITS WRITES IT (0.22.76). read_fits hands back (3, H, W)
-    # for an RGB cube -- which is what Siril and PixInsight write, i.e. the
+    # for an RGB cube -- which is what astronomy stacking software writes, i.e. the
     # commonest thing anyone imports. The guard below passed anyway, because
     # shape[2] is W and W >= 3, and `a[:, :, :3]` then produced a (3, H, 3)
     # array that failed later as "could not find the lunar limb". FitsFrame has
@@ -366,7 +366,7 @@ def build_from_rgb(folder, rgb, progress, denoise="off", stats=None,
     #
     # An import has a better limb than a stack, not a worse one -- somebody
     # already registered and merged it -- so the blind rule was backwards.
-    # Measured on an imported Siril stack (R = 523.8 px, fit rms 2.34 px): the
+    # Measured on an imported stack from a stacking program (R = 523.8 px, fit rms 2.34 px): the
     # transition is 11.0 px wide at the 90th percentile, so the measured rule
     # asks for 9.9 px and the blind one took 22.0. Those extra 12 px are a ring
     # right where prominences live, at 1.83 arcsec/px about 22 arcsec of it.

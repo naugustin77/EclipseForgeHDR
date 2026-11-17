@@ -1032,6 +1032,291 @@ def preview_stage(rec, wd, cache=None, progress=None, stop=None):
     return rec
 
 
+# ---- SHARPNESS FROM THE RAW FILES (0.32.0, 2026-11-15) -----------------
+# The previews are too small to tell a sharp limb from a shaken one at long
+# focal lengths: on a test set (Moon radius 1270 px, low Sun, wind) the edge
+# of the sharp frames was 6-7 px wide and of the shaken ones 10-26 px, i.e.
+# 0.5-2 preview px. So each frame's raw is read once (a few seconds each), the
+# limb fitted, and the width of the Moon's edge measured along 360 rays: the
+# 20-80 % rise from the dark disc to the corona just outside it. Shake widens
+# it in one direction only (two opposite sectors wide, the ones at 90 degrees
+# sharp); seeing widens it all round. A frame whose edge is more than
+# SHARP_FACTOR times as wide as the set's sharp frames (25th percentile) is
+# proposed to be switched off -- never all frames of one exposure.
+SHARP_BUILD = 1
+SHARP_FACTOR = 1.4
+# LARGE DISC ONLY (0.31.2). An exposure whose frames are all soft keeps its
+# sharpest one. On a test set with the Moon filling the frame two exposures
+# consisted of ONE frame each, both blurred (edge 13 and 15 px against 6-8 px
+# in every other frame), and sat between sharp exposures 2.5x apart. Such a
+# frame is proposed off as well, leaving the exposure out, when: the disc is
+# larger than LONE_DISC_FRAC of the short side; a sharp exposure exists on
+# either side and the two are no more than LONE_MAX_GAP apart; and the frame's
+# edge is more than SHARP_FACTOR times as wide as theirs. Smaller discs keep
+# the old rule unchanged.
+LONE_DISC_FRAC = 0.5
+LONE_MAX_GAP = 4.0
+
+
+def _edge_width(L, cy, cx, R):
+    """Median 20-80 % width of the limb (px of L) over 360 rays, and the
+    median in 12 sectors of 30 degrees (None where no ray was usable)."""
+    from scipy import ndimage
+    h, w = L.shape
+    pad = int(0.08 * R) + 4
+    y0, y1 = max(int(cy - R - pad), 0), min(int(cy + R + pad) + 1, h)
+    x0, x1 = max(int(cx - R - pad), 0), min(int(cx + R + pad) + 1, w)
+    sm = ndimage.gaussian_filter(np.asarray(L[y0:y1, x0:x1], np.float32), 1.0)
+    ang = np.linspace(0, 2 * np.pi, 360, endpoint=False)
+    rr = np.linspace(0.93 * R, 1.07 * R, 281)
+    ys = (cy - y0) + rr[:, None] * np.sin(ang)[None]
+    xs = (cx - x0) + rr[:, None] * np.cos(ang)[None]
+    ok = (ys.min(0) > 0) & (ys.max(0) < sm.shape[0] - 1) & (xs.min(0) > 0) & (xs.max(0) < sm.shape[1] - 1)
+    P = ndimage.map_coordinates(sm, [ys.ravel(), xs.ravel()], order=1).reshape(ys.shape)
+    dr = float(rr[1] - rr[0])
+    wid = np.full(360, np.nan)
+    for k in np.flatnonzero(ok):
+        p = P[:, k]
+        lo = float(np.median(p[:60]))
+        hi = float(np.max(p[140:200]))
+        if hi - lo < 10.0 * max(float(np.std(p[:60])), 1.0):
+            continue
+        q = (p[100:] - lo) / (hi - lo)
+        i20, i80 = int(np.argmax(q > 0.2)), int(np.argmax(q > 0.8))
+        if i80 > i20:
+            wid[k] = (i80 - i20) * dr
+    good = wid[np.isfinite(wid)]
+    if good.size < 90:
+        return None, None
+    sec = []
+    for i in range(12):
+        v = wid[i * 30:(i + 1) * 30]
+        v = v[np.isfinite(v)]
+        sec.append(round(float(np.median(v)), 2) if v.size >= 5 else None)
+    return float(np.median(good)), sec
+
+
+def measure_raw_edge(path, cy, cx, R):
+    """The limb of one raw frame at half size, seeded from its preview:
+    {"w": edge width, "sec": per-sector widths, "R": radius} in half-size px."""
+    import rawpy
+    from .pipeline import fit_limb_rays
+    with rawpy.imread(path) as r:
+        b = r.raw_image_visible.astype(np.float32)
+        blk = float(np.mean(r.black_level_per_channel))
+    b -= blk
+    h, w = b.shape
+    L = b[:h // 2 * 2, :w // 2 * 2].reshape(h // 2, 2, w // 2, 2).mean(axis=(1, 3))
+    del b
+    f = fit_limb_rays(np.clip(L, 0, None), cy, cx, R)
+    if f is None or not np.isfinite(f[2]) or f[3] > 0.05 * f[2] or abs(f[2] - R) > 0.15 * R:
+        return {"err": "limb not fitted"}
+    wd_, sec = _edge_width(L, float(f[0]), float(f[1]), float(f[2]))
+    if wd_ is None:
+        return {"err": "limb too faint"}
+    return {"w": round(wd_, 3), "sec": sec, "R": round(float(f[2]), 2)}
+
+
+def sharp_stage(rec, wd, cache=None, progress=None, stop=None):
+    """Adds the sharpness rows (raw files) to a record that has been through
+    preview_stage. Proposes shaken or soft frames to be switched off."""
+    cache = cache if cache is not None else _load_cache(wd)
+    frames = rec.get("frames") or []
+    if rec.get("no_previews") or len(frames) < 3:
+        return rec
+    from .raw import RAW_EXTS
+    good = [f for f in frames if f.get("pv") and not f["pv"].get("err")
+            and os.path.splitext(f["name"])[1].lower() in RAW_EXTS]
+    if len(good) < 3:
+        return rec
+    rw = _raw_width(good[0]["path"])
+    if not rw:
+        return rec
+    k_ = rw / float(good[0]["pv"]["w"]) / 2.0          # half-size px per preview px
+    cr = cache.setdefault("raw", {})
+    dirty = 0
+    for i, f in enumerate(good):
+        if stop is not None and stop():
+            return rec
+        try:
+            sig = _sig(f["path"])
+        except OSError:
+            continue
+        c = cr.get(f["name"])
+        if not c or c.get("sig") != sig or c.get("b") != SHARP_BUILD:
+            pv = f["pv"]
+            try:
+                c = measure_raw_edge(f["path"], pv["cy"] * k_, pv["cx"] * k_, pv["R"] * k_)
+            except Exception as e:
+                c = {"err": f"{type(e).__name__}: {e}"}
+            c.update(sig=sig, b=SHARP_BUILD)
+            cr[f["name"]] = c
+            dirty += 1
+            if dirty % 8 == 0:
+                _save_cache(wd, cache)
+        f["sh"] = c
+        if progress is not None:
+            progress(i + 1, len(good))
+    if dirty:
+        _save_cache(wd, cache)
+    meas = [f for f in good if f.get("sh") and f["sh"].get("w") and not f.get("flag")]
+    if len(meas) < max(3, 0.5 * len(good)):
+        return rec
+    items = rec["items"]
+    floor = float(np.percentile([f["sh"]["w"] for f in meas], 25))
+    lim = SHARP_FACTOR * floor
+    by_exp = {}
+    for f in meas:
+        by_exp.setdefault((_key(f["sec"]), f.get("iso"), f.get("fnum")), []).append(f)
+    # EACH FRAME AGAINST ITS OWN EXPOSURE (2026-11-16). The Moon's edge widens
+    # with the exposure: on a seven-bracket test set it was 4.1-4.8 px in every
+    # frame up to 1/2 s, 5.0 px in all six 1 s frames and 6.3-6.5 px in all six
+    # 2 s frames. Measured against the sharp quarter of the whole set (4.3 px,
+    # limit 6.0) five of the six 2 s frames were proposed off as shaken -- 10 of
+    # 25 s of exposure, all of it in the outer corona. So the reference for a
+    # frame is the sharpest frame of its own exposure or of any longer one
+    # (never sharper than the set's floor): only a frame that stands out
+    # among frames shot like it is proposed off, and an exposure that is soft
+    # all through while the longer ones are sharp is still found.
+    _sharpest = {k: min(f["sh"]["w"] for f in fs) for k, fs in by_exp.items()}
+    lim_of = {}
+    for k in by_exp:
+        _base = min(v for k2, v in _sharpest.items() if k2[0] >= k[0])
+        lim_of[k] = SHARP_FACTOR * max(floor, _base)
+    soft, all_soft = [], []
+    for k, fs in by_exp.items():
+        bad = [f for f in fs if f["sh"]["w"] > lim_of[k]]
+        if bad and len(bad) == len(fs):
+            keep = min(fs, key=lambda f: f["sh"]["w"])
+            bad = [f for f in bad if f is not keep]
+            all_soft.append((k, keep))
+        soft += bad
+    lone = []
+    try:
+        _fr = [2.0 * f["pv"]["R"] / max(1.0, min(f["pv"]["w"], f["pv"]["h"])) for f in good
+               if f["pv"].get("R") and f["pv"].get("h")]
+        if all_soft and _fr and float(np.median(_fr)) > LONE_DISC_FRAC:
+            _softk = {k for k, _ in all_soft}
+            _softn = {f["name"] for f in soft}
+            for k, keep in all_soft:
+                if len(by_exp[k]) != 1:
+                    continue
+                nb = {}
+                for k2, fs2 in by_exp.items():
+                    if k2 in _softk or k2[1:] != k[1:]:
+                        continue
+                    ok2 = [f["sh"]["w"] for f in fs2 if f["name"] not in _softn]
+                    if not ok2:
+                        continue
+                    side = "lo" if k2[0] < k[0] else "hi"
+                    if side not in nb or abs(np.log(k2[0] / k[0])) < abs(np.log(nb[side][0] / k[0])):
+                        nb[side] = (k2[0], ok2)
+                if len(nb) == 2 and nb["hi"][0] / nb["lo"][0] <= LONE_MAX_GAP \
+                        and keep["sh"]["w"] > SHARP_FACTOR * float(np.median(nb["lo"][1] + nb["hi"][1])):
+                    lone.append((k, keep))
+    except Exception:
+        lone = []
+    if lone:
+        _lk = {k for k, _ in lone}
+        all_soft = [(k, f) for k, f in all_soft if k not in _lk]
+        soft += [f for _, f in lone]
+    _lone_names = {f["name"] for _, f in lone}
+    soft.sort(key=lambda f: f.get("ep") or 0)
+    # FRAMES AN EARLIER PRE-CHECK SWITCHED OFF (2026-11-16). A frame switched
+    # off on this check's proposal is no longer listed, so it is never looked at
+    # again -- and when the rule changes (it did: 2 s frames of a test set were
+    # taken for shaken), it stays off for good. Those frames, and only those
+    # (their recorded reason is the check's own), are measured here against
+    # the current rule; the ones that pass are offered back (rec["sharp_on"]).
+    rec["sharp_on"] = {}
+    try:
+        from .frameselect import load as _fs_load
+        _folder = os.path.dirname(good[0]["path"])
+        _sel = _fs_load(_folder)
+        _why = _sel.get("why") or {}
+        _cand = [k for k in sorted(_sel["off"]) if "/" not in k
+                 and str(_why.get(k, "")).startswith("survey: ")
+                 and any(t in str(_why.get(k, "")) for t in ("shaken", "soft all round", "blurred"))]
+        _pv = np.median([[f["pv"]["cy"], f["pv"]["cx"], f["pv"]["R"]] for f in good], axis=0)
+        _new = 0
+        for k in _cand:
+            if stop is not None and stop():
+                break
+            _p = os.path.join(_folder, k)
+            if not os.path.exists(_p):
+                continue
+            _sg = _sig(_p)
+            _m = cache.setdefault("meta", {}).get(k)
+            if not _m or _m.get("sig") != _sg:
+                _m = dict(frame_meta(_p), sig=_sg)
+                cache["meta"][k] = _m
+            c = cr.get(k)
+            if not c or c.get("sig") != _sg or c.get("b") != SHARP_BUILD:
+                try:
+                    c = measure_raw_edge(_p, _pv[0] * k_, _pv[1] * k_, _pv[2] * k_)
+                except Exception as e:
+                    c = {"err": f"{type(e).__name__}: {e}"}
+                c.update(sig=_sg, b=SHARP_BUILD)
+                cr[k] = c
+                _new += 1
+            if not c.get("w") or not _m.get("sec"):
+                continue
+            _kk = (_key(_m["sec"]), _m.get("iso"), _m.get("fnum"))
+            if _kk in lim_of and c["w"] <= lim_of[_kk]:
+                rec["sharp_on"][k] = round(2 * c["w"], 1)
+        if _new:
+            _save_cache(wd, cache)
+    except Exception:
+        rec["sharp_on"] = {}
+
+    def kind(f):
+        sec = [v for v in f["sh"]["sec"] if v]
+        return "shaken" if sec and max(sec) >= 1.8 * min(sec) else "soft all round"
+    # the raw measurement replaces the preview's smear guess
+    rec["items"] = items = [it for it in items if it.get("title") != "Smeared frames?"]
+    for n, r in list(rec["roles"].items()):
+        if r.get("role") == "off" and "preview" in str(r.get("why", "")):
+            del rec["roles"][n]
+    for f in soft:
+        if rec["roles"].get(f["name"], {}).get("role") == "contact":
+            continue
+        _k = (_key(f["sec"]), f.get("iso"), f.get("fnum"))
+        rec["roles"][f["name"]] = {"role": "off", "why": f"{kind(f)}: the Moon's edge is "
+                                   f"{2 * f['sh']['w']:.0f} px wide, "
+                                   f"{2 * lim_of[_k] / SHARP_FACTOR:.0f} px in the sharp frames shot like it"
+                                   + ("; the only frame at this exposure, the exposures next to it cover it"
+                                      if f["name"] in _lone_names else "")}
+    n_sh = sum(1 for f in soft if kind(f) == "shaken")
+    rec["sharpness"] = {"floor_px": round(2 * floor, 2), "limit_px": round(2 * lim, 2),
+                        "limit_px_by_exposure": {_ex_txt(k[0]): round(2 * v, 2) for k, v in sorted(lim_of.items())},
+                        "frames": {f["name"]: round(2 * f["sh"]["w"], 2) for f in meas},
+                        "soft": [f["name"] for f in soft],
+                        "all_soft": [_ex_txt(k[0]) for k, _ in all_soft],
+                        "lone_out": [_ex_txt(k[0]) for k, _ in lone]}
+    base = (f"measured on the raw files: the Moon's edge is {2 * floor:.0f} px wide in the sharp frames "
+            f"(the limit set by optics, focus and the air)")
+    if soft:
+        names = ", ".join(f["name"] for f in soft[:8]) + (f" and {len(soft) - 8} more" if len(soft) > 8 else "")
+        txt = (base[0].upper() + base[1:] + f". In {len(soft)} of {len(meas)} frames it is more than "
+               f"{SHARP_FACTOR:g} times as wide as in the sharpest frames of the same exposure"
+               + (f", {n_sh} of them blurred in one direction (shake)" if n_sh else "")
+               + f". Switch them off in Frames: {names}")
+        if all_soft:
+            txt += (". Every frame is soft at " + ", ".join(_ex_txt(k[0]) for k, _ in all_soft)
+                    + ": the sharpest of each stays in")
+        if lone:
+            txt += (". " + ", ".join(_ex_txt(k[0]) for k, _ in lone)
+                    + (" has one frame only and it is blurred; the exposures next to it cover it, so it is "
+                       "proposed off too" if len(lone) == 1 else
+                       " have one frame each and it is blurred; the exposures next to them cover them, so "
+                       "they are proposed off too"))
+        items.append({"level": "warn", "title": "Blurred frames", "text": txt, "act": {"field": "fpanel"}})
+    else:
+        items.append({"level": "ok", "title": "Sharpness", "text": "all frames within "
+                      f"{SHARP_FACTOR:g} times the sharpest of their exposure; " + base, "act": None})
+    return rec
+
+
 def timed_all(frames):
     return bool(frames) and all(f.get("t") is not None for f in frames)
 
@@ -1047,6 +1332,11 @@ def run(folder, wd, progress=None, stop=None, previews=True):
         n1 = len(rec["items"])
         try:
             preview_stage(rec, wd, cache, progress, stop)
+            try:
+                sharp_stage(rec, wd, cache, progress, stop)
+            except Exception as e:
+                rec["items"].append({"level": "info", "title": "Sharpness",
+                                     "text": f"not measured ({type(e).__name__}: {e})", "act": None})
             rec["done"] = not (stop is not None and stop())
         except Exception as e:
             del rec["items"][n1:]
@@ -1054,11 +1344,6 @@ def run(folder, wd, progress=None, stop=None, previews=True):
                                  "text": f"not available ({type(e).__name__}: {e})", "act": None})
             rec["done"] = True
     return rec
-
-
-#: exposure step from which the guide gives the Merge-weight tip (if rings
-#: show, try Blended edge; if the limb goes dark, back to Exact edge)
-TRY_BLEND_EV = 2.0
 
 
 def guidance(rec):
@@ -1081,24 +1366,13 @@ def guidance(rec):
                          "label": "Clipped mean (kappa-sigma)",
                          "why": f"{fpe} frames per exposure: the clipped mean takes out satellites, planes "
                                 "and single hot pixels"})
-    # MERGE WEIGHT: A CONDITIONAL TIP, NOT A CHANGE (2026-11-14). Exact edge
-    # is the default and stays it: Blended edge is known to fail at the limb
-    # (CHANGELOG: the limb ramp, the merge 4x too dark 4 px outside the limb on
-    # a test set, and the magenta ring round the disc). But with wide steps
-    # between exposures Exact edge can print each exposure's clipping contour
-    # as a ring. Neither is right for every set, and which one wins can only be
-    # seen in the result, so the guide says what to look for, what to try,
-    # and when to go back.
-    steps = rec.get("ev_steps") or []
-    if steps and max(steps) >= TRY_BLEND_EV:
-        tries.append({"id": "feather", "value": "plain", "name": "Merge weight", "label": "Blended edge",
-                      "if": "If you see rings around the limb or bright prominences",
-                      "why": f"Steps of up to {max(steps):.1f} EV between exposures: with Exact edge each exposure's "
-                             "clipping contour can show as a ring. Blended edge hides those, but can leave the "
-                             "corona just outside the limb too dark and a magenta ring round the disc",
-                      "then": "It needs a new stack: compare the two results and keep the better one",
-                      "back": {"value": "taper", "label": "Exact edge",
-                               "if": "If the corona just outside the limb is too dark or a magenta ring shows"}})
+    # MERGE WEIGHT: NO TIP BEFORE THE RUN (2026-11-15). The conditional
+    # "try Blended edge if rings show" with its button read as advice to switch
+    # now (a tester: a user would fall for it, get the known Blended-edge
+    # failure and blame the suggestion). Whether rings show can only be seen in
+    # the result, so the tip moved to 3 Check your result, where it appears
+    # only when the run measured the exposures disagreeing at the limb
+    # (runnotes.py). Exact edge stays the default.
     if "tier_mode" in sug:
         mx = rec.get("mixed") or {}
         what = " and ".join(k for k in ("ISO", "Aperture") if k in mx) or "ISO"
@@ -1235,6 +1509,16 @@ def proposals(folder):
     return {}
 
 
+def reset(wd):
+    """"Check again" on tab 1 (0.32.0): forget the survey of this folder,
+    rows and cached preview readings alike, so the next status() reads every
+    frame afresh. A job still running sees its generation change and stops."""
+    with _LOCK:
+        _JOB["gen"] += 1
+        _JOB.update(key=None, rec=None, done=0, total=0, thread=None)
+    _save_cache(wd, {"build": SURVEY_BUILD, "meta": {}, "prev": {}})
+
+
 def status(folder, wd, start=True):
     """For /api/survey: the rows so far, and whether the preview stage is
     still running. Starts the job when the folder (or its frames) changed."""
@@ -1262,12 +1546,25 @@ def status(folder, wd, start=True):
                         def prog(i, n):
                             _JOB["done"], _JOB["total"] = i, n
                         n1 = len(rec["items"])
+                        _JOB["phase"] = "previews"
                         try:
                             preview_stage(rec, wd, cache, prog, lambda: _JOB["gen"] != gen)
                         except Exception as e:
                             del rec["items"][n1:]
                             rec["items"].append({"level": "info", "title": "Preview checks",
                                                  "text": f"not available ({type(e).__name__}: {e})", "act": None})
+                        # the preview rows are shown while the raw files are read
+                        with _LOCK:
+                            if _JOB["gen"] != gen:
+                                return
+                            _JOB["rec"] = dict(public(rec), items=list(rec["items"]), done=False)
+                            _JOB["phase"] = "raw"
+                            _JOB["done"], _JOB["total"] = 0, 0
+                        try:
+                            sharp_stage(rec, wd, cache, prog, lambda: _JOB["gen"] != gen)
+                        except Exception as e:
+                            rec["items"].append({"level": "info", "title": "Sharpness",
+                                                 "text": f"not measured ({type(e).__name__}: {e})", "act": None})
                         rec["done"] = True
                         with _LOCK:
                             if _JOB["gen"] == gen:
@@ -1284,9 +1581,12 @@ def status(folder, wd, start=True):
         rec = _JOB["rec"]
         return {"ok": True, "items": (rec or {}).get("items", []),
                 "pending": not (rec or {}).get("done", False),
-                "done": _JOB["done"], "total": _JOB["total"],
+                "done": _JOB["done"], "total": _JOB["total"], "phase": _JOB.get("phase"),
                 "suggest": (rec or {}).get("suggest", {}), "roles": (rec or {}).get("roles", {}),
-                "guide": (rec or {}).get("guide")}
+                "guide": (rec or {}).get("guide"),
+                # frames an earlier pre-check switched off that now pass
+                # (sharp_stage); the server offers them back as "Switch back on"
+                "sharp_on": (rec or {}).get("sharp_on") or {}}
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.31.0
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.32.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -8,20 +8,47 @@
 the Moon and prominence layers; noise reduction (NoiseXTerminator) afterwards
 in Photoshop.*
 
-A local desktop application that turns a folder of exposure-bracketed raw files
-shot during totality into a finished corona image. Point it at the folder, wait
-a few minutes, then adjust the result on a live preview and export it.
+**Your bracketed totality frames in, a finished corona picture out:** the inner
+and the outer corona in one image, the Moon with its earthshine and the
+prominences sharp, without rings at the limb. Free, and it runs on your own
+computer — no account, no upload. The interface is a small web server on
+`127.0.0.1` that only your computer talks to; the site form can optionally use
+two open online services (OpenStreetMap tiles for the map, Open-Meteo for a
+height lookup).
 
-Everything runs on your own machine. No cloud, no account, no telemetry: the
-interface is a small web server on `127.0.0.1` that only your browser talks to.
-The site form can optionally use two open online services: map tiles for the
-site picker (OpenStreetMap), and a height lookup for the chosen position
-(Open-Meteo).
+## Download
+
+From the [**Releases page**](https://github.com/naugustin77/EclipseForgeHDR/releases/latest), under *Assets*:
+
+| | |
+|---|---|
+| **Mac** with Apple silicon (M1 and later) | `EclipseForgeHDR-0.32.0-macOS-arm64.dmg` |
+| **Mac** with an Intel processor | `EclipseForgeHDR-0.32.0-macOS-x86_64.dmg` |
+| **Windows** 10 and 11 | `EclipseForgeHDR-0.32.0-Windows-Setup.exe` |
+
+- **Mac:** open the .dmg and drag EclipseForgeHDR onto the Applications folder.
+  The app is not signed by Apple, so macOS blocks the first start: open
+  **System Settings → Privacy & Security**, scroll down and click **Open
+  Anyway**. After that it starts normally.
+- **Windows:** run the Setup file. If Windows says it protected your PC, click
+  **More info → Run anyway** (once). EclipseForgeHDR is then in the Start menu;
+  it is removed again under Settings → Apps. On Windows on ARM the program
+  runs through Windows' own translation, more slowly.
+- Prefer Python? [Install with pipx](#install-with-python) instead — the same
+  program.
+
+## Three steps
+
+1. **Images** — choose the folder with your raw files. EFHDR checks how the set
+   was shot and sets what this set needs.
+2. **Processing** — press **Start**. A few minutes later the picture is there.
+3. **Result → Export** — pick a look (**All looks** shows every look on your
+   own picture), then export the picture, the polar map and the extras.
 
 | | |
 |:---:|:---:|
 | ![](docs/images/eclipseforge_composite_render_A.jpg) | ![](docs/images/eclipseforge_composite_render_B.jpg) |
-| **After stacking** (here a low eclipse in 2026, hence the warm tones) | **After colour and tone adjustments** ("Night navy" preset) |
+| **After stacking** (here with the Sun low in the sky, hence the warm tones) | **After colour and tone adjustments** ("Night navy" preset) |
 
 *The same stack, before and after rendering. Left: the merge as it comes out of
 the stack, with the camera's white balance (look "EFHDR as loaded"). With the
@@ -55,259 +82,45 @@ the detail views.
 
 ![Tab 4, Export](docs/images/EclipseForgeHDR_GUI_Tab4.jpg)
 
-**5 · Extras:** the Sky & Sun overlay, poster, limb panorama, corona in
-motion, film and corona sound.
+**5 · Extras:** the Sky & Sun overlay, poster, corona in motion, film
+and corona sound.
 
 ![Tab 5, Extras](docs/images/EclipseForgeHDR_GUI_Tab5.jpg)
 
 </details>
 
----
+## New in 0.32.0
 
-## New in 0.31.0
+- **Download and double-click:** a Mac app (Apple silicon and Intel) and a
+  Windows installer on the Releases page; no Python needed.
+- **The pre-check sets what your set needs:** the settings it finds for the
+  set are applied by itself and listed in tab 2 under *Settings for this
+  set*; all other stacking settings sit folded under **Expert settings**. A
+  setting you change by hand is never overruled.
+- **Tab 3, simple first:** the look and six main controls on top (Brightness,
+  Corona reach, Detail, Colour temperature, Earthshine, Prominences); every
+  other control under **Show all controls**.
+- **All looks:** every look rendered on your own picture side by side; click
+  one to use it. **A/B** compares two looks, **Undo / Redo** (also Ctrl+Z /
+  Ctrl+Shift+Z, ⌘ on a Mac) steps through your changes.
+- **Picture check:** the picture is checked for rings round the Moon as the
+  export will render it, in tab 3 and before export, with what to try when
+  there are some.
+- **Observing site at a glance:** a coloured status line (set, check, not
+  set) and a small map with the path of totality.
+- **Moon layer:** dark or bright patches along the inside of the limb now
+  fade softly into the disc.
+- **Large Moons and bursts:** one disc per exposure, a more robust disc finder,
+  links for a Moon that fills most of the frame, and frames re-checked against
+  the frames shot the same way before a pre-check proposes them off (frames it
+  once switched off are offered back).
+- **Corona in motion:** the speed is on the card (0.1–0.8 s per bracket).
+  The Limb panorama is no longer offered (the polar map shows the same
+  unrolled).
+- **Copy log / Save log** in the Run box.
+- **Re-stack once:** caches from 0.31.0 are not reused.
 
-- **"How this was shot"** (tab 1): before anything is stacked, EFHDR reads the
-  frames' own data and the camera's small preview in each raw file and says how
-  the set was shot — the bracket pattern, the exposure steps, frames per
-  exposure, ISO or aperture that change, framing that moved between brackets,
-  frames that look like diamond ring or beads, smeared frames, how far each
-  exposure clips. On top it gives a verdict, the settings to change (each with
-  its reason and an Apply button), what to expect from the result, and tips
-  that only apply if the result shows a problem, with the way back.
-- **Another role for a frame** (Frames panel): a frame in the image folder can
-  be used as a short exposure (prominence layer only) or a contact frame
-  (camera clock only) without moving it. The survey proposes such roles; one
-  click applies them.
-- **The run stops instead of giving a broken picture.** When the exposures
-  cannot be aligned to each other, show Moons of different sizes or in
-  different places, or when the frames of one exposure group do not show the
-  same scene, the run stops with a message that says what is wrong and what to
-  change. Red in the log now means exactly that.
-- **"Check your result"** (tab 3): warnings of the run that can show in the
-  picture — rings at the limb, a soft limb, brackets not tied, exposure data
-  that look wrong, a missing layer — in plain words, with what to look for and
-  what to try.
-- **Earthshine checked against the real Moon.** The structure on the lunar disc
-  is compared with a map of the real Moon (NASA LRO) in every orientation and
-  against random patterns of the same texture; it goes into the picture only
-  when it matches well above chance. The map is used for this check only:
-  nothing from it is drawn, the disc shows your own data. A **Force
-  earthshine** box takes in a weaker match (still above chance), with more noise.
-- **Objects crossing the field** (aircraft, satellites, birds) no longer leave a
-  trail of faint copies: the clipped mean rejects the area around a strong
-  outlier, not only its core.
-- **Mixed ISO or aperture:** Tiers "By measured brightness" splits a shutter
-  speed by what the frames recorded, and never merges frames whose camera
-  exposure times differ.
-- **Two brackets shot apart** are tied on the corona clear of both Moons; no
-  second Moon or sharp ring with HDR per bracket.
-- **Tightly framed sets:** no ring at the frame edge's distance, links from
-  patches where the correlation window has no signal, no colour below zero
-  from the per-channel fit; stars are marked only when the catalogue confirms
-  them, with a deeper pass for long lenses.
-- **Steady progress bar** and time left.
-- **Re-stack once:** caches from 0.30.x are not reused.
-
-## New in 0.30.0
-
-- **Five tabs that follow the work:** 1 Images (folder, frames, checklist,
-  shooting timeline), 2 Processing (stacking options, site and time, recipe
-  check, Start and the log), 3 Result (preview, looks, stars), 4 Export (one
-  card per product, each with a small preview), 5 Extras.
-- **Frames panel** (tab 1): every frame found — brackets, short exposures,
-  contact frames, flats, darks, bias — with a preview from the raw data. Switch
-  a frame off, or force a bracket frame in past the automatic checks (forced
-  frames are marked). The darks, bias, short-exposure and contact folders can
-  also be chosen by hand.
-- **Recipe check** (tab 2): before Start, the chosen stacking options are
-  checked against the loaded data, with a one-click fix where one applies.
-  Start is never blocked.
-- **Site picker on a map** with the path of totality, for 14 total eclipses
-  from 2017 to 2037, and city lists for each.
-- **Polar map:** the corona unwrapped around the Sun, position angle across and
-  distance up, from solar or celestial north (or a north you enter by hand).
-  Linear or shape-true radius, N/E/S/W in the middle, a mirrored view, grid and
-  the Earth for scale; also as two layers (map and lettering) and as seamless
-  tiles for carousels.
-- **More exports:** the plain HDR stack (one log stretch, no detail layers),
-  the linear HDR merge as a 32-bit float TIFF, and every detail view.
-- **Extras tab:** Sky & Sun overlay (also as a transparent layer and an SVG),
-  poster (picture plus polar map), limb panorama, corona in motion (for
-  repeated brackets), a film from the single frames to the finished picture
-  that unrolls into the polar map, and the corona as sound. Sizes for social
-  media (16:9, 1:1, 4:5, 3:4, 9:16) with safe zones for reels, stories and
-  posts.
-- **Sharper stacks:** the links between exposures are measured above the
-  sensor's fixed pattern; darks at several exposures are fitted per photosite;
-  the earthshine strength is decided from the data.
-- **Inner softening** (inner corona group): eases detail and sharpening next to
-  the Moon's edge, full from a chosen radius.
-- **Canon CR3 exposure times** are read from the camera's own EXIF block
-  inside the file; before, a folder of CR3 frames had no exposure groups.
-- **Site height:** taken from the camera's GPS when the frames carry a
-  position, or looked up on request from the Copernicus 90 m terrain model
-  (via Open-Meteo) with the new "Look up" button next to Height.
-- **Re-stack once:** caches from 0.29.x are not reused.
-- **New requirements** (installed automatically): `certifi` for the map tiles
-  and `imageio-ffmpeg` for the video clips.
-
-## New in 0.29.2
-
-- **Soft versions of the looks.** Every colour look now has a soft version
-  listed right under it (Clean Steel has one, for M4 / M5 / M6). It keeps the
-  look's colours and outer field but gives a brighter, smoother inner corona:
-  the region out to about 1.5 Moon radii is lifted, and the fine detail and
-  sharpening near the limb are eased. The streamers further out keep their
-  detail and the sky is not brightened.
-- Caches from 0.28.0 to 0.29.1 stay valid.
-
-## New in 0.29.1
-
-- **Sky pedestal** (Tone group, next to Black point): takes the even light of
-  a bright sky, such as a sunset sky, off before the stretch. Radial flatten can
-  then carry the corona further out without lifting the sky with it. The light
-  is measured in the outer frame when the layers load. 0 = off, and the picture
-  is then unchanged. Higher values give a darker sky and a stronger fall-off
-  towards the corners.
-- **Black point** now goes to 0.2.
-- **New look: Sunflower**, a golden sunset look in Mono + tints: yellow out to
-  about twice the Moon's radius, turning gently orange beyond, a dark brown sky
-  and a soft fall-off towards the corners.
-- Caches from 0.28.0 and 0.29.0 stay valid.
-
-## New in 0.29.0
-
-- **Faster stacking.** Raw decoding, the hot-pixel test and the filters run on
-  several processor cores; on a 41-frame test set the stack took about a third
-  less time, with identical results.
-- **Camera clock from the contact frames.** With the observing site entered,
-  the time stamps of the frames in a `diamond ring/` subfolder (or `beads`,
-  `contact`) set the camera clock against the predicted second and third
-  contact. The shooting timeline shows C2, C3 and the short exposures; on
-  repeated brackets the Moon is placed at mid-totality. See *Folder layout*.
-- **Stars:** the catalogue goes to magnitude 10 (about 61,000 stars). A fainter
-  candidate is confirmed only down to the depth the picture reaches: when a
-  brighter catalogue star on open sky left no signal, a fainter match is not
-  trusted. **Star gain** starts at 1 (as in the stack): the stars are part of
-  the stack and are not taken out.
-- **Mono + tints:** new **Corona colour**; the bright corona takes it and
-  blends outwards into the Sky colour, which now also tints the faint corona
-  and the sky without the sky lift. **Sky lift colour** runs from grey (0) to
-  the Sky colour (1) and beyond.
-- The time estimate in the pipeline bar no longer says "finishing" too early.
-- New chapters: *Folder layout* and *Repeated brackets*.
-- Caches from 0.28.0 stay valid; the stars are checked again on the next Start.
-
-## New in 0.28.0
-
-- **Repeated brackets.** A sequence shot through the bracket several times over
-  totality is recognised from the time stamps and the exposure order; the log
-  and report give each bracket's brightness. The Moon moves against the corona
-  over minutes, so every frame is now placed on the lunar track and every
-  exposure is stacked with the Moon of one moment: the limb stays sharp instead
-  of smearing.
-- **Brackets: HDR per bracket (experimental).** Merges each bracket on its own
-  and stacks the HDRs, for sequences where the sky or the Moon's position
-  changes markedly between brackets. Not yet tested on many sets; the default
-  stays Stack per exposure.
-- **Single pass through the bracket:** the exposures are linked on the corona
-  clear of every Moon, and one Moon is used for all of them. Sharper inner
-  corona on a bracket where the Moon moved during the sequence.
-- The Moon's expected motion is computed from the eclipse elements at the
-  observing site instead of being assumed.
-- **Photometry:** the per-channel linear fit falls back to the plain scale
-  factors when a fit runs away, which removes isophote rings on short brackets.
-- **Prominences:** a core clipped in every frame rises smoothly from its edge
-  to a plateau instead of a flat patch; new **Prominence brightness** slider.
-- **Filament detail:** no more fine rings around the Moon. MGN reaches the
-  darkest parts of the corona.
-- **Looks:** Silver rays, Night navy, Midnight silver and Golden hour added;
-  Dark moody and Deep purple removed.
-- **Preview** renders on all processor cores; the 1:1 crop button sits in the
-  bar under the preview, always in reach. A timeline of the shoot under the log
-  shows which frames were stacked.
-- Caches from 0.27.0 are re-stacked once.
-
-## New in 0.27.0
-
-- **Frames another program already aligned** (Siril, PixInsight) are
-  recognised by the black border such a program leaves on every frame it
-  shifted, and are stacked as written instead of being aligned again. A new
-  setting, **Alignment** (Automatic / Always align / Keep frames as they are),
-  overrules the check either way.
-- **Tiers: By measured brightness.** Frames are grouped by the brightness
-  measured in the frames, not by the exposure time in the header — for
-  brackets whose times were typed in by hand or are only labels.
-- **FITS input:** when the file reports no black level, it is measured from
-  the frames themselves (pairs of exposures of the same scene); a 3-plane FITS
-  whose colour planes clip at different levels has its clipped pixels found per
-  plane. On a Siril set both had left rings near the Sun and a lean in the
-  exposure ladder.
-- **Picture quality** in the log and report is now a rating (excellent to very
-  poor) over five things a viewer sees — detail, noise, artefacts, colour,
-  tones — with one plain sentence and one thing to try for the weakest,
-  instead of "BAD" for a single measurement.
-- **Simple stack:** aligns each exposure group to the previous group's stack,
-  ignoring hot pixels; builds the filament and inner detail layers (it now
-  carries a noise map); re-stacks by itself after an update.
-- **Prominence layer:** short frames whose prominence cores are clipped are
-  matched again (they were dropped), and the core no longer shows dark blotches.
-- Caches from 0.26.0 are re-stacked once.
-
-## New in 0.26.0
-
-- **Filament detail layer:** each width of structure (1.5–24 px) is raised
-  only as far as the measured noise of that width allows, so filaments gain
-  contrast without the grain rising with them. A fine-only version is built
-  alongside it ("Filament detail: coarse part" picks between them; the fine one
-  avoids blotches at the limb).
-- **Inner detail layer:** loops and arches near the limb (6–12 px structure),
-  with straight radial rays damped.
-- **Stars:** stars in the field are found, taken out of the corona before the
-  detail filters and put back over the finished picture (Star gain, Star
-  colour). An optional check against a bundled star catalogue confirms them and
-  gives the frame's scale and orientation; a sky map shows them by name.
-- **Observing site and time** (optional), with a place picker for the 2026 and
-  2027 eclipses that fills in position and time of totality.
-- **1:1 crop of the export:** click the preview to see a window of the
-  full-resolution export with the current settings.
-- **MGN rebuilt:** no smoothing along the filaments (it made a streaky, blocky
-  texture), evenly spaced scales, and the residual ring at the limb removed.
-- **Looks:** Clean Steel M4 / M5 / M6 added; Natural balanced blue removed.
-  All colour looks except Bright desaturated streamers now share the Clean Steel
-  detail settings: MGN out, partial convolution with flat 4–32 px weights, the
-  fine filament layer, Structure 0.4.
-- **Stacking:** long-exposure hot pixels repaired frame by frame; frame gains
-  no longer biased by saturation; the slightly oval Moon from atmospheric
-  refraction made round in the merge; faster inner-corona and partial-
-  convolution steps.
-- Caches from 0.25.0 are re-stacked once.
-
-## New in 0.25.0
-
-- **Moon layer:** the lunar disc with its earthshine detail (maria), stacked
-  from the long exposures, with its own level, colour and tone curve (Moon
-  group). Built automatically, also on the simple stack.
-- **Prominence layer:** prominences stacked from the short exposures and laid
-  over the finished picture, with their own colour, peak and stretch; exportable
-  as an RGBA TIFF.
-- **Look presets:** EFHDR as loaded, Natural balanced blue, Bright desaturated
-  streamers, Calm blue, Sunset, Dark moody, Deep purple.
-- **Colour modes:** from the data, Monochrome (single-channel export), or
-  Mono + tints (a stylized rendering with a chosen sky and prominence tint).
-- **Structure:** local contrast on the finished picture at the width of the
-  streamers. Final sharpening with a multi-scale high-pass method.
-- **Denoise Off by default.** Fine grain is best left to a dedicated denoiser
-  (e.g. NoiseXTerminator) on the export; Denoise can be changed without a
-  re-stack.
-- **Removed:** the NAFE layer (it turned unsmoothed noise into blotches near the
-  limb) and the Log stretch control.
-- **Fixed:** concentric rings in the MGN layer's far field; Highlight
-  compression and Contain whites now work in every look.
-- **Processing recipes:** save and load all processing settings per dataset.
-- Caches from 0.23.x are re-stacked once.
-
-See the [changelog](CHANGELOG.md) for details.
+Older releases: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -505,7 +318,7 @@ stopping on a line.
 ## Features
 
 - Import a finished HDR instead of a bracket — one 16-bit TIFF or FITS from
-  Siril, PixInsight or Photoshop gets every enhancement layer, with the tone
+  a stacking program, astronomy software or an image editor gets every enhancement layer, with the tone
   curve read from the file's own colour profile
 - Automatic tier detection, best-frame selection, hot-pixel repair
 - The lunar disc is found from its limb *edge*, so nothing depends on focal
@@ -529,9 +342,11 @@ stopping on a line.
 - Optional observing site and time, with a map picker showing the path of
   totality for 14 eclipses from 2017 to 2037
 - Frames panel: every frame with a preview, switched off or forced in by hand
-- Recipe check of the stacking options against the loaded data before Start
+- A pre-check of how the set was shot, which sets the stacking options it needs
+- Picture check for rings round the Moon, before export
+- All looks side by side on your picture, A/B compare, undo and redo
 - Polar map (angle × radius) as an export, also in layers and as tiles
-- Extras: Sky & Sun overlay, poster, limb panorama, corona in motion, film and
+- Extras: Sky & Sun overlay, poster, corona in motion, film and
   corona sound, in social-media sizes with safe zones
 - 1:1 crop of the export at any point of the preview
 - Moon layer (earthshine) from the longest exposures; prominence layer from
@@ -544,13 +359,17 @@ stopping on a line.
   JPG, each with a `.params.json` sidecar recording the exact settings
 - Optional export of the **aligned exposure tiers** as 16-bit TIFFs with an
   embedded ICC profile (sRGB or scene-linear), for hand-blending or HDR
-  combining in Photoshop, Affinity or PixInsight
+  combining in other software
 - A written run report: alignment residuals, lunar drift, tier variance,
   calibration factors, and every gate the pipeline opened or closed
 - Raw input from any Bayer camera LibRaw supports; 16-bit TIFF brackets and FITS
   (colour, mono or 3-plane) also accepted
 
 ---
+
+## Install with Python
+
+The downloadable app above needs none of this. To run EFHDR from Python instead:
 
 ## Before you install
 
@@ -697,7 +516,7 @@ Intermediates live in `.eclipseforgehdr/` inside the raw folder; outputs land in
 layer* and the composite export is accompanied by `<name>_prominences_16bit.tif`:
 the prominences alone, in colour, on exactly the same grid, size and
 orientation, with their mask in the alpha channel. Drop it on top of the
-composite in Photoshop and blend it yourself (Normal with *Blend If*, Screen,
+composite in an image editor and blend it yourself (Normal with *Blend If*, Screen,
 opacity, a clipped Curves or Hue/Saturation). Why a layer: the composite's own
 tone mapping clips or flattens bright H-alpha cores, and no in-app blend looked
 natural. Where the prominences are comes from the HDR merge's red excess
@@ -880,7 +699,7 @@ need it.
 ### Alignment — Automatic / Always align / Keep frames as they are
 
 *Automatic* looks at a sample of the frames for the black border a registering
-program (Siril, PixInsight) leaves where it shifted a frame. When most frames
+program leaves where it shifted a frame. When most frames
 carry one, of different widths, the set was registered already and is stacked as
 written; otherwise EFHDR aligns it as usual. The log says which. *Always align*
 and *Keep frames as they are* overrule the check. Re-stacks.
@@ -982,7 +801,7 @@ Also writes each aligned exposure tier as a 16-bit TIFF into
 Aligned and demosaiced but not merged or tone mapped, so the exposure
 relationship between tiers is preserved, with an ICC profile embedded.
 *scene-linear* writes them at gamma 1.0 with a linear profile — choose that for
-PixInsight or your own HDR combine; leave it off for Photoshop and Affinity,
+astronomy software or your own HDR combine; leave it off for image editors,
 where sRGB-encoded files open looking correct.
 
 ## Importing a finished HDR
@@ -1219,7 +1038,7 @@ the field size and, with the site given, the Sun's altitude.
 ## FITS input
 
 Folders of FITS frames work as input, for capture software that writes it rather
-than camera raw — INDI/EKOS, SharpCap, N.I.N.A., FireCapture. Colour (CFA +
+than camera raw (astronomy capture programs). Colour (CFA +
 `BAYERPAT`), monochrome, and already-debayered 3-plane cubes are all handled;
 the Bayer pattern is rolled to RGGB and `XBAYROFF`/`YBAYROFF` are respected.
 
@@ -1256,7 +1075,7 @@ the frames: two exposures of the same scene differ by a factor, so a straight
 line through one against the other crosses at the black level. Several pairs
 from the short-to-middle part of the bracket are used, per colour channel.
 
-**Registered frames.** Frames that Siril or PixInsight already aligned are
+**Registered frames.** Frames that a stacking program already aligned are
 recognised by their black borders and kept as written (see *Alignment*).
 
 Reading needs no extra package: there is a built-in reader for plain

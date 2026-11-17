@@ -26,9 +26,11 @@ RULES = [
      "1 Images (Frames)."),
     (r"tiers disagree by .* at the limb",
      "Rings at the Moon's edge possible",
-     "The exposures disagree at the Moon's edge, so concentric rings may show around the limb and "
-     "bright prominences. If they do, try Merge weight \"Blended edge\" in 2 Processing (new stack); "
-     "it can darken the corona just outside the limb, so compare and keep the better one."),
+     "The run measured the exposures disagreeing at the Moon's edge. Look at the limb and the bright "
+     "prominences: if concentric rings show there, Merge weight \"Blended edge\" (new stack) can hide "
+     "them, but it can also darken the corona just outside the limb and leave a magenta ring round the "
+     "disc. Compare the two results and keep the better one. If no rings show, change nothing.",
+     {"id": "feather", "value": "plain", "label": "Try Blended edge (new stack)"}),
     (r"limb fit rms .* limb smeared",
      "Soft Moon edge",
      "The Moon's edge came out smeared: the frames were not placed exactly on each other. Expect a "
@@ -73,7 +75,9 @@ RULES = [
     (r"correction disabled: master",
      "Calibration frames not applied",
      "Flats or darks have another size than the light frames and were not applied."),
-    (r"% of merged samples negative",
+    # from 0.5 % on: the log line also appears for a few hundredths of a percent
+    # (printed as 0.0%), which shows nowhere in the picture
+    (r"(?<![\d.])(?:[1-9]\d*\.\d|0\.[5-9])% of merged samples negative",
      "Sky below black",
      "Part of the sky came out below black and was set to zero; the sky may look flat or blotchy."),
     (r"per-tier radial check: .* departs up to",
@@ -92,7 +96,9 @@ RULES = [
      "The Moon layer could not be built: the Moon stays smooth and the Earthshine control does "
      "nothing."),
 ]
-_RX = [(re.compile(p, re.I), t, x) for p, t, x in RULES]
+# a rule may carry a fourth item: the setting to try ({id, value, label}),
+# offered as a button on the note -- only after a run, only when it fired
+_RX = [(re.compile(r[0], re.I), r[1], r[2], (r[3] if len(r) > 3 else None)) for r in RULES]
 
 
 def collect(lines, levels):
@@ -102,12 +108,15 @@ def collect(lines, levels):
         lv = levels[i] if levels and i < len(levels) else None
         if lv not in (None, "warn", "fail", "odd"):
             continue
-        for rx, title, text in _RX:
+        for rx, title, text, act in _RX:
             if title in seen:
                 continue
             if rx.search(str(ln)):
                 seen.add(title)
-                out.append({"title": title, "text": text, "line": str(ln)[:300]})
+                n = {"title": title, "text": text, "line": str(ln)[:300]}
+                if act:
+                    n["act"] = dict(act)
+                out.append(n)
     return out
 
 

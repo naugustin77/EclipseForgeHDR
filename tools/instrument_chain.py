@@ -2,9 +2,9 @@
 """Dump the per-frame chain, stage by stage, so the ring artifact can be traced
 to the step that creates it.
 
-WHY THIS EXISTS. A test mean-stacked two sets of the same nine raws in Photoshop:
-EclipseForgeHDR's exported aligned tiers, and Lightroom's exports. The EFHDR
-stack rings; the Lightroom stack does not. So something in our per-frame
+WHY THIS EXISTS. A test mean-stacked two sets of the same nine raws in an image editor:
+EclipseForgeHDR's exported aligned tiers, and a raw converter's exports. The EFHDR
+stack rings; the raw converter's stack does not. So something in our per-frame
 handling makes it. Reproducing that chain from outside the app was tried and
 produced three confounded results in a row (no white balance, a shift applied
 to the mosaic instead of the channels). The fix is not a better reproduction --

@@ -1,4 +1,4 @@
-"""Threads for the independent parts of a stack (lab 0.28.x, 2026-10-18).
+"""Threads for the independent parts of a stack (0.28.x, 2026-10-18).
 
 The heavy steps are numpy and scipy.ndimage calls, which release the GIL, so
 plain threads give most of the speed of several cores with NO copy of the

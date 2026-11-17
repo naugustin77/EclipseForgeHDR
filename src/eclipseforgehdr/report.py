@@ -111,7 +111,7 @@ METHODS = [
      "average also has a sinc frequency response, so its gain is not monotone "
      "in frequency, and its phase spectrum is not flat, so structures can be "
      "shifted. Treat this layer as a look rather than a measurement. Method "
-     "traced to Espenak (2000), from Photoshop's Radial Blur / Spin; an "
+     "traced to Espenak (2000), from an image editor's radial (spin) blur; an "
      "earlier attribution here to Pellett via Druckmuller 2009 is unverified"),
     ("Partial convolution",
      "unsharp masks of the log-stretched image at 2, 4, 8, 16 and 32 px, added back "
@@ -621,7 +621,7 @@ def build(stats):
               f"({_fl['rejected'][0]['file']} {_fl['rejected'][0]['why']})")
     elif _fl.get("dir"):
         A(f"flat field   : NOT applied — {_fl.get('error', 'unavailable')}")
-    # frame brightness inside the tiers (transparency), lab 0.24
+    # frame brightness inside the tiers (transparency), 0.24
     _fgs = [(k, v.get("frame_gain")) for k, v in (stats.get("quality") or {}).items()
             if isinstance(v, dict) and v.get("frame_gain")]
     if _fgs:
@@ -635,7 +635,7 @@ def build(stats):
             A(f"frame bright.: spread within a tier up to {max(_spr):.1f}% "
               f"(median {float(np.median(_spr)):.1f}%), corrected per frame"
               + (f"; {_out} frame(s) left out for brightness (>15% off the tier median; darker or brighter, cause not known)" if _out else ""))
-    # sky subtraction (TODO 22, lab 0.24)
+    # sky subtraction (TODO 22, 0.24)
     _ss = stats.get("sky_sub") or {}
     if _ss:
         if _ss.get("applied"):
@@ -1001,8 +1001,8 @@ def build(stats):
         _swap["Demosaic"] = (
             "VNG, Variable Number of Gradients (Chang, Cheng & Ward 1999), from "
             "the gradient tables in LibRaw's own misc_demosaic.cpp -- the same "
-            "algorithm PixInsight's RAW module uses, so a render can be compared "
-            "with one of its on equal terms. Agrees with LibRaw's output to 1.5 "
+            "algorithm a widely used astronomy package's RAW module uses, so a render "
+            "can be compared with one of its on equal terms. Agrees with LibRaw's output to 1.5 "
             "counts in 65535 over 44 million pixels once LibRaw's own 16-bit "
             "clip is applied. The clipping test is asked of the MOSAIC, so a "
             "pixel interpolated in part from a saturated photosite is flagged")
