@@ -37,6 +37,10 @@ From the [**Releases page**](https://github.com/naugustin77/EclipseForgeHDR/rele
 - Prefer Python? [Install with pipx](#install-with-python) instead — the same
   program.
 
+**New to it?** The [Getting Started guide (PDF, 9 pages)](docs/EclipseForgeHDR_Getting_Started.pdf)
+walks through a first run with screenshots: install, load, stack, pick a look,
+export, and what to do when the picture looks wrong.
+
 ## Three steps
 
 1. **Images** — choose the folder with your raw files. EFHDR checks how the set
@@ -58,21 +62,27 @@ adjustments of the "Night navy" preset and the Moon layer.*
 
 ![Tab 3, Result: the live preview with the look controls](docs/images/EclipseForgeHDR_GUI_Tab3.jpg)
 
-*Tab 3, Result: the live preview with the look controls. The row of buttons
-under the preview switches between the composite and each individual layer;
-every slider re-renders live, with no re-processing.*
+*Tab 3, Result: the live preview, the look and six main controls; every other
+control under **Show all controls**. Under the preview: **All looks** (every look
+on your picture), **A/B**, **Undo / Redo**. The picture check reports rings round
+the Moon. Every slider re-renders live, with no re-processing.*
+
+![All looks: every look on your own picture](docs/images/EclipseForgeHDR_GUI_Tab3_all-looks.jpg)
+
+*All looks: every look on your own picture, side by side; a click puts it on.*
 
 <details>
 <summary><b>The other four tabs</b> (click to open)</summary>
 
 **1 · Images:** the folder, the calibration folders, a checklist of what was
-found, the shooting timeline and the Frames panel, where every frame can be
-switched off or forced in.
+found, the shooting timeline, the pre-check (how this was shot) and the Frames
+panel, where every frame can be switched off or forced in.
 
 ![Tab 1, Images](docs/images/EclipseForgeHDR_GUI_Tab1.jpg)
 
-**2 · Processing:** the stacking options, the recipe check, the observing site
-and time, Start and the log.
+**2 · Processing:** the settings the pre-check set for this set, the stacking
+options folded under Expert settings, the observing site and time with its map,
+Start, and the log with Copy and Save.
 
 ![Tab 2, Processing](docs/images/EclipseForgeHDR_GUI_Tab2.jpg)
 

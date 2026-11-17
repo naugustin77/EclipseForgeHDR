@@ -1,29 +1,28 @@
 ---
 name: Dataset report
 about: A run on your own eclipse data — worked, partly worked, or failed
-title: "[dataset] camera / focal length / result in one line"
+title: "[dataset] camera / result in one line"
 labels: dataset
 ---
 
-**Please attach the run report.** It is written to
-`eclipseforge_output/<name>_report.txt` next to your raws and records every
-decision the pipeline made and the numbers behind them. It is far more useful
-than a screenshot.
+**Please attach `eclipseforge_diagnostics.zip`** from `eclipseforge_output/`
+inside your frame folder (written after every run). It holds the run report
+with every decision the pipeline made and the numbers behind them, plus
+measurements and small greyscale thumbnails: no raw data. It is far more
+useful than a screenshot. The log (tab 2, **Save log**) helps too.
 
 ## The bracket
 
-- Camera and lens / focal length / aperture:
-- Number of frames, number of exposure tiers, shortest and longest exposure:
+- Camera and lens:
+- Number of frames, number of exposures, shortest and longest exposure:
 - Mount: equatorial / alt-az / untracked / hand-held
-- Roughly how many pixels across is the Moon?
-- Eclipse, date, sun altitude if you know it:
+- One pass through the exposures, or repeated brackets?
 
 ## What happened
 
-Worked / partly worked / failed at which step. If it failed, paste the last few
-lines of the log.
+Worked / partly worked / failed at which step. If the run stopped, paste the
+red message.
 
 ## Screenshots
 
-Composite plus the individual layer views (MGN, FNRGF, Inner, Prom gate) if a
-particular layer is the problem — they usually narrow it down immediately.
+The result (tab 3), and if one part is the problem, a 1:1 crop of it.
