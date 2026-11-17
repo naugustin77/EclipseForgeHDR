@@ -22,3 +22,6 @@ TODO.md
 
 # transfer tarballs dropped in the repo root
 *.tar.gz
+
+# the desktop apps built by packaging/build_app.py
+release/
