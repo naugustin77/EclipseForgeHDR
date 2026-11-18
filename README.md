@@ -46,6 +46,11 @@ From the [**Releases page**](https://github.com/naugustin77/EclipseForgeHDR/rele
   every setting, what it does and when to change it; preparing your data
   (folder layout, repeated brackets, flats, darks, FITS), the layers, the
   stars, troubleshooting and a glossary.
+- **Sample dataset**: no eclipse frames of your own? A complete totality set
+  (about 0.9 GB) is on the
+  [Sample dataset release](https://github.com/naugustin77/EclipseForgeHDR/releases/tag/sample-data-2026).
+  The frames are FITS at half resolution, meant only for a quick test of the
+  app. Data: Nico Augustin, CC BY-NC 4.0.
 
 ## Three steps
 
