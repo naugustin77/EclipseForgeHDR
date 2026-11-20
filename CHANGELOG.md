@@ -5,6 +5,22 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.32.1
+
+**No re-stack:** 0.32.0 caches are reused.
+
+**Mac app**
+- macOS reported the downloaded 0.32.0 Mac app (Intel and Apple silicon) as
+  "damaged", and `codesign --verify` said "invalid Info.plist (plist or
+  signature have been modified)". The build wrote the version into the app's
+  Info.plist after PyInstaller had signed the app, which broke the signature.
+  The app is now signed again after that step, and the build checks the
+  signature (on the app and on the copy in the .dmg) and stops if it fails.
+- If you have 0.32.0 installed and it will not open, in Terminal:
+  `codesign --force --deep --sign - "/Applications/EclipseForgeHDR 0.32.0.app"`
+  then `xattr -dr com.apple.quarantine "/Applications/EclipseForgeHDR 0.32.0.app"`
+  -- or install 0.32.1.
+
 ## 0.32.0
 
 **Re-stack once:** 0.31.0 caches are not reused (the stack changed for sets

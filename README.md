@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.32.0
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.32.1
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -22,9 +22,9 @@ From the [**Releases page**](https://github.com/naugustin77/EclipseForgeHDR/rele
 
 | | |
 |---|---|
-| **Mac** with Apple silicon (M1 and later) | `EclipseForgeHDR-0.32.0-macOS-arm64.dmg` |
-| **Mac** with an Intel processor | `EclipseForgeHDR-0.32.0-macOS-x86_64.dmg` |
-| **Windows** 10 and 11 | `EclipseForgeHDR-0.32.0-Windows-Setup.exe` |
+| **Mac** with Apple silicon (M1 and later) | `EclipseForgeHDR-0.32.1-macOS-arm64.dmg` |
+| **Mac** with an Intel processor | `EclipseForgeHDR-0.32.1-macOS-x86_64.dmg` |
+| **Windows** 10 and 11 | `EclipseForgeHDR-0.32.1-Windows-Setup.exe` |
 
 - **Mac:** open the .dmg and drag EclipseForgeHDR onto the Applications folder.
   The app is not signed by Apple, so macOS blocks the first start: open
@@ -109,6 +109,12 @@ and corona sound.
 ![Tab 5, Extras](docs/images/EclipseForgeHDR_GUI_Tab5.jpg)
 
 </details>
+
+## New in 0.32.1
+
+- **The Mac app opens again.** macOS called the 0.32.0 Mac app "damaged":
+  the build changed the app after signing it. Nothing else changed; 0.32.0
+  results are reused without a re-stack.
 
 ## New in 0.32.0
 

@@ -86,6 +86,19 @@ def name_mac_app():
     info["CFBundleDisplayName"] = f"{NAME} {version()}"
     with open(pl, "wb") as f:
         plistlib.dump(info, f)
+    # THE SIGNATURE SEALS THE Info.plist. PyInstaller signs the bundle ad hoc
+    # while it builds it; editing the Info.plist afterwards broke that seal,
+    # and macOS reported the downloaded 0.32.0 app as "damaged" (codesign:
+    # "invalid Info.plist (plist or signature have been modified)"). So the
+    # bundle is signed again, ad hoc, after the edit -- and checked.
+    sign_mac_app(dst)
+
+
+def sign_mac_app(app):
+    """Ad-hoc signature over the finished bundle, then the same check a user
+    would run; the build stops if it fails."""
+    subprocess.check_call(["codesign", "--force", "--deep", "--sign", "-", app])
+    subprocess.check_call(["codesign", "--verify", "--deep", "--strict", "--verbose=2", app])
 
 
 def exe_path():
@@ -129,6 +142,9 @@ def package():
         shutil.rmtree(stage, ignore_errors=True)
         os.makedirs(stage)
         subprocess.check_call(["ditto", app_bundle(), os.path.join(stage, os.path.basename(app_bundle()))])
+        # the copy that goes into the dmg must still verify
+        subprocess.check_call(["codesign", "--verify", "--deep", "--strict", "--verbose=2",
+                               os.path.join(stage, os.path.basename(app_bundle()))])
         os.symlink("/Applications", os.path.join(stage, "Applications"))
         if os.path.exists(out):
             os.remove(out)
