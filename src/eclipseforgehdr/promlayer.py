@@ -1372,12 +1372,45 @@ def display_maps(wd, geo):
                               "W2": W2.astype(np.float32), "F": F.astype(np.float32)}
 
 
-def overlay(rgb, maps, P):
+# THE CORONA DIMMED AROUND PROMINENCES (2026-11-21). Under a bright, warm look
+# (Golden hour, Cinematic sunset) the inner corona sits close to white, so a
+# prominence laid over it has no room left for its colour and goes the
+# corona's yellow; under the default look the corona there is darker and the
+# prominence glows pink with a bright core. Colouring the prominence redder
+# instead was tried and judged too strong and unnatural. So the prominence is
+# left exactly as it is and the BRIGHT corona just around it is dimmed a little
+# (promDim), over a soft footprint of the prominences (not the chromosphere
+# rim, which would draw a ring) blurred by promDimWidth x R. Faded in only
+# where the corona is bright (luminance 0.45 -> 0.85), so a darker look is
+# hardly touched. 0 = off, the default; set by the looks that need it.
+DIM_LO, DIM_SPAN = 0.45, 0.40
+
+
+def dim_backdrop(rgb, maps, P, R):
+    """Dim the bright corona around the prominences, in place (see above)."""
+    k = float(P.get("promDim", 0.0) or 0.0)
+    s = float(P.get("promLayer", 1.0))
+    if k <= 0 or s <= 0 or not R:
+        return
+    gam = float(P.get("promStretch", 0.5))
+    y = np.clip(maps["L"], 0, None) ** np.float32(gam)
+    ap = np.clip(y * maps["W1"] * np.float32(1.5 * s), 0, 1).astype(np.float32)
+    sig = max(float(P.get("promDimWidth", 0.02) or 0.02) * float(R), 0.5)
+    H = np.clip(_pgauss(ap, sig) * 2.0, 0, 1)
+    lw = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    w = np.clip((np.clip(rgb @ lw, 0, 1) - DIM_LO) / DIM_SPAN, 0, 1)
+    w = w * w * (3 - 2 * w)
+    rgb *= (1 - np.float32(min(k, 1.0)) * H * w)[..., None]
+
+
+def overlay(rgb, maps, P, R=None):
     """Lay the layer over a finished (display-encoded) picture, in place on the
-    slice it is given. Returns alpha. Same formula as the page's promOverlay."""
+    slice it is given. Returns alpha. Same formula as the page's promOverlay.
+    R: the disc radius in this picture's pixels, for promDim."""
     s = float(P.get("promLayer", 1.0))
     if s <= 0:
         return None
+    dim_backdrop(rgb, maps, P, R)
     gam = float(P.get("promStretch", 0.5)); rim = float(P.get("promRim", 1.0))
     mode = int(P.get("colourMode", 0) or 0)
     sat = 0.0 if mode == 1 else float(P.get("promSat", 1.3))

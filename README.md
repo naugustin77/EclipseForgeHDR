@@ -1,6 +1,6 @@
 # EclipseForgeHDR
 
-**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.32.1
+**High-Dynamic-Range Solar Eclipse Image Processing** — version 0.33.0
 
 ![Total solar eclipse corona processed with EclipseForgeHDR](docs/images/EFHDRshowpiece.jpg)
 
@@ -22,9 +22,9 @@ From the [**Releases page**](https://github.com/naugustin77/EclipseForgeHDR/rele
 
 | | |
 |---|---|
-| **Mac** with Apple silicon (M1 and later) | `EclipseForgeHDR-0.32.1-macOS-arm64.dmg` |
-| **Mac** with an Intel processor | `EclipseForgeHDR-0.32.1-macOS-x86_64.dmg` |
-| **Windows** 10 and 11 | `EclipseForgeHDR-0.32.1-Windows-Setup.exe` |
+| **Mac** with Apple silicon (M1 and later) | `EclipseForgeHDR-0.33.0-macOS-arm64.dmg` |
+| **Mac** with an Intel processor | `EclipseForgeHDR-0.33.0-macOS-x86_64.dmg` |
+| **Windows** 10 and 11 | `EclipseForgeHDR-0.33.0-Windows-Setup.exe` |
 
 - **Mac:** open the .dmg and drag EclipseForgeHDR onto the Applications folder.
   The app is not signed by Apple, so macOS blocks the first start: open
@@ -109,6 +109,22 @@ and corona sound.
 ![Tab 5, Extras](docs/images/EclipseForgeHDR_GUI_Tab5.jpg)
 
 </details>
+
+## New in 0.33.0
+
+- **New looks:** *Cinematic blue* and *Cinematic sunset* (light around the
+  Moon, a cool or a warm sky), and *Limited dataset* for sets with too little
+  light, chosen by itself when the run finds one.
+- **Moon glow:** the corona's light on the dark Moon, strongest at the rim.
+  **Corona glow:** a soft glow from the corona's own light. Both in the quick
+  controls.
+- **Prominences keep their glow in warm looks:** the bright corona around
+  them can be dimmed a little.
+- **Diamond ring:** only the ring and its glare are laid on, with an
+  unclipped core and controls for size, exposure, glare, colour and
+  highlights.
+- **FITS with PEDESTAL** stack like the raws (press Clear cache once on such
+  sets); Windows site times are no longer guessed.
 
 ## New in 0.32.1
 

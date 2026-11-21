@@ -1,4 +1,4 @@
-__version__ = "0.32.1"
+__version__ = "0.33.0"
 
 # 0.23.3 changes the SHARED PEDESTAL for any file whose header reports no black
 # level (every FITS, normally): fits.py stops reading OFFSET as one, and the fit
@@ -375,7 +375,11 @@ CACHE_FAMILIES = (
     # colour planes measured clear of the Moon on such sets). No 0.31.0 cache
     # is the same data: its own family, one re-stack per folder.
     # 0.32.1 only repairs the Mac app's signature: same data, no re-stack.
-    frozenset({"0.32.0", "0.32.1"}),
+    # 0.33.0 adds looks, Moon glow, corona glow and the diamond-ring controls,
+    # all at render time; camera raws stack the same, so no re-stack. A FITS
+    # set with PEDESTAL stacks differently (values below the pedestal kept):
+    # the CHANGELOG asks for Clear cache once on such sets.
+    frozenset({"0.32.0", "0.32.1", "0.33.0"}),
 
 )
 

@@ -34,6 +34,10 @@ dependencies = [
   "certifi>=2023.7",
   # an ffmpeg for the clips of the Extras tab (film.py) when the system has none
   "imageio-ffmpeg>=0.4",
+  # the time-zone database for the site picker's local times (eclipses.py,
+  # zoneinfo): Windows has none of its own, so without this the UTC offset
+  # fell back to a guess from the longitude there
+  "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

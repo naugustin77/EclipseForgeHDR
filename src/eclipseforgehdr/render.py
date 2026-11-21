@@ -73,6 +73,9 @@ DEFAULTS = {
     "promLayer": 1.0, "promStretch": 0.5, "promRim": 1.0, "promSat": 1.3, "promFade": 1.0,
     #   promSoft    soft highlights: no flat core, no hard step to the rim (0 = off)
     "promSoft": 0.0,
+    # the bright corona dimmed around the prominences (promlayer.dim_backdrop),
+    # 0 = off; width as a fraction of R (2026-11-21)
+    "promDim": 0.0, "promDimWidth": 0.02,
     #   promLight   the prominences ADD brightness to the corona instead of being
     #               laid over it as an opaque colour; how close the brightest
     #               core may come to white (0 = the opaque colour as before)
@@ -167,11 +170,20 @@ DEFAULTS = {
     # noise gate. All off by default -- it is a finish, not a default look.
     "finalMid": 0.0, "finalDark": 0.0, "finalLight": 0.0, "finalNoise": 3.0,
     "discLevel": 0.045, "discTrim": 0.0, "earthShine": 0.0,
+    # Moon glow (2026-11-18): the corona's light scattered onto the disc, 0 = off;
+    # starts at 0.5 (2026-11-21, after the 0.33 tests; 0.6 from 2026-11-19)
+    "moonGlow": 0.5,
+    # cinematic finish (2026-11-19) -- see cine(). A touch of corona glow by
+    # default (0.05, 2026-11-21); vignette and Moon sky tint off
+    "coronaGlow": 0.05, "vignette": 0.0, "moonSky": 0.0,
     # block 3a: zoned partial-conv gains, tone curve, contained whites, disc edge
     "hillZone": 0.0, "hillZoneR": 1.8,
     "toneCurve": [[0.0, 0.0], [1.0, 1.0]], "containWhites": 1.0,
     "discSoft": 12.0,
     "ringBlend": 0.0, "ringScale": 1.0, "ringDX": 0.0, "ringDY": 0.0,
+    # the diamond ring's own light only, with its own colour and highlight
+    # controls (2026-11-19) -- see ring_light()
+    "ringSize": 0.5, "ringExpo": 2.0, "ringTemp": 1.2, "ringSat": 1.0, "ringHL": 0.5, "ringFall": 0.6,
     # the look controls (0.24), all off -- see look()
     "coronaLevel": 0.0, "skyLevel": 0.0, "skyColour": 0.0, "moonColour": 0.0,
     # THE MOON GROUP (0.24): the Moon's own tone curve -- the main curve no
@@ -266,7 +278,7 @@ def defaults_for(mode):
 # the first thing to reach for when a loaded look is close but not right.
 _LOCAL_KEYS = frozenset({
     "discLevel", "discTrim", "bgBlack",
-    "ringBlend", "ringScale", "ringDX", "ringDY",
+    "ringBlend", "ringSize", "ringScale", "ringDX", "ringDY",
 })
 
 
@@ -536,6 +548,24 @@ class Layers:
         if earth.shape != lum.shape:
             self.has_earth = False
             earth = np.full(lum.shape, 0.5, np.float32)
+        # THE MOON GLOW'S RADIAL SHAPE (Moon layer build 12): measured on this
+        # set's Moon-aligned stack when it shows one, the sample dataset's
+        # otherwise -- the glow itself takes its brightness from the corona
+        # beside the limb, so it works on every set
+        self.glow_shape = list(_mlm.DEFAULT_GLOW_SHAPE)
+        try:
+            _mm = json.load(open(os.path.join(wd, _mlm.MOON_META)))
+            # only where the disc's light was confirmed as the real Moon's
+            # (the maria check): on a set where it was not, the stack's rings
+            # are noise -- measured on a thin test set, a shape that jumped
+            # from 0.07 at 0.75 R to 0.74 at 0.95 R and drew a grey ring
+            _ok = str((_mm.get("maria_check") or {}).get("verdict", "")) == "confirmed"
+            _gs = _mm.get("glow_shape") if (int(_mm.get("build", 0)) >= 12 and _ok) else None
+            if isinstance(_gs, list) and len(_gs) == len(self.glow_shape):
+                self.glow_shape = [float(v) for v in _gs]
+        except Exception:
+            pass
+        self.glow_shape = glow_profile(self.glow_shape)
         gate = np.load(os.path.join(wd, "prom.npy"))
         pelp = os.path.join(wd, "pellett.npy")
         pel = np.load(pelp) if os.path.exists(pelp) else np.full(lum.shape, 0.5, np.float32)
@@ -1079,10 +1109,19 @@ class Layers:
 
     def reload_contact(self):
         p = os.path.join(self.wd, "contact_rgb.npy")
+        # contact.json (2026-11-19): the layer is encoded over the frame's own
+        # peak, so nothing clips; `peak` is that peak in units of the frame's
+        # 99.9th percentile. Without it, an older layer clipped at 1.
+        self.contact_peak = 1.0
+        try:
+            self.contact_peak = float(json.load(open(os.path.join(self.wd, "contact.json")))["peak"])
+        except Exception:
+            pass
         if os.path.exists(p):
             c = np.load(p).astype(np.float32)
             self.full["contact"] = c
-            self.prev["contact"] = c[::self.prev_decim, ::self.prev_decim]
+            _hp, _wp = self.prev["bg"].shape[:2]
+            self.prev["contact"] = c[::self.prev_decim, ::self.prev_decim][:_hp, :_wp]
             return True
         return False
 
@@ -2265,6 +2304,19 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
                             float(P["finalMid"]), float(P["finalDark"]),
                             float(P["finalLight"]), float(P.get("finalNoise", 0)),
                             soft=(cy, cx, _lsS, _lsR) if _lsOn else None)
+    # THE MOON GLOW (2026-11-18), on the finished picture, before the
+    # prominence and star layers
+    if view in ("composite", "moon") and float(P.get("moonGlow", 0.0) or 0.0) > 1e-6:
+        rgb = moon_glow(rgb, float(P["moonGlow"]), cy, cx, R,
+                        getattr(layers, "glow_shape", None),
+                        alpha=moon_alpha(layers, P, decim, rgb.shape[:2]),
+                        gate=src.get("prom"))
+    # THE CINEMATIC FINISH (2026-11-19): corona glow, Moon in the sky's
+    # colour, vignette -- after the Moon glow, before the prominence and star
+    # layers
+    if view == "composite" and max(float(P.get("coronaGlow", 0) or 0), float(P.get("vignette", 0) or 0),
+                                   float(P.get("moonSky", 0) or 0)) > 1e-6:
+        rgb = cine(rgb, P, cy, cx, R, moon_alpha(layers, P, decim, rgb.shape[:2]), pin=pin)
     # THE 0.24 PROMINENCE LAYER, over the finished picture (after the final
     # sharpening, so its soft edge is not sharpened into a line)
     if view == "composite" and getattr(layers, "has_promlayer", False):
@@ -2273,13 +2325,13 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
             _m = {k: src["pl_" + k] for k in ("L", "C", "W1", "W2", "F")}
             _hh, _ww = rgb.shape[:2]
             _m = {k: v[:_hh, :_ww] for k, v in _m.items()}
-            _pov(rgb, _m, P)
+            _pov(rgb, _m, P, R)
         else:
             _y0, _y1, _x0, _x1 = layers.pl_box
             _sub = np.ascontiguousarray(rgb[_y0:_y1, _x0:_x1])
             if keep is not None and float(P.get("promLayer", 1.0)) > 0:
                 _corona = rgb.copy()          # the picture without the layer
-            _pov(_sub, layers.pl_full, P)
+            _pov(_sub, layers.pl_full, P, R)
             rgb[_y0:_y1, _x0:_x1] = _sub
     # THE STAR LAYER, over the finished picture too (stars.overlay)
     if view == "composite" and getattr(layers, "has_stars", False):
@@ -2304,9 +2356,10 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
                 ct[:, :, ch] = ndimage.affine_transform(
                     c[:, :, ch], mat, offset=off, order=1, mode="constant", cval=0)
             c = ct
-        rgb = 1 - (1 - rgb) * (1 - P["ringBlend"] * c)
+        ring = ring_light(c, rgb, P, cy, cx, R, getattr(layers, "contact_peak", 1.0))
+        rgb = 1 - (1 - rgb) * (1 - P["ringBlend"] * ring)
         if _corona is not None:
-            keep["corona"] = 1 - (1 - _corona) * (1 - P["ringBlend"] * c)
+            keep["corona"] = 1 - (1 - _corona) * (1 - P["ringBlend"] * ring)
             _corona = None
     # THE MOON VIEW (0.24): the finished Moon on its own -- the composite's
     # disc (level, earthshine, colour, its own curve), black outside it, the
@@ -2314,6 +2367,349 @@ def render(layers: Layers, params, preview=False, view="composite", keep=None, p
     if view == "moon":
         rgb = rgb * (1.0 - moon_alpha(layers, P, decim, rgb.shape[:2]))[:, :, None]
     return rgb
+
+
+GLOW_RING = (1.02, 1.04)      # R: where the corona beside the limb is sampled
+GLOW_BINS = 720
+GLOW_SMOOTH = 4.0             # bins (2 degrees): sigma of the smoothing along the limb
+# PROMINENCES ARE LEFT OUT of the glow's colour (2026-11-20): the prominence
+# gate's pixels above GLOW_GATE are not sampled (moon_glow), and a running
+# median over GLOW_MEDIAN bins (12.5 degrees) takes out what is left of
+# narrow bright features before the smoothing.
+GLOW_GATE = 0.05
+GLOW_MEDIAN = 25
+
+
+GLOW_TREND = (0.85, 0.95)     # R: the fall-off's trend is fitted here and carried on to the limb
+GLOW_SOFT = 0.6               # the fall-off raised to this power: a softer, wider glow
+
+
+def glow_profile(shape):
+    """The Moon glow's fall-off as the render uses it (2026-11-19).
+
+    1. Beyond 0.95 R the measured rings are replaced by the trend of
+       0.85-0.95 R (an exponential in r), where that is lower: on the 600 mm
+       set the last three rings jump away from it (0.60 / 0.79 / 1.00 against
+       a trend of 0.52 / 0.60 / 0.69) -- most likely the stack's own edge,
+       the corona smeared into the disc as the Moon drifts and the limb's
+       blur, not glow -- and drew a dense bright rim.
+    2. Scaled to 1 at the last ring and raised to GLOW_SOFT, so the glow
+       reaches further in and the edge stands out less (chosen by eye on the
+       600 mm set from 1 / 0.75 / 0.6 / 0.45)."""
+    shp = np.asarray(shape, np.float64)
+    rc = np.arange(len(shp)) * 0.01 + 0.005
+    m = (rc >= GLOW_TREND[0]) & (rc <= GLOW_TREND[1]) & (shp > 0)
+    if m.sum() >= 4:
+        p = np.polyfit(rc[m], np.log(shp[m]), 1)
+        k = rc > GLOW_TREND[1]
+        shp[k] = np.minimum(shp[k], np.exp(np.polyval(p, rc[k])))
+    if shp[-1] > 0:
+        shp = shp / shp[-1]
+    return [float(v) for v in np.clip(shp, 0, None) ** GLOW_SOFT]
+
+
+GLOW_DETAIL = 0.5    # share of the fine detail (< 0.03 R) the corona glow gives back
+# share of the corona glow kept on the Moon's disc (2026-11-20): the glow is a
+# wide blur and spread over the dark disc as a veil -- on a test set it lifted
+# the Moon from 56 to 76 levels and turned it olive in the warm look
+GLOW_ON_MOON = 0.15
+
+
+def cine(rgb, P, cy, cx, R, alpha, pin=None):
+    """THE CINEMATIC FINISH (2026-11-19), on the finished picture.
+
+    Asked for after comparing renders with references that have "more
+    dynamic, some glow, some pep". Measured against those references, the
+    looks so far had the smallest brightness range between the inner corona
+    and the sky of all thirteen images compared, and one of the brightest
+    skies. Fitting the tone curve to their brightness profile matched the
+    numbers but amplified the grain in the outer corona about three times.
+    What the references have instead is light: a smooth glow around the Moon
+    with the filaments drawn on top of it.
+
+    coronaGlow: a bloom from the corona's own light -- the picture above 45 %
+    brightness (the disc left out), blurred over 0.13 R and 0.5 R, in the
+    inner corona's own colour, screened on. Being blurred it lifts the corona
+    without lifting its grain. The fine detail it would wash out (scales below
+    0.03 R) is given back in part (GLOW_DETAIL), so the loops at the limb stay
+    visible without the mottled texture there coming back in full.
+    moonSky: the Moon's disc tinted to the sky's own colour (its median beyond
+    3 R, softened), keeping its brightness; the tint fades out on the disc's
+    bright pixels (the glow at the limb).
+    vignette: the frame darkened toward its corners, from 30 % of the way out
+    from the centre.
+
+    The picture-wide numbers (the glow map itself, the corona's and the sky's
+    colour, the frame's centre and size in units of R) go into `pin`, so a 1:1
+    crop renders as that window of the whole picture: the glow is a blur over
+    half a lunar radius, and a crop on its own would miss the light around it
+    (measured: +44 levels in a crop against +33 in the picture)."""
+    rgb = np.asarray(rgb, np.float32)
+    pin_ok = pin is not None and "cine_frame" in pin
+    H, W = rgb.shape[:2]
+    yy = np.arange(H, dtype=np.float32)[:, None]
+    xx = np.arange(W, dtype=np.float32)[None, :]
+    rn = np.sqrt((yy - np.float32(cy)) ** 2 + (xx - np.float32(cx)) ** 2) / np.float32(R)
+    al = np.clip(np.asarray(alpha, np.float32), 0, 1)
+    lw = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    amt = float(P.get("coronaGlow", 0) or 0)
+    if amt > 1e-6:
+        if pin_ok and pin.get("cine_g") is not None:
+            # a crop: the whole picture's glow map, sampled where this window is
+            gp = np.asarray(pin["cine_g"], np.float32)
+            gcy, gcx, gR = pin["cine_g_geo"]
+            g = ndimage.map_coordinates(
+                gp, [np.repeat(gcy + (yy - np.float32(cy)) / np.float32(R) * gR, W, 1),
+                     np.repeat(gcx + (xx - np.float32(cx)) / np.float32(R) * gR, H, 0)],
+                order=1, mode="nearest").astype(np.float32)
+        else:
+            Y = rgb @ lw
+            src = np.clip((Y - 0.45) / 0.55, 0, 1) * (1 - al)
+            f = max(1, int(round(float(R) / 100.0)))
+            sm = src[::f, ::f]
+            g = 0.6 * ndimage.gaussian_filter(sm, 0.13 * R / f) + 0.4 * ndimage.gaussian_filter(sm, 0.5 * R / f)
+            g = g / max(float(g.max()), 1e-6)
+            if pin is not None and not pin_ok:
+                pin["cine_g"] = g.astype(np.float32)
+                pin["cine_g_geo"] = [float(cy) / f, float(cx) / f, float(R) / f]
+            g = ndimage.map_coordinates(g, [np.repeat(yy / f, W, 1), np.repeat(xx / f, H, 0)],
+                                        order=1, mode="nearest").astype(np.float32)
+            del Y, src
+        if pin_ok and pin.get("cine_k"):
+            k = np.asarray(pin["cine_k"], np.float32)
+        else:
+            sel = (rn >= 1.1) & (rn < 1.5)
+            k = rgb[sel].mean(axis=0) if sel.sum() > 50 else np.ones(3, np.float32)
+            k = np.sqrt(k / max(float(k.mean()), 1e-6)).astype(np.float32)
+            if pin is not None:
+                pin["cine_k"] = [float(v) for v in k]
+        gl = np.clip(np.float32(amt) * g[:, :, None] * k[None, None, :], 0, 1)
+        gl *= (1 - np.float32(1 - GLOW_ON_MOON) * al)[:, :, None]
+        det = np.empty_like(rgb)
+        for c in range(3):
+            det[:, :, c] = rgb[:, :, c] - ndimage.gaussian_filter(rgb[:, :, c], 0.03 * R)
+        rgb = np.clip(rgb + gl * (1 - rgb) + np.float32(GLOW_DETAIL) * gl * det, 0, 1)
+        del g, gl, det
+    ms = float(P.get("moonSky", 0) or 0)
+    if ms > 1e-6:
+        sk = None
+        if pin_ok and pin.get("cine_sky") is not None:
+            sk = np.asarray(pin["cine_sky"], np.float32)
+        elif not pin_ok:
+            sky = rn > 3.0
+            if sky.sum() < 2000:
+                sky = rn > 2.2
+            if sky.sum() > 500:
+                sk = np.median(rgb[sky], axis=0)
+            if pin is not None:
+                pin["cine_sky"] = None if sk is None else [float(v) for v in sk]
+        if sk is not None:
+            sk = sk / max(float(sk @ lw), 1e-6)
+            sk = np.clip(sk, 1e-3, None) ** 0.8           # a softer tint than the sky itself
+            sk = (sk / max(float(sk @ lw), 1e-6)).astype(np.float32)
+            Ym = (rgb @ lw)[:, :, None]
+            # fading out on the bright pixels: the glow at the limb stays
+            # white rather than turning into a bright blue ring
+            w = (np.float32(ms) * al)[:, :, None] * np.clip(1 - Ym / 0.6, 0, 1)
+            rgb = np.clip(rgb * (1 - w) + Ym * sk[None, None, :] * w, 0, 1)
+    vg = float(P.get("vignette", 0) or 0)
+    if vg > 1e-6:
+        if pin_ok:
+            fy, fx, fd = pin["cine_frame"]
+            hc, wc, dd = cy + fy * R, cx + fx * R, fd * R
+        else:
+            hc, wc, dd = (H - 1) / 2.0, (W - 1) / 2.0, float(np.hypot(H / 2.0, W / 2.0))
+        dn = np.sqrt((yy - np.float32(hc)) ** 2 + (xx - np.float32(wc)) ** 2) / np.float32(dd)
+        v = 1 - np.float32(vg) * np.clip((dn - 0.3) / 0.7, 0, 1) ** 1.6
+        rgb = rgb * v[:, :, None]
+    if pin is not None and not pin_ok:
+        pin["cine_frame"] = [((H - 1) / 2.0 - cy) / R, ((W - 1) / 2.0 - cx) / R,
+                             float(np.hypot(H / 2.0, W / 2.0)) / R]
+    return rgb.astype(np.float32)
+
+
+def moon_glow(rgb, strength, cy, cx, R, shape=None, alpha=None, gate=None):
+    """THE MOON GLOW (2026-11-18): the corona's light scattered onto the dark
+    Moon, as a long exposure shows it -- strongest at the rim, fading toward
+    the centre, brighter under bright streamers.
+
+    The glow's brightness and colour at the rim are the finished picture's own
+    corona just outside the limb (GLOW_RING, per direction in GLOW_BINS bins,
+    smoothed with a sigma of 2 degrees); `strength` 1 means the glow at the rim equals
+    that corona. Inward it falls off with the radial shape the Moon layer
+    measured on the Moon-aligned stack (moonlayer.glow_shape; 1 at the rim).
+    It is screened onto the disc and the strip out to GLOW_RING[0], and
+    nowhere made brighter than the corona beside it, so the pale strip at the
+    limb cannot become a bright ring.
+
+    Measured on the sample dataset (half size, R = 307 px) at 0.6, levels of
+    255 at 2, 4, 8, 15, 30 and 60 px inside the limb: 146, 135, 118, 89, 64,
+    48 (glow 0: 61, 41, 34, 35, 36, 35); the strip outside the limb stays at
+    the corona's level (187-190)."""
+    if shape is None:
+        from .moonlayer import DEFAULT_GLOW_SHAPE
+        shape = glow_profile(DEFAULT_GLOW_SHAPE)
+    H, W = rgb.shape[:2]
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    yy -= np.float32(cy); xx -= np.float32(cx)
+    rn = np.sqrt(yy * yy + xx * xx) / np.float32(R)
+    tb = ((np.arctan2(yy, xx) + np.pi) / (2 * np.pi) * GLOW_BINS).astype(np.int32) % GLOW_BINS
+    del yy, xx
+    ring = (rn >= GLOW_RING[0]) & (rn < GLOW_RING[1])
+    if ring.sum() < 50:
+        return rgb
+    # PROMINENCES LEFT OUT (2026-11-20): the ring runs through them, and on a
+    # set with many their red was carried into the disc as stripes. Measured
+    # on a test set: three groups of 8-12 degrees, R/G up to 18 against the
+    # corona's 1.6-1.8. The pixels of the prominence gate are left out; a
+    # direction with none left takes its neighbours' value (below).
+    if gate is not None:
+        g = np.asarray(gate, np.float32)[:H, :W]
+        if g.shape == ring.shape:
+            keep = ring & (g <= GLOW_GATE)
+            if keep.sum() >= 50:
+                ring = keep
+    cnt = np.bincount(tb[ring], None, GLOW_BINS)
+    C = np.empty((GLOW_BINS, 3), np.float32)
+    for k in range(3):
+        v = np.bincount(tb[ring], rgb[:, :, k][ring], GLOW_BINS) / np.maximum(cnt, 1)
+        # an empty bin (the ring off the frame) takes its neighbours' value
+        if (cnt == 0).any() and (cnt > 0).any():
+            idx = np.arange(GLOW_BINS); okb = cnt > 0
+            v = np.interp(idx, idx[okb], v[okb], period=GLOW_BINS)
+        v = ndimage.median_filter(v, size=GLOW_MEDIAN, mode="wrap")
+        C[:, k] = ndimage.gaussian_filter1d(v, GLOW_SMOOTH, mode="wrap")
+    # THE SHAPE. The measured fall-off ends at the last ring centre (0.985 R);
+    # it is carried on to the limb with its own last slope instead of being
+    # held at 1, which drew a flat band 9 px wide inside the limb at full
+    # size (R = 621 px: 169 levels flat from 9 to 4 px inside at 0.85).
+    shp = np.asarray(shape, np.float32)
+    rc = np.arange(len(shp), dtype=np.float32) * 0.01 + 0.005
+    slope = float(shp[-1] - shp[-2]) / 0.01 if len(shp) > 1 else 0.0
+    rc = np.append(rc, 1.0).astype(np.float32)
+    shp = np.append(shp, shp[-1] + max(slope, 0.0) * (1.0 - float(rc[-2]))).astype(np.float32)
+    # WHERE IT GOES (2026-11-19): on the disc, and in the disc's soft edge in
+    # proportion to how much of each pixel is disc (`alpha`, the render's own
+    # edge ramp): pixel = alpha x glowing disc + (1 - alpha) x corona. Before,
+    # the glow was screened over the edge and faded out separately, and on a
+    # full-size set the two ramps crossed: a bright line at the limb and a
+    # darker one 3-4 px out (182 -> 177 -> 192 levels at 0.85, R = 621 px).
+    if alpha is None:
+        alpha = (rn < 1.0).astype(np.float32)
+    on = alpha > 0
+    full = alpha >= 0.999
+    # the disc's own level next to the limb, per direction, for the edge
+    # pixels whose disc part cannot be seen on its own
+    near = full & (rn >= 0.96) & (rn < 0.99)
+    Dl = np.zeros((GLOW_BINS, 3), np.float32)
+    if near.sum() > 50:
+        cn = np.bincount(tb[near], None, GLOW_BINS); okn = cn > 0
+        for k in range(3):
+            v = np.bincount(tb[near], rgb[:, :, k][near], GLOW_BINS) / np.maximum(cn, 1)
+            if (~okn).any() and okn.any():
+                idx = np.arange(GLOW_BINS)
+                v = np.interp(idx, idx[okn], v[okn], period=GLOW_BINS)
+            Dl[:, k] = ndimage.gaussian_filter1d(v, GLOW_SMOOTH, mode="wrap")
+    o = rgb[on]
+    a = alpha[on][:, None].astype(np.float32)
+    D = np.where(full[on][:, None], o, Dl[tb[on]])
+    f = np.interp(np.minimum(rn[on], 1.0), rc, shp, left=float(shp[0]),
+                  right=float(shp[-1])).astype(np.float32)
+    Cd = C[tb[on]]
+    G = np.clip(np.float32(strength) * Cd * f[:, None], 0, 1)
+    # capped at the corona beside the limb with a soft knee from 80 % of it,
+    # so a strong glow still rises to the limb instead of running flat (a
+    # hard cap drew an 11 px flat band at 0.85 on R = 621 px)
+    Gs = 1.0 - (1.0 - D) * (1.0 - G)
+    cap = np.maximum(D, Cd); kn = 0.8 * cap; span = np.maximum(cap - kn, 1e-6)
+    Gd = np.where(Gs > kn, kn + span * np.tanh((Gs - kn) / span), Gs).astype(np.float32)
+    out = rgb.copy()
+    # in the soft edge the glow is a floor under the picture: the larger of
+    # the two. Both rise toward the corona, so the profile only ever rises.
+    # (A mix by the ramp did not work: the picture's edge is steeper than its
+    # ramp, mixed before the tone curve -- it overshot by 20 levels 4-6 px
+    # out, or dipped 8 levels where the ramp began, at 0.85 on R = 621 px.)
+    out[on] = np.where(full[on][:, None], Gd, np.maximum(o, Gd))
+    return out.astype(np.float32)
+
+
+def ring_light(c, rgb, P, cy, cx, R, peak=1.0):
+    """THE DIAMOND RING'S OWN LIGHT (2026-11-19), from the contact layer `c`,
+    ready to be screened on.
+
+    `c` is display-encoded over the frame's own peak (lin = c^2.2, 1 = the
+    brightest channel of the bead, contact.json), so its bright core keeps a
+    gradient and its colour; an older layer was clipped at the frame's 99.9th
+    percentile, and there 35 % of the ring's pixels had a channel at 1 and
+    14 % were flat white (measured on a test set).
+
+    1. THE FLOOR. The whole frame used to be screened on, and its sky and
+       corona paled the picture (sky +15 levels, corona +18-20, Moon +30 on
+       the test set). Now a floor t is taken off the linear light, softly
+       (x m, m = bl/(bl + t), bl = the light blurred over 0.6 % of R),
+       t = 10^(-1 - 2.5 x ringSize) of the peak: 0 keeps the bead and what is
+       above 10 % of it, 1 the glare down to 0.03 %. On the test set the
+       contact frame's Moon is at 0.015 % of the peak, its sky at 0.004 %.
+    1b. ITS EXPOSURE. Ring exposure multiplies the light by 2^EV before the
+       highlight shoulder: 0 = the peak just white, a thin arc as the camera
+       saw it; higher = a thicker, glowing core.
+    2. ITS COLOUR. The glare as shot came out orange (red/green 1.36,
+       blue/green 0.70 on the test set: the camera white balance, before any
+       of the look's colour work). The glare's own median colour is divided
+       out, so Ring temperature 1 is white; above 1 warmer, below cooler.
+       Ring saturation raises the chroma to a power, as Saturation does.
+    3. ITS HIGHLIGHTS. A hue-preserving shoulder on the brightest channel,
+       knee at 1 - 0.5 x ringHL, going to white at the very top: the core
+       turns white without the hard channel-by-channel clip that tinted its
+       edge.
+    4. ITS FALL-OFF. Back to display with gamma 2.2 - 1.1 x ringFall: 0 is the
+       soft fall-off of a plain display conversion, 1 a steep one -- a smaller,
+       harder core with less grey glare over the corona around it."""
+    c = np.clip(np.asarray(c, np.float32), 0, 1)
+    # IN UNITS OF THE BEAD'S PEAK, not of the frame's 99.9th percentile: on
+    # the test set the peak is 103x that percentile, and measured against it
+    # the mask and the white point turned everything above 1 % of it white --
+    # a wide blob, and the red prominence white with it. Relative to the peak
+    # the ring renders as a camera shows it: a thin bright arc, its glare
+    # falling off around it. (`peak` stays for the record; a layer built
+    # before 2026-11-19 was clipped at 1 and is used as it is.)
+    lin = c ** 2.2
+    Y = 0.2126 * lin[:, :, 0] + 0.7152 * lin[:, :, 1] + 0.0722 * lin[:, :, 2]
+    bl = ndimage.gaussian_filter(Y, max(0.006 * float(R), 0.7))
+    sz = min(max(float(P.get("ringSize", 0.5)), 0.0), 1.0)
+    t = 10.0 ** (-1.0 - 2.5 * sz)
+    # the floor taken off softly: bl^2/(bl + t) -- bl - t well above the
+    # floor, fading as bl^2/t below it, so the glare thins out by itself
+    # instead of being cut. A mask between t and 3t did cut it: next to the
+    # bead the glare falls 3x within a few pixels, and with the exposure
+    # raised that showed as a hard edge on the Moon.
+    m = (bl / (bl + np.float32(t))).astype(np.float32)
+    # chroma at unit luminance, the glare's own median colour divided out
+    a = lin / np.maximum(Y, 1e-6)[:, :, None]
+    sel = (Y > t) & (Y < 0.3)
+    if sel.sum() > 50:
+        k = np.median(a[sel], axis=0)
+    else:
+        k = np.ones(3, np.float32)
+    k = k / max(float(0.2126 * k[0] + 0.7152 * k[1] + 0.0722 * k[2]), 1e-6)
+    a = np.clip(a / k[None, None, :], 0.05, 20.0)
+    T = float(P.get("ringTemp", 1.2))
+    a[:, :, 0] *= T
+    a[:, :, 2] /= T
+    S = float(P.get("ringSat", 1.0))
+    if abs(S - 1.0) > 1e-9:
+        a = a ** np.float32(S)
+    a /= np.maximum(0.2126 * a[:, :, 0] + 0.7152 * a[:, :, 1] + 0.0722 * a[:, :, 2], 1e-6)[:, :, None]
+    ring = (Y * m * np.float32(2.0 ** float(P.get("ringExpo", 0.0))))[:, :, None] * a
+    mx = ring.max(axis=2)
+    knee = 1.0 - 0.5 * min(max(float(P.get("ringHL", 0.5)), 0.0), 1.0)
+    ms = np.where(mx <= knee, mx, knee + (1 - knee) * np.tanh((mx - knee) / max(1 - knee, 1e-3)))
+    ring *= (ms / np.maximum(mx, 1e-6))[:, :, None]
+    w = np.clip((ms - 0.9) / 0.1, 0, 1)[:, :, None]
+    ring = ring * (1 - w) + ms[:, :, None] * w
+    g = 2.2 - 1.1 * min(max(float(P.get("ringFall", 0.6)), 0.0), 1.0)
+    ring = np.clip(ring, 0, 1) ** np.float32(1.0 / g)
+    return np.clip(ring, 0, 1).astype(np.float32)
 
 
 def crop_layers(L, y0, y1, x0, x1):

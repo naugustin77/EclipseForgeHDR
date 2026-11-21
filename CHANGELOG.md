@@ -5,6 +5,66 @@ Newest first. Entries from 0.6.1 onward were written at the time. The 0.7.2 –
 own version and from the development record; where a change cannot be pinned to
 an exact version it is filed under the release it is known to precede.
 
+## 0.33.0
+
+**No re-stack for camera raws:** 0.32.x caches are reused. The Moon layer is
+rebuilt once on the next Start (about a minute). **FITS sets with a PEDESTAL
+keyword:** press Clear cache once and Start (the stack changed, see below).
+
+**New looks**
+- **Cinematic blue** and **Cinematic sunset**: the Clean Steel detail recipe
+  with light around the Moon -- cool white on a deep blue sky, or golden-amber
+  on a warm brown sky with a dark Moon that keeps its earthshine.
+- **Limited dataset**: a set with too little light (a short bracket of 2-3
+  stops, nothing longer than a few milliseconds) is recognised from the run's
+  own measurements and opens on this look: the detail layers and sharpening
+  that would turn its sky noise into a mottled band are off, and the black
+  point is measured on the set. Every other look stays in the list. For the
+  cleanest picture, export the linear HDR merge and denoise it in an
+  image-processing app.
+
+**New controls**
+- **Moon glow** (quick controls, starts at 0.5, 0 = off): the corona's light
+  scattered onto the dark Moon, as a long exposure shows it -- strongest at
+  the rim, fading inward with the fall-off measured on your Moon stack,
+  brighter under bright streamers. Its colour comes from the corona beside
+  the limb, with the prominences left out. Settings files saved without it
+  get 0.5.
+- **Corona glow** (Tone group and quick controls, starts at 0.05, 0 = off): a
+  soft glow from the corona's own light, as a lens shows it. Blurred, so it
+  lifts no grain; the fine loops at the limb stay visible. It is kept mostly
+  off the Moon.
+- **Vignette** (Tone, 0 = off) and **Moon in the sky's colour** (Moon group,
+  0 = off).
+- **Dim the corona around prominences** and its **width** (Prominences group,
+  0 = off): in bright, warm looks the inner corona is close to white, so the
+  prominences had no room left for their colour. The bright corona just
+  around them is dimmed a little; the prominences themselves are unchanged.
+  Golden hour and Cinematic sunset use 0.3, Cinematic blue 0.5 over a wider
+  area.
+
+**Diamond ring**
+- Only the ring and its glare are laid on the picture; the contact frame's
+  sky and corona no longer pale the picture.
+- The core is no longer clipped flat: the layer is kept up to the bead's own
+  peak (the log says how much of the frame the sensor clipped). **Load the
+  contact frame once more** for this; a layer loaded before still works.
+- New controls: Ring size, Ring exposure, Ring glare fall-off, Ring
+  temperature, Ring saturation, Ring highlights ("Ring blend" is now "Ring
+  strength").
+
+**Fixes**
+- FITS with a PEDESTAL keyword: values below the pedestal are kept, as raws
+  keep the negative half of the read noise (they were clamped to zero, which
+  halved the measured read noise and lifted the shortest exposures), and no
+  per-channel black level is fitted on such a mosaic.
+- Browse for a single file (contact frame, settings) opens in the folder of
+  the file already chosen instead of the home folder.
+- On some sets the preview copy of the contact layer was one pixel larger
+  than the picture, and a preview with the ring on failed.
+- Windows: the time-zone database is included, so the site picker's local
+  times no longer fall back to a guess from the longitude.
+
 ## 0.32.1
 
 **No re-stack:** 0.32.0 caches are reused.

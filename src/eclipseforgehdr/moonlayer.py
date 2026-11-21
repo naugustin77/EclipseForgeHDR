@@ -32,11 +32,12 @@ from scipy.signal import fftconvolve
 
 MOON_FILE = "moon_layer.npy"
 MOON_META = "moon_layer.json"
-MOON_BUILD = 9              # 2: limb band levelled and equalised before the fade (2026-10-07)
+MOON_BUILD = 12             # 2: limb band levelled and equalised before the fade (2026-10-07)
                             # 3: scaled by the maria agreement of two half-stacks (2026-10-28)
                             # 4: the structure checked against a map of the real Moon (lunarcheck.py, 2026-11-14)
                             # 5: the Force earthshine variant built alongside (2026-11-14)
                             # 9: blobs of the edge pass faded to the plain disc (2026-11-17)
+                            # 12: the glow's radial shape measured on the stack (2026-11-18)
 #: the variant the Moon group's "Force earthshine" box switches to, and the
 #: small file that remembers the box for this folder
 MOON_FORCE_FILE = "moon_layer_forced.npy"
@@ -156,6 +157,52 @@ def _masters(wd, shape):
         pass
     return bias, rate, flat
 
+
+
+def glow_shape(M, r):
+    """THE MOON GLOW'S RADIAL SHAPE (build 12, 2026-11-18).
+
+    The light the corona scatters onto the dark Moon, as the Moon-aligned
+    stack shows it: per ring of 0.01 R the median above the disc's centre
+    (r < 0.4), lightly smoothed, made to rise monotonically outward and
+    scaled to 1 at the last ring inside the limb (0.98-0.99 R). On the sample
+    dataset it is 0.70 at 0.97 R, 0.27 at 0.9 R, 0.12 at 0.8 R and 0.03 at
+    0.6 R. The render takes the glow's brightness at the rim from the corona
+    beside it, so only this shape comes from here. None when the rim shows no
+    measurable excess (under 2 % of the centre): the render then uses
+    DEFAULT_GLOW_SHAPE."""
+    try:
+        M = np.asarray(M, np.float64); r = np.asarray(r, np.float64)
+        ok = np.isfinite(M) & (M > 0)
+        c = float(np.median(M[ok & (r < 0.4)]))
+        if not (c > 0):
+            return None
+        rb = np.arange(0.0, 0.99, 0.01)
+        ex = np.array([np.median(M[ok & (r >= b) & (r < b + 0.01)]) / c - 1.0
+                       if (ok & (r >= b) & (r < b + 0.01)).sum() > 8 else 0.0 for b in rb])
+        ex = np.maximum(ndimage.gaussian_filter1d(np.nan_to_num(ex), 1.0, mode="nearest"), 0.0)
+        ex = np.maximum.accumulate(ex)
+        if not (ex[-1] > 0.02):
+            return None
+        return [round(float(v), 4) for v in ex / ex[-1]]
+    except Exception:
+        return None
+
+
+#: the shape measured on the sample dataset, for a set whose own stack shows
+#: none (glow_shape returned None) or that has no Moon layer
+#: (rings of 0.01 R from the centre to 0.98-0.99 R)
+DEFAULT_GLOW_SHAPE = [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0002, 0.0005, 0.0008,
+    0.0008, 0.0008, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012,
+    0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.0012,
+    0.0015, 0.0018, 0.0018, 0.0021, 0.0028, 0.0034, 0.004, 0.0046, 0.0054, 0.0061, 0.0068,
+    0.0076, 0.0087, 0.0098, 0.0112, 0.0128, 0.0143, 0.0156, 0.0167, 0.0177, 0.0189, 0.0203,
+    0.0225, 0.0252, 0.0277, 0.0296, 0.0316, 0.0338, 0.036, 0.0384, 0.0414, 0.0449, 0.0485,
+    0.0522, 0.0563, 0.0604, 0.0635, 0.0668, 0.071, 0.0755, 0.0803, 0.0859, 0.0918, 0.0976,
+    0.1037, 0.1109, 0.1187, 0.1269, 0.1362, 0.147, 0.1589, 0.1718, 0.1862, 0.2027, 0.2215,
+    0.2435, 0.268, 0.2961, 0.3304, 0.3725, 0.4246, 0.4905, 0.578, 0.698, 0.8543, 1.0,
+]
 
 def build(folder, wd, progress=None, frames=None):
     """Build MOON_FILE / MOON_META. Returns the meta dict, or None."""
@@ -464,6 +511,7 @@ def build(folder, wd, progress=None, frames=None):
         except Exception as _e:
             _log(progress, f"[warn] Moon layer: dump failed ({_e})", None)
     Eb, r, level, alpha, s_lo, s_hi = _layer(M)
+    _glow_shape = glow_shape(M, r)
     # MARIA AGREEMENT (2026-10-28). The same layer from the first and the
     # second half of the frames (in shooting order), each stacked on its own.
     # Maria are fixed to the Moon and are in both; noise is not, and leftover
@@ -592,7 +640,8 @@ def build(folder, wd, progress=None, frames=None):
             "psf_alpha": alpha, "disc_level": level, "structure_rms": sd,
             "structure_rel": sd / max(level, 1e-9), "band_px_halfres": [s_lo, s_hi],
             "half_frames": list(_hn), "maria_agreement": _agree, "maria_share": _share,
-            "maria_share_halves": _share_halves, "maria_check": _chk, "force": _force}
+            "maria_share_halves": _share_halves, "maria_check": _chk, "force": _force,
+            "glow_shape": _glow_shape}
     json.dump(meta, open(os.path.join(wd, MOON_META), "w"), indent=1)
     _log(progress, f"[ok] Moon layer: {nused} frames, scatter model r^-{alpha:g}, "
                    f"maria {100 * sd / max(level, 1e-9):.2f}% of disc light", None)

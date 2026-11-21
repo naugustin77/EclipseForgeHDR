@@ -54,6 +54,8 @@ def freeze():
             "--collect-data", "skimage"]
     if os.path.exists(icon):
         args += ["--icon", icon]
+    if os.name == "nt":             # the time-zone data zoneinfo needs on Windows (pyproject: tzdata)
+        args += ["--collect-data", "tzdata"]
     if LAB:                         # the lab switch baked in: a double-clicked app has no environment
         os.makedirs(WORK, exist_ok=True)
         hook = os.path.join(WORK, "lab_hook.py")

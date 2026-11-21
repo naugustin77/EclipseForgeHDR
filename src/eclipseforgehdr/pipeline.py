@@ -5856,6 +5856,19 @@ def run(folder, progress: Progress, crop_pc=1600, denoise="off",
                 # level, or a whole unknown one.
                 stats["black_level_reported"] = bool(
                     getattr(rf, "black_level_reported", True))
+                # A FITS MOSAIC WITH A PEDESTAL IS A RAW (0.32.1). The floors
+                # above come from re-mosaicking a 3-plane cube, or from a file
+                # that gives no black level at all. A 2-D CFA FITS whose header
+                # reports PEDESTAL has answered the question the way LibRaw
+                # does for a raw, and the fit then only finds something else:
+                # on the sample dataset (binned from raws, per-site black
+                # subtracted exactly) it subtracted R +36.6 G -43.4 B +6.8 ADU,
+                # while the bias and dark frames of the same set sit within
+                # 1.7 ADU of the pedestal at every Bayer site. Raws never fit
+                # these floors; neither does this.
+                if (stats["fit_channel_floors"] and stats["black_level_reported"]
+                        and not str(getattr(rf, "pattern", "")).startswith("RGB")):
+                    stats["fit_channel_floors"] = False
                 if _black_meas is not None:
                     # measured above and taken off: what is left is a residue,
                     # as after a reported black level -- the pedestal fits keep
@@ -10465,6 +10478,12 @@ def prepare_contact(folder, raw_path, progress):
     geo = json.load(open(os.path.join(wd, "geometry.json")))
     progress.log(f"decoding {os.path.basename(raw_path)}...", 0.1)
     rf = open_frame(raw_path)
+    # how much of the frame the SENSOR clipped -- the ring's core cannot be
+    # recovered there, whatever the encoding below does (2026-11-19)
+    try:
+        _nsat = int(np.count_nonzero(rf.bayer >= float(rf.sat_level)))
+    except Exception:
+        _nsat = -1
     # the contact frame goes through the same optics, so it gets the same flat
     # -- but only if the run that built the composite actually applied one
     _mf = os.path.join(wd, "masterflat.npy")
@@ -10576,8 +10595,29 @@ def prepare_contact(folder, raw_path, progress):
         del _al, _s, _m
     except Exception as _e:
         progress.log(f"[warn] contact frame: ring geometry not checked ({_e})", None)
-    top = np.percentile(lum, 99.9)
-    disp = np.clip(rgb / max(top, 1e-6), 0, 1) ** (1 / 2.2)
+    top = float(np.percentile(lum, 99.9))
+    # ENCODED OVER THE FRAME'S OWN PEAK (2026-11-19), not clipped at its 99.9th
+    # percentile: that clip, channel by channel, left 35 % of a test ring's
+    # pixels with a channel at 1 and 14 % flat white, so the core had no
+    # gradient and its edge went off-colour. `peak` (in units of `top`) goes
+    # to contact.json; render.ring_light decodes lin = layer^2.2 x peak. The
+    # peak is the brightest CHANNEL (red runs above the luminance in a warm
+    # ring), taken slightly blurred so one hot pixel cannot set it; a few
+    # single pixels above it clip, which nobody sees.
+    _pk = max(float(ndimage.gaussian_filter(rgb[::2, ::2, _c], 1.5).max()) for _c in range(3))
+    _pk = max(_pk / max(top, 1e-6), 1.0)
+    _mx = float(np.max(rgb)) / max(top, 1e-6)
+    disp = np.clip(rgb / (max(top, 1e-6) * _pk), 0, 1) ** (1 / 2.2)
+    _frac = (_nsat / float(rf.bayer.size)) if _nsat >= 0 else None
+    progress.log(f"contact frame: peak {_pk:.2f}x its 99.9th percentile, brightest channel "
+                 f"{_mx:.2f}x" + (f", {_nsat} sensor pixels clipped ({100 * _frac:.3f} %)"
+                                  if _frac is not None else ""), None)
+    try:
+        json.dump({"peak": _pk, "top": top, "max_channel": _mx, "sensor_clipped_px": _nsat,
+                   "sensor_clipped_frac": _frac},
+                  open(os.path.join(wd, "contact.json"), "w"), indent=1)
+    except Exception as _e:
+        progress.log(f"[warn] contact frame: contact.json not written ({_e})", None)
     # match the composite frame size if the sensor crop differs slightly
     Hc, Wc = load_big(os.path.join(wd, "hdr_lum.npy")).shape
     out = np.zeros((Hc, Wc, 3), np.float32)

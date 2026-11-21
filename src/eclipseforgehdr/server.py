@@ -148,6 +148,11 @@ def browse():
     # the page sends where it would like to start and a fallback (the raw
     # folder, say, when its eclipseforge_output/ does not exist yet)
     _cands = [path, request.args.get("fallback", ""), os.path.expanduser("~")]
+    # a FILE in the field (the contact frame, a settings file) starts the
+    # browser in the folder holding it -- it used to fall through to the home
+    # folder, so every pick began from the top (2026-11-19)
+    _cands = [os.path.dirname(os.path.expanduser(c)) if c and os.path.isfile(os.path.expanduser(c)) else c
+              for c in _cands]
     path = next((os.path.abspath(os.path.expanduser(c)) for c in _cands
                  if c and os.path.isdir(os.path.expanduser(c))), os.path.expanduser("~"))
     exts = _PICK_EXT.get(kind)
@@ -2159,6 +2164,15 @@ def cache_state():
     return jsonify(out)
 
 
+def _thin_info(ly):
+    """Limited dataset (thindata.py): the verdict and, for a thin set, its look."""
+    try:
+        from . import thindata as _td
+        return _td.for_layers(ly)
+    except Exception as e:
+        return {"thin": False, "error": str(e)}
+
+
 @app.get("/api/geometry")
 def get_geometry():
     ly = STATE["layers"]
@@ -2216,6 +2230,7 @@ def get_geometry():
                     "hillSpan": [_hill_span(ly, i)
                                  for i in range(int(getattr(ly, "n_hill", 0)))],
                     "decim": ly.prev_decim, "has_contact": ly.has_contact,
+                    "contact_peak": float(getattr(ly, "contact_peak", 1.0)),
                     "has_flat": getattr(ly, "has_flat", False),
                     "has_promdet": getattr(ly, "has_promdet", False),
                     "hasPromLayer": bool(getattr(ly, "has_promlayer", False)),
@@ -2238,6 +2253,8 @@ def get_geometry():
                     "flat_range": list(getattr(ly, "flat_range", []) or []),
                     "flat_error": getattr(ly, "flat_error", None),
                     "has_earth": getattr(ly, "has_earth", False),
+                    "glow_shape": getattr(ly, "glow_shape", None),
+                    "thin": _thin_info(ly),
                     "earthForce": _earth_force_info(ly),
                     "runNotes": _run_notes_for(ly)})
 
@@ -2335,6 +2352,14 @@ def load_contact():
     STATE["busy"] = _t
     _t.start()
     return jsonify({"ok": True})
+
+
+@app.get("/api/contact_peak")
+def contact_peak():
+    """The contact layer's encoding peak (render.ring_light), re-read by the
+    page after a contact frame is loaded."""
+    ly = STATE["layers"]
+    return jsonify({"peak": float(getattr(ly, "contact_peak", 1.0)) if ly is not None else 1.0})
 
 
 def _hill_r0(ly):

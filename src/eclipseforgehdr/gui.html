@@ -1081,6 +1081,7 @@ label.optchk.nondef{color:var(--gold2)}
         <div class="xbody">
           <div class="xhead"><label><input type="checkbox" class="xinc"> <b>Linear HDR merge</b></label><span class="xtag">TIFF 32-bit float</span></div>
           <p class="xdesc">The merge before any look: scene-linear, 32-bit float, sRGB primaries, linear ICC profile. 1.0 is the bright inner corona; prominence cores go above it. For HDR finishing in other software. Size and orientation apply.</p>
+          <p class="xdesc" id="thinhint" style="display:none"><b>Limited dataset:</b> this set's noise limits what the looks can do. For the cleanest picture, export this file and run a strong denoiser on it in an image-processing app before you stretch it.</p>
           <div class="xmeta" data-meta="f32"></div>
           <div class="xfoot"><span class="xstat"></span><button class="mini xone">Export</button></div>
         </div>
@@ -1217,6 +1218,8 @@ label.optchk.nondef{color:var(--gold2)}
           <option value="expM5">Clean Steel M5</option>
           <option value="expM6">Clean Steel M6</option>
           <option value="cleanSteelSoft">Clean Steel soft</option>
+          <option value="cinematic">Cinematic blue</option>
+          <option value="cinematicSunset">Cinematic sunset</option>
           <option value="silverRays">Silver rays</option>
           <option value="silverRaysSoft">Silver rays soft</option>
           <option value="nightNavy">Night navy</option>
@@ -1322,6 +1325,8 @@ const DEFS = [
  ["promPeak","Prominence peak (1 = off)",0.6,1,0.005,"prom"],
  ["promSoft","Prominence soft highlights",0,1,0.01,"prom"],
  ["promLight","Prominence brightness (0 = opaque colour)",0,1,0.01,"prom"],
+ ["promDim","Dim the corona around prominences (0 = off)",0,1,0.01,"prom"],
+ ["promDimWidth","Dimmed area width (fraction of R)",0.005,0.08,0.001,"prom"],
  ["promFade","Calm the corona detail under prominences",0,1,0.01,"prom"],
  ["starStrength","Star gain (1 = as in the stack, higher = brighter)",1,10,0.01,"stars"],
  ["starColour","Star colour (0 = white, 1 = as measured)",0,2,0.01,"stars"],
@@ -1338,8 +1343,12 @@ const DEFS = [
  ["skySub","Sky pedestal (0 = off)",0,1,0.01,"tone"],
  ["coronaLevel","Inner corona level, 1.05-1.15 R (0 = off)",0,0.9,0.005,"tone"],
  ["containWhites","Contain whites (ceiling, 1 = off)",0.80,1.0,0.005,"tone"],
+ ["coronaGlow","Corona glow (0 = off)",0,1,0.01,"tone"],
+ ["vignette","Vignette (0 = off)",0,1,0.01,"tone"],
  ["discLevel","Moon disc level",0,0.6,0.002,"moon"],
  ["earthShine","Earthshine (maria contrast)",0,1.5,0.01,"moon"],
+ ["moonGlow","Moon glow (0 = off)",0,1,0.01,"moon"],
+ ["moonSky","Moon in the sky's colour (0 = off)",0,1,0.01,"moon"],
  ["moonColour","Moon colour strength (0 grey, 1 = the picked colour)",0,2.5,0.01,"moon"],
  ["discTrim","Disc mask trim (px)",-40,40,0.5,"moon"],
  ["discSoft","Disc edge softness (px)",2,60,1,"moon"],
@@ -1347,7 +1356,13 @@ const DEFS = [
  ["finalDark","Shadows (minimum)",0,1,0.01,"final"],
  ["finalLight","Highlights (maximum)",0,1,0.01,"final"],
  ["finalNoise","Noise gate (0 = off)",0,8,0.1,"final"],
- ["ringBlend","Ring blend (screen)",0,1,0.01,"ring"],
+ ["ringBlend","Ring strength",0,1,0.01,"ring"],
+ ["ringSize","Ring size (bead to wide glare)",0,1,0.01,"ring"],
+ ["ringExpo","Ring exposure (EV)",0,6,0.05,"ring"],
+ ["ringFall","Ring glare fall-off (soft to steep)",0,1,0.01,"ring"],
+ ["ringTemp","Ring temperature (cool ← → warm)",0.6,1.8,0.01,"ring"],
+ ["ringSat","Ring saturation",0,2,0.01,"ring"],
+ ["ringHL","Ring highlights (hard to soft)",0,1,0.01,"ring"],
  ["ringScale","Ring disc size",0.80,1.25,0.001,"ring"],
  ["ringDX","Ring offset X (px)",-200,200,0.5,"ring"],
  ["ringDY","Ring offset Y (px)",-200,200,0.5,"ring"],
@@ -1453,6 +1468,8 @@ function buildSliders(defaults){
     // a parameter (the looks and Natural keep their values, pixel for pixel);
     // Structure, on the finished picture, is the control now.
     if (k === "clarity") div.style.display = "none";
+    if (k === "promDim") div.title = "Dims the bright corona just around the prominences so they keep their glow in bright, warm looks. Acts only where the corona is bright; the prominences themselves are not changed. 0 = off. Double-click to reset.";
+    if (k === "promDimWidth") div.title = "How far around the prominences the corona is dimmed, as a fraction of the Moon's radius. Double-click to reset.";
     if (k === "promLight") div.title = "How far the prominences brighten the corona under them, so the brightest core is also the brightest part (pale pink where it outshines a light corona). 0 = laid over the corona as an opaque colour, as before. Double-click to reset.";
   if (k === "promSoft") div.title = "Smooths the step from the prominence cores to their rims: the brightest parts keep their structure instead of becoming one flat colour. 0 = off. Double-click to reset.";
   if (k === "limbSoft") div.title = "Eases the fine detail and sharpening next to the Moon, so the bright inner corona stays smooth; the streamers further out keep their full detail. 0 = off. Double-click to reset.";
@@ -1461,6 +1478,17 @@ function buildSliders(defaults){
   if (k === "skySub") div.title = "Takes the even light of a bright (sunset) sky off before the stretch, so Radial flatten lifts the corona without lifting the sky with it. 1 = all of the sky light measured in the outer frame. Higher gives a darker sky and a stronger fall-off towards the corners; near 1 it can print a dark ring where the faint glow meets the sky. 0 = off. Double-click to reset.";
   if (k === "bandFaint") div.title = "Fades the filament detail out in the darker parts of the picture: 0 = everywhere, higher = only where the corona is brighter than this. Double-click to reset.";
   if (k === "bandCoarse") div.title = "How much of the coarse filament texture (6-24 px) the filament detail carries. 1 = as before; lower takes out the blotchy texture next to the limb and keeps the fine filaments.";
+  if (k === "ringBlend") div.title = "How strongly the diamond ring's light is laid over the picture (screen blend). Only the ring and its glare are added; the rest of the contact frame stays out, so the picture keeps its contrast. 0 = off. Double-click to reset.";
+  if (k === "ringSize") div.title = "How much of the ring's glare is kept: 0 = only the bead and what is above 10 % of its peak, 1 = the glare down to 0.03 % of it. The glare fades out by itself rather than being cut. Double-click to reset.";
+  if (k === "ringExpo") div.title = "How bright the ring's light is laid on, in stops: 0 = the bead's peak just white, a thin arc as the camera saw it; higher = a thicker, glowing core. Double-click to reset.";
+  if (k === "ringFall") div.title = "How quickly the ring's glare fades: 0 = soft, a wide grey glow over the corona; 1 = steep, a smaller and harder core with the corona around it left clear. Double-click to reset.";
+  if (k === "ringTemp") div.title = "The colour of the ring's light. 1 = white (the glare's own colour as shot is taken out); above 1 warmer, below 1 cooler. Double-click to reset.";
+  if (k === "ringSat") div.title = "How strong the ring's colour is: 0 = white, 1 = as set by Ring temperature, 2 = deeper. Double-click to reset.";
+  if (k === "ringHL") div.title = "How the brightest part of the ring turns white: 0 = hard, 1 = a soft shoulder that keeps a gradient in the core. A contact frame loaded with an older version is clipped in the core; load it again for the full gradient. Double-click to reset.";
+  if (k === "coronaGlow") div.title = "A soft glow from the corona's own light, as a lens shows it around a bright source: the inner corona lit, the streamers standing out from the sky. Blurred, so it lifts no grain; the fine loops are kept on top. 0 = off. Double-click to reset.";
+  if (k === "vignette") div.title = "Darkens the frame toward its corners, from about a third of the way out from the centre. 0 = off. Double-click to reset.";
+  if (k === "moonSky") div.title = "Tints the dark Moon in the colour of the sky around it, keeping its brightness; the glow at its edge stays white. 0 = off (the Moon colour controls above). Double-click to reset.";
+  if (k === "moonGlow") div.title = "The corona's light scattered onto the dark Moon, as a long exposure shows it: strongest at the rim, fading toward the centre, brighter under bright streamers. 1 = as bright as the corona beside the limb; it starts at 0.5. 0 = off. Double-click to reset.";
   if (k === "bandDetail") div.title = "Lifts filaments and loops size by size, each only as far as its own measured noise allows, so the grain stays down. Full effect at 100 % in the export. Double-click to reset.";
   if (k === "innerDetail") div.title = "Lifts loops and small structure close to the limb, where the stack is cleanest; straight radial rays are held back. Full effect at 100 % in the export, the preview shows it reduced. Double-click to reset.";
     if (k === "starStrength") div.title = "Brightness of the stars found in the stack: 1 keeps them as they are in the stack, above 1 brightens them. Double-click to reset.";
@@ -2838,7 +2866,7 @@ async function loadLayers(){
     if (sn){ sn.innerHTML = starNoteHtml(); drawSkyMap(); } }
   for (const k of ["promGain","promDetail","promChroma"]){
     const el = $("s_"+k), row = el && el.closest(".ctl"); if (row) row.style.display = GEO.hasPromLayer ? "none" : ""; }
-  for (const k of ["promLayer","promStretch","promRim","promSat","promPeak","promFade","promSoft","promLight"]){
+  for (const k of ["promLayer","promStretch","promRim","promSat","promPeak","promFade","promSoft","promLight","promDim","promDimWidth"]){
     const el = $("s_"+k), row = el && el.closest(".ctl"); if (row) row.style.display = GEO.hasPromLayer ? "" : "none"; }
   { const hc = document.querySelector(".promhuectl"); if (hc) hc.style.display = GEO.hasPromLayer ? "" : "none"; }
   if (GEO.hasHill){ names.push("hilllog");
@@ -2911,7 +2939,15 @@ async function loadLayers(){
   // A GOOD FIRST LOOK (2026-11-16): the first result of a session opens on a
   // finished look instead of the camera-coloured stack; the stack as loaded
   // stays one choice in the list
-  if (_fresh && !$("lookpreset").value && LOOKS[DEFAULT_LOOK]){
+  // THIN DATA (2026-11-18, thindata.py): a set too thin for the usual looks
+  // starts with the Limited dataset look and its measured black point
+  syncThinLook();
+  const _sel = $("lookpreset").value;
+  if (LOOKS.thinData && (_fresh || !_sel || _sel === DEFAULT_LOOK)){
+    $("lookpreset").value = "thinData"; $("lookpreset").dispatchEvent(new Event("change"));
+    $("status").textContent = "Limited dataset: " + (GEO.thin.why || []).join(", ")
+      + ". Started with the Limited dataset look (black sky, little detail); every other look is still in the list. For the cleanest picture, export the Linear HDR merge (tab 4) and denoise it in an image-processing app.";
+  } else if (_fresh && !_sel && LOOKS[DEFAULT_LOOK]){
     $("lookpreset").value = DEFAULT_LOOK; $("lookpreset").dispatchEvent(new Event("change"));
   }
   RG.key = ""; RG.last = null; $("rgbtn").disabled = false;
@@ -2926,9 +2962,27 @@ async function loadLayers(){
 // the same elements, moved: their values, resets and saved settings are as
 // before.
 const DEFAULT_LOOK = "expM4";
+// the Limited dataset look exists only for a set the server calls thin; its black
+// point is measured on that set, so it comes with the geometry
+function syncThinLook(){
+  const sel = $("lookpreset"); let opt = sel.querySelector('option[value="thinData"]');
+  const hint = $("thinhint");
+  if (hint) hint.style.display = (GEO && GEO.thin && GEO.thin.thin) ? "" : "none";
+  if (GEO && GEO.thin && GEO.thin.thin && GEO.thin.look){
+    LOOKS.thinData = GEO.thin.look;
+    if (!opt){
+      opt = document.createElement("option"); opt.value = "thinData"; opt.textContent = "Limited dataset";
+      opt.title = "For a set with little light (a short bracket, short exposures, a small sensor): the sky's noise goes to black, the detail layers stay low.";
+      const al = sel.querySelector('option[value="asloaded"]'); if (al) al.after(opt); else sel.appendChild(opt);
+    }
+  } else {
+    delete LOOKS.thinData;
+    if (opt){ if (sel.value === "thinData") sel.value = ""; opt.remove(); }
+  }
+}
 const QUICK = [["outGamma", "Brightness"], ["radialFlatten", "Corona reach (outer corona brighter)"],
                ["detailGain", "Detail"], ["temp", "Colour temperature (blue \u2190 \u2192 yellow)"],
-               ["earthShine", "Earthshine on the Moon"], ["promLayer", "Prominences"]];
+               ["earthShine", "Earthshine on the Moon"], ["moonGlow", "Moon glow"], ["coronaGlow", "Corona glow"], ["promLayer", "Prominences"]];
 let QUICK_BUILT = false;
 function buildQuick(){
   if (QUICK_BUILT) return; QUICK_BUILT = true;
@@ -3129,9 +3183,9 @@ function makeDetail(Q){
 // in this list counts, so a new control is safe by default: it simply makes
 // stage A recompute.
 const STAGE_B_KEYS = new Set(["outGamma","bgBlack","toneCurve","moonCurve",
-  "ringBlend","ringScale","ringDX","ringDY","coronaLevel","skyLevel","skyColour",
+  "coronaGlow","vignette","moonSky","ringBlend","ringSize","ringExpo","ringFall","ringTemp","ringSat","ringHL","ringScale","ringDX","ringDY","coronaLevel","skyLevel","skyColour",
   "moonColour","moonHueR","moonHueG","moonHueB","skyHueR","skyHueG","skyHueB","finalMid","finalDark","finalLight","structure",
-  "finalNoise","containWhites","promLayer","promStretch","promRim","promSat","promSoft","promLight",
+  "finalNoise","containWhites","promLayer","promStretch","promRim","promSat","promSoft","promLight","promDim","promDimWidth",
   "starStrength","starColour","innerDetail","bandDetail","bandCoarse","bandFaint","detailStart"]);
 const RCACHE = {L: null, N: 0, key: "", draft: false};
 function stageKeyA(Q){
@@ -3821,6 +3875,8 @@ function _fsDone(m){
   if (m.err){ _poolOff("final sharpening: " + m.err.split("\n")[0]); if (r && r.job === _fsJob){ r.data = new Uint8ClampedArray(r.data); _fsPost(r); } return; }
   if (!m.ok || !J || !r || m.job !== _fsJob) return;            // cancelled or an older render
   const copy = new ImageData(new Uint8ClampedArray(J.d), r.W, r.H);
+  if (r.view === "composite" || r.view === "moon") moonGlowPass(copy.data, r.PE);
+  if (r.view === "composite") cinePass(copy.data, r.PE);
   if (r.view === "moon") moonMask(copy.data, r.PE); else { promOverlay(copy.data); starOverlay(copy.data); }
   ringPass(copy.data, r.PE);
   octx.putImageData(copy, 0, 0); draw();
@@ -4040,6 +4096,8 @@ function renderNow(){
   // the final sharpening copies the picture BEFORE the prominence layer goes on,
   // and lays the layer on after it -- the order render.py uses
   scheduleFinal(out);
+  if (VIEW === "composite" || VIEW === "moon") moonGlowPass(out.data, P);
+  if (VIEW === "composite") cinePass(out.data, P);
   if (VIEW === "composite"){ promOverlay(out.data); starOverlay(out.data); }
   if (VIEW === "moon") moonMask(out.data, P);
   ringPass(out.data, P);
@@ -4050,20 +4108,76 @@ function renderNow(){
 // detail passes, the sharpening and the prominence/star layers. The page used
 // to screen it inside stage B, so the preview's ring was level-scaled and
 // sharpened while the export's was not (audit 2026-10-10).
-function ringPass(d, P){
-  if (!(P.ringBlend > 0) || !L.contact || VIEW !== "composite") return;
-  const move = (P.ringScale!==1 || P.ringDX!==0 || P.ringDY!==0), dec = GEO.decim || 4, b = P.ringBlend;
-  const N = GEO.W*GEO.H;
-  for (let i=0, j=0; i<N; i++, j+=4){
-    let jr = j;
+// Only the ring's own light is screened on, with its own colour, highlight
+// and fall-off controls -- render.ring_light (2026-11-19), mirrored here.
+// The layer is display-encoded over the bead's own peak: lin = (v/255)^2.2.
+const RINGM = {key: "", src: null, m: null, Y: null, a: null};
+function ringMask(P){
+  const W = GEO.W, H = GEO.H, N = W*H, dec = GEO.decim || 4, pk = +(GEO.contact_peak || 1);
+  const key = [W, H, pk, P.ringSize, P.ringScale, P.ringDX, P.ringDY].join(",");
+  if (RINGM.key === key && RINGM.src === L.contact && RINGM.m) return RINGM;
+  const move = (P.ringScale!==1 || P.ringDX!==0 || P.ringDY!==0);
+  const a = new Float32Array(N*3), Y = new Float32Array(N);
+  for (let i=0; i<N; i++){
+    let jr = i*4;
     if (move){
-      const y = (i/GEO.W)|0, x = i - y*GEO.W;
+      const y = (i/W)|0, x = i - y*W;
       const sy = Math.round(GEO.cy + (y - GEO.cy - P.ringDY/dec)/P.ringScale);
       const sx = Math.round(GEO.cx + (x - GEO.cx - P.ringDX/dec)/P.ringScale);
-      jr = (sy>=0 && sy<GEO.H && sx>=0 && sx<GEO.W) ? (sy*GEO.W+sx)*4 : -1;
+      jr = (sy>=0 && sy<H && sx>=0 && sx<W) ? (sy*W+sx)*4 : -1;
       if (jr < 0) continue;
     }
-    for (let c=0;c<3;c++){ const v = d[j+c]/255; d[j+c] = (1-(1-v)*(1-b*(L.contact[jr+c]/255)))*255; }
+    const r = Math.pow(L.contact[jr]/255, 2.2), g = Math.pow(L.contact[jr+1]/255, 2.2), b = Math.pow(L.contact[jr+2]/255, 2.2);
+    const l = 0.2126*r + 0.7152*g + 0.0722*b;
+    Y[i] = l; const il = 1/Math.max(l, 1e-6);
+    a[i*3] = r*il; a[i*3+1] = g*il; a[i*3+2] = b*il;
+  }
+  const bl = _gauss(Y, W, H, Math.max(0.006*GEO.R, 0.7));
+  const sz = Math.min(Math.max(+(P.ringSize ?? 0.5), 0), 1);
+  // the floor taken off softly (render.ring_light): x bl/(bl + t)
+  const t = Math.pow(10, -1 - 2.5*sz), m = new Float32Array(N);
+  const s0 = [], s1 = [], s2 = [];
+  for (let i=0; i<N; i++){
+    m[i] = bl[i]/(bl[i] + t);
+    if (Y[i] > t && Y[i] < 0.3){ s0.push(a[i*3]); s1.push(a[i*3+1]); s2.push(a[i*3+2]); }
+  }
+  // the glare's own median colour, divided out
+  let k0 = 1, k1 = 1, k2 = 1;
+  if (s0.length > 50){
+    const med = v => { v.sort((p, q) => p - q); const n = v.length, h = n >> 1; return n % 2 ? v[h] : 0.5*(v[h-1] + v[h]); };
+    k0 = med(s0); k1 = med(s1); k2 = med(s2);
+    const kl = Math.max(0.2126*k0 + 0.7152*k1 + 0.0722*k2, 1e-6); k0 /= kl; k1 /= kl; k2 /= kl;
+  }
+  for (let i=0; i<N; i++){
+    a[i*3]   = Math.min(20, Math.max(0.05, a[i*3]/k0));
+    a[i*3+1] = Math.min(20, Math.max(0.05, a[i*3+1]/k1));
+    a[i*3+2] = Math.min(20, Math.max(0.05, a[i*3+2]/k2));
+  }
+  RINGM.key = key; RINGM.src = L.contact; RINGM.m = m; RINGM.Y = Y; RINGM.a = a;
+  return RINGM;
+}
+function ringPass(d, P){
+  if (!(P.ringBlend > 0) || !L.contact || VIEW !== "composite") return;
+  const N = GEO.W*GEO.H, bb = P.ringBlend;
+  const M = ringMask(P), m = M.m, Y = M.Y, A = M.a;
+  const T = +(P.ringTemp ?? 1.2), S = +(P.ringSat ?? 1), ex = Math.pow(2, +(P.ringExpo ?? 2));
+  const knee = 1 - 0.5*Math.min(Math.max(+(P.ringHL ?? 0.5), 0), 1);
+  const ig = 1/(2.2 - 1.1*Math.min(Math.max(+(P.ringFall ?? 0.6), 0), 1));
+  for (let i=0, j=0; i<N; i++, j+=4){
+    const yi = Y[i]*m[i]*ex; if (!(yi > 0)) continue;
+    let a0 = A[i*3]*T, a1 = A[i*3+1], a2 = A[i*3+2]/T;
+    if (Math.abs(S - 1) > 1e-9){ a0 = Math.pow(a0, S); a1 = Math.pow(a1, S); a2 = Math.pow(a2, S); }
+    const al = Math.max(0.2126*a0 + 0.7152*a1 + 0.0722*a2, 1e-6);
+    let r0 = yi*a0/al, r1 = yi*a1/al, r2 = yi*a2/al;
+    const mx = Math.max(r0, r1, r2);
+    const ms = mx <= knee ? mx : knee + (1-knee)*Math.tanh((mx-knee)/Math.max(1-knee, 1e-3));
+    const sc = ms/Math.max(mx, 1e-6); r0 *= sc; r1 *= sc; r2 *= sc;
+    const w = Math.min(1, Math.max(0, (ms - 0.9)/0.1));
+    r0 = r0*(1-w) + ms*w; r1 = r1*(1-w) + ms*w; r2 = r2*(1-w) + ms*w;
+    r0 = Math.pow(Math.min(1, Math.max(0, r0)), ig); r1 = Math.pow(Math.min(1, Math.max(0, r1)), ig); r2 = Math.pow(Math.min(1, Math.max(0, r2)), ig);
+    d[j]   = (1-(1-d[j]/255)  *(1-bb*Math.min(1, r0)))*255;
+    d[j+1] = (1-(1-d[j+1]/255)*(1-bb*Math.min(1, r1)))*255;
+    d[j+2] = (1-(1-d[j+2]/255)*(1-bb*Math.min(1, r2)))*255;
   }
 }
 // THE INNER DETAIL LAYER -- render.py, after look(): the picture times
@@ -4133,6 +4247,200 @@ function lookChromaB(t, b){
   return c.map(v => v/l);
 }
 // THE MOON VIEW -- render.py moon_alpha: the disc with its soft edge, black outside
+// THE MOON GLOW (2026-11-18) -- render.py's moon_glow(), on the finished
+// picture before the prominence and star layers: the corona just outside the
+// limb (1.02-1.04 R, 720 directions, smoothed 2 degrees) is screened onto the
+// disc with the radial shape the Moon layer measured, never brighter than
+// the corona beside it.
+// THE CINEMATIC FINISH (2026-11-19) -- render.py cine(), same order: corona
+// glow, Moon in the sky's colour, vignette; after the Moon glow.
+const GLOW_DETAIL = 0.5, GLOW_ON_MOON = 0.15;
+function cinePass(d, P){
+  const ga = +(P && P.coronaGlow || 0), ms = +(P && P.moonSky || 0), vg = +(P && P.vignette || 0);
+  if (!(ga > 0 || ms > 0 || vg > 0) || !GEO) return;
+  const W = GEO.W, H = GEO.H, cy = GEO.cy, cx = GEO.cx, R = GEO.R, N = W*H;
+  if (d.length !== N*4) return;
+  const DEC = GEO.decim || 4, rr = L.r, rm = L.rmask;
+  if (!rr || !rm || rr.length !== N) return;
+  const dsw = Math.max(1, (P.discSoft||12))/DEC, dt = (P.discTrim||0)/DEC;
+  const al = new Float32Array(N);
+  for (let i = 0; i < N; i++){ const e = (rr[i]-(rm[i]+dt+2/DEC-dsw))/dsw; al[i] = 1 - (e<0?0:e>1?1:e); }
+  const LW = [0.2126, 0.7152, 0.0722];
+  if (ga > 0){
+    const f = Math.max(1, Math.round(R/100)), w = Math.ceil(W/f), h = Math.ceil(H/f);
+    const sm = new Float32Array(w*h);
+    for (let y = 0, j = 0; y < h; y++) for (let x = 0; x < w; x++, j++){
+      const i = y*f*W + x*f, k = i*4;
+      const Y = (LW[0]*d[k] + LW[1]*d[k+1] + LW[2]*d[k+2])/255;
+      sm[j] = Math.min(1, Math.max(0, (Y - 0.45)/0.55))*(1 - al[i]);
+    }
+    const g1 = _gauss(sm, w, h, 0.13*R/f), g2 = _gauss(sm, w, h, 0.5*R/f), g = new Float32Array(w*h);
+    let gm = 1e-6; for (let j = 0; j < w*h; j++){ g[j] = 0.6*g1[j] + 0.4*g2[j]; if (g[j] > gm) gm = g[j]; }
+    // the inner corona's own colour, 1.1-1.5 R, softened
+    let s0 = 0, s1 = 0, s2 = 0, n = 0;
+    const y0 = Math.max(0, Math.floor(cy - 1.5*R)), y1 = Math.min(H-1, Math.ceil(cy + 1.5*R));
+    const x0 = Math.max(0, Math.floor(cx - 1.5*R)), x1 = Math.min(W-1, Math.ceil(cx + 1.5*R));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++){
+      const rn = Math.hypot(y - cy, x - cx)/R; if (rn < 1.1 || rn >= 1.5) continue;
+      const k = (y*W + x)*4; s0 += d[k]; s1 += d[k+1]; s2 += d[k+2]; n++;
+    }
+    let k0 = 1, k1 = 1, k2 = 1;
+    if (n > 50){ const mu = Math.max((s0+s1+s2)/(3*n), 1e-6); k0 = Math.sqrt(s0/n/mu); k1 = Math.sqrt(s1/n/mu); k2 = Math.sqrt(s2/n/mu); }
+    const KK = [k0, k1, k2], ch = [], bl = [];
+    for (let c = 0; c < 3; c++){ const a = new Float32Array(N); for (let i = 0; i < N; i++) a[i] = d[i*4+c]/255; ch.push(a); bl.push(_gauss(a, W, H, 0.03*R)); }
+    for (let y = 0; y < H; y++){
+      const gy = Math.min(y/f, h-1), ya = Math.floor(gy), yb = Math.min(ya+1, h-1), fy = gy - ya;
+      for (let x = 0; x < W; x++){
+        const gx = Math.min(x/f, w-1), xa = Math.floor(gx), xb = Math.min(xa+1, w-1), fx = gx - xa;
+        const gv = ((g[ya*w+xa]*(1-fx) + g[ya*w+xb]*fx)*(1-fy) + (g[yb*w+xa]*(1-fx) + g[yb*w+xb]*fx)*fy)/gm;
+        const i = y*W + x, mk = 1 - (1 - GLOW_ON_MOON)*al[i];
+        for (let c = 0; c < 3; c++){
+          const v = ch[c][i], gl = Math.min(1, Math.max(0, ga*gv*KK[c]))*mk;
+          d[i*4+c] = Math.min(1, Math.max(0, v + gl*(1 - v) + GLOW_DETAIL*gl*(v - bl[c][i])))*255;
+        }
+      }
+    }
+  }
+  if (ms > 0){
+    // the sky's median colour beyond 3 R (2.2 R when that leaves too little)
+    const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+    let cnt = 0;
+    for (const lim of [3.0, 2.2]){
+      for (let c = 0; c < 3; c++) hist[c].fill(0); cnt = 0;
+      for (let i = 0; i < N; i++){ if (rr[i]/R <= lim) continue; const k = i*4; hist[0][d[k]|0]++; hist[1][d[k+1]|0]++; hist[2][d[k+2]|0]++; cnt++; }
+      if (cnt >= 2000) break;
+    }
+    if (cnt > 500){
+      const med = hgm => { let a = 0; for (let b = 0; b < 256; b++){ a += hgm[b]; if (a >= cnt/2) return (b + 0.5)/255; } return 1; };
+      let sk = [med(hist[0]), med(hist[1]), med(hist[2])];
+      let sl = Math.max(LW[0]*sk[0] + LW[1]*sk[1] + LW[2]*sk[2], 1e-6); sk = sk.map(v => Math.pow(Math.max(v/sl, 1e-3), 0.8));
+      sl = Math.max(LW[0]*sk[0] + LW[1]*sk[1] + LW[2]*sk[2], 1e-6); sk = sk.map(v => v/sl);
+      for (let i = 0; i < N; i++){
+        if (!(al[i] > 0)) continue;
+        const k = i*4, r = d[k]/255, g = d[k+1]/255, b = d[k+2]/255, Ym = LW[0]*r + LW[1]*g + LW[2]*b;
+        const wv = ms*al[i]*Math.min(1, Math.max(0, 1 - Ym/0.6)); if (!(wv > 0)) continue;
+        d[k]   = Math.min(1, Math.max(0, r*(1-wv) + Ym*sk[0]*wv))*255;
+        d[k+1] = Math.min(1, Math.max(0, g*(1-wv) + Ym*sk[1]*wv))*255;
+        d[k+2] = Math.min(1, Math.max(0, b*(1-wv) + Ym*sk[2]*wv))*255;
+      }
+    }
+  }
+  if (vg > 0){
+    const hc = (H-1)/2, wc = (W-1)/2, dd = Math.hypot(H/2, W/2);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+      const dn = Math.hypot(y - hc, x - wc)/dd, t = Math.min(1, Math.max(0, (dn - 0.3)/0.7));
+      if (!(t > 0)) continue;
+      const v = 1 - vg*Math.pow(t, 1.6), k = (y*W + x)*4;
+      d[k] *= v; d[k+1] *= v; d[k+2] *= v;
+    }
+  }
+}
+// EMPTY DIRECTIONS (2026-11-20): filled linearly between the filled ones on
+// either side, around the circle, as render.py's np.interp(period=...). The
+// page took the mean of the two nearest; with prominences left out the gaps
+// are wide, and next to the diamond ring the two drew differently (25 levels).
+function glowFillGaps(v, none){
+  const NB = v.length; let first = -1;
+  for (let b = 0; b < NB; b++) if (!isNaN(v[b])){ first = b; break; }
+  if (first < 0){ v.fill(none); return; }
+  let a = first;
+  for (let step = 1; step <= NB; step++){
+    const b = (first + step) % NB;
+    if (isNaN(v[b])) continue;
+    const gap = (b - a + NB) % NB || NB;
+    for (let t = 1; t < gap; t++) v[(a + t) % NB] = v[a] + (v[b] - v[a])*t/gap;
+    a = b;
+    if (b === first) break;
+  }
+}
+function moonGlowPass(d, P){
+  const s = +(P && P.moonGlow || 0);
+  if (!(s > 0) || !GEO) return;
+  const W = GEO.W, H = GEO.H, cy = GEO.cy, cx = GEO.cx, R = GEO.R;
+  if (d.length !== W*H*4) return;
+  const shp = GEO.glow_shape || null; if (!shp || !shp.length) return;
+  const NB = 720, r0 = 1.02, r1 = 1.04;
+  const sum = new Float64Array(NB*3), cnt = new Float64Array(NB);
+  const ymin = Math.max(0, Math.floor(cy - r1*R)), ymax = Math.min(H-1, Math.ceil(cy + r1*R));
+  const xmin = Math.max(0, Math.floor(cx - r1*R)), xmax = Math.min(W-1, Math.ceil(cx + r1*R));
+  const bin = (y, x) => (Math.floor((Math.atan2(y - cy, x - cx) + Math.PI)/(2*Math.PI)*NB) % NB + NB) % NB;
+  // the prominence gate's pixels are not sampled -- unless that would leave fewer than 50 (render.py)
+  const GATE255 = 0.05*255;
+  let useGate = !!(L.prom && L.prom.length === W*H*4);
+  if (useGate){
+    let n = 0;
+    for (let y = ymin; y <= ymax && n < 50; y++) for (let x = xmin; x <= xmax; x++){
+      const rn = Math.hypot(y - cy, x - cx)/R; if (rn < r0 || rn >= r1) continue;
+      if (L.prom[(y*W + x)*4] <= GATE255 && ++n >= 50) break;
+    }
+    if (n < 50) useGate = false;
+  }
+  for (let y = ymin; y <= ymax; y++) for (let x = xmin; x <= xmax; x++){
+    const rn = Math.hypot(y - cy, x - cx)/R; if (rn < r0 || rn >= r1) continue;
+    const b = bin(y, x), i = (y*W + x)*4;
+    if (useGate && L.prom[i] > GATE255) continue;      // prominences left out (render.py GLOW_GATE)
+    sum[b*3] += d[i]; sum[b*3+1] += d[i+1]; sum[b*3+2] += d[i+2]; cnt[b]++;
+  }
+  let tot = 0; for (let b = 0; b < NB; b++) tot += cnt[b]; if (tot < 50) return;
+  const C = new Float32Array(NB*3);
+  for (let k = 0; k < 3; k++){
+    const v = new Float64Array(NB);
+    for (let b = 0; b < NB; b++) v[b] = cnt[b] > 0 ? sum[b*3+k]/cnt[b] : NaN;
+    glowFillGaps(v, NaN);                                           // an empty bin: interpolated (render.py np.interp)
+    // prominences left out: a running median over 25 bins first (render.py GLOW_MEDIAN)
+    { const MH = 12, med = new Float64Array(NB), win = new Float64Array(2*MH+1);
+      for (let b = 0; b < NB; b++){ for (let t = -MH; t <= MH; t++) win[t+MH] = v[(b + t + NB) % NB]; win.sort(); med[b] = win[MH]; }
+      for (let b = 0; b < NB; b++) v[b] = med[b]; }
+    const sg = 4, rad = 12, kw = []; let ks = 0;
+    for (let t = -rad; t <= rad; t++){ const w = Math.exp(-t*t/(2*sg*sg)); kw.push(w); ks += w; }
+    for (let b = 0; b < NB; b++){ let a = 0; for (let t = -rad; t <= rad; t++) a += kw[t+rad]*v[(b + t + NB) % NB]; C[b*3+k] = a/ks/255; }
+  }
+  // the shape carried on to the limb with its own last slope (render.py)
+  const n = shp.length, slope = n > 1 ? Math.max((shp[n-1] - shp[n-2])/0.01, 0) : 0;
+  const fAt = rn => {
+    if (rn >= 1.0) rn = 1.0;
+    const t = rn/0.01 - 0.5;
+    if (t <= 0) return shp[0];
+    if (t < n - 1){ const i0 = Math.floor(t); return shp[i0] + (shp[i0+1] - shp[i0])*(t - i0); }
+    return shp[n-1] + slope*(rn - ((n-1)*0.01 + 0.005));
+  };
+  // the disc's soft edge, as render.py moon_alpha / moonMask
+  const DEC = GEO.decim || 4, rr = L.r, rm = L.rmask;
+  if (!rr || !rm || rr.length !== W*H) return;
+  const dsw = Math.max(1, (P.discSoft||12))/DEC, dt = (P.discTrim||0)/DEC;
+  const alphaAt = i => { const e = (rr[i]-(rm[i]+dt+2/DEC-dsw))/dsw; return 1 - (e<0?0:e>1?1:e); };
+  const ylo = Math.max(0, Math.floor(cy - r0*R)), yhi = Math.min(H-1, Math.ceil(cy + r0*R));
+  const xlo = Math.max(0, Math.floor(cx - r0*R)), xhi = Math.min(W-1, Math.ceil(cx + r0*R));
+  // the disc's own level next to the limb (0.96-0.99 R), per direction
+  const ds = new Float64Array(NB*3), dc = new Float64Array(NB);
+  for (let y = ylo; y <= yhi; y++) for (let x = xlo; x <= xhi; x++){
+    const rn = Math.hypot(y - cy, x - cx)/R; if (rn < 0.96 || rn >= 0.99) continue;
+    const p = y*W + x; if (alphaAt(p) < 0.999) continue;
+    const b = bin(y, x), i = p*4; ds[b*3] += d[i]; ds[b*3+1] += d[i+1]; ds[b*3+2] += d[i+2]; dc[b]++;
+  }
+  const Dl = new Float32Array(NB*3);
+  for (let k = 0; k < 3; k++){
+    const v = new Float64Array(NB);
+    for (let b = 0; b < NB; b++) v[b] = dc[b] > 0 ? ds[b*3+k]/dc[b] : NaN;
+    glowFillGaps(v, 0);
+    const sg = 4, rad = 12, kw = []; let ks = 0;
+    for (let t = -rad; t <= rad; t++){ const w = Math.exp(-t*t/(2*sg*sg)); kw.push(w); ks += w; }
+    for (let b = 0; b < NB; b++){ let a = 0; for (let t = -rad; t <= rad; t++) a += kw[t+rad]*v[(b + t + NB) % NB]; Dl[b*3+k] = a/ks/255; }
+  }
+  // on the disc the glow; in its soft edge the larger of picture and glow
+  for (let y = ylo; y <= yhi; y++) for (let x = xlo; x <= xhi; x++){
+    const p = y*W + x, al = alphaAt(p); if (!(al > 0)) continue;
+    const rn = Math.hypot(y - cy, x - cx)/R, f = fAt(rn), full = al >= 0.999;
+    const b = bin(y, x), i = p*4;
+    for (let k = 0; k < 3; k++){
+      const c = C[b*3+k], o = d[i+k]/255, D = full ? o : Dl[b*3+k];
+      const g = Math.min(Math.max(s*c*f, 0), 1), gs = 1 - (1 - D)*(1 - g);
+      const cap = Math.max(D, c), kn = 0.8*cap, sp = Math.max(cap - kn, 1e-6);
+      const gd = gs > kn ? kn + sp*Math.tanh((gs - kn)/sp) : gs;
+      d[i+k] = Math.round(255*(full ? gd : Math.max(o, gd)));
+    }
+  }
+}
 function moonMask(d, P){
   const DEC = GEO.decim || 4, rr = L.r, rm = L.rmask;
   const dsw = Math.max(1, (P.discSoft||12))/DEC, dt = (P.discTrim||0)/DEC;
@@ -4259,6 +4567,26 @@ function promOverlay(d){
   const PK = Math.min(1, Math.max(0.3, P.promPeak ?? 1));
   const SO = Math.min(1, Math.max(0, P.promSoft ?? 0)), AS = 1/(1 - Math.exp(-1.5)), KN = 1 - 0.4*SO;
   const LI = Math.min(1, Math.max(0, P.promLight ?? 0.8));   // promlayer.overlay: prominence light
+  // the bright corona dimmed around the prominences (promlayer.dim_backdrop)
+  const DM = Math.min(1, Math.max(0, P.promDim ?? 0));
+  if (DM > 0 && GEO.R){
+    const W = GEO.W, H = GEO.H, n = W*H, ap = new Float32Array(n);
+    if (d.length === n*4){
+      for (let i=0, j=0; i<n; i++, j+=4){
+        const Lv = (Ll[j]*256 + Ll[j+1])/65535*4; if (Lv <= 0) continue;
+        let y = Math.pow(Lv, gam); if (y >= 0.9) y = 0.9 + 0.1*Math.tanh((y-0.9)/0.1);
+        ap[i] = Math.min(1, Math.max(0, y*(W1[j]/255)*K));
+      }
+      const Hb = _gauss(ap, W, H, Math.max(0.5, (P.promDimWidth ?? 0.02)*GEO.R));
+      for (let i=0, j=0; i<n; i++, j+=4){
+        const h = Math.min(1, Hb[i]*2); if (h <= 0) continue;
+        const Lb = Math.min(1, Math.max(0, (0.2126*d[j] + 0.7152*d[j+1] + 0.0722*d[j+2])/255));
+        let w = Math.min(1, Math.max(0, (Lb - 0.45)/0.40)); w = w*w*(3 - 2*w);
+        const f = 1 - DM*h*w; if (f >= 1) continue;
+        d[j] *= f; d[j+1] *= f; d[j+2] *= f;
+      }
+    }
+  }
   for (let j=0; j<d.length; j+=4){
     const Lv = (Ll[j]*256 + Ll[j+1])/65535*4;
     if (Lv <= 0) continue;
@@ -4962,6 +5290,8 @@ function _fsMakeWorker(){
       if (_fsNext){ const n = _fsNext; _fsNext = null; _fsPost(n); }
       if (!job || m.job !== _fsJob) return;            // an older render: drop it
       const copy = new ImageData(new Uint8ClampedArray(m.buf), job.W, job.H);
+      if (job.view === "composite" || job.view === "moon") moonGlowPass(copy.data, job.PE);
+      if (job.view === "composite") cinePass(copy.data, job.PE);
       if (job.view === "moon") moonMask(copy.data, job.PE); else { promOverlay(copy.data); starOverlay(copy.data); }
       ringPass(copy.data, job.PE);
       octx.putImageData(copy, 0, 0); draw();
@@ -4986,6 +5316,8 @@ function _fsMain(r){                                    // no worker: the old pa
   const copy = new ImageData(r.data, r.W, r.H);
   structureBoost(copy.data, r.W, r.H, GEO.cy, GEO.cx, GEO.R, r.st, r.ls, r.lsr);
   finalSharpen(copy.data, r.W, r.H, GEO.R, r.mid, r.dark, r.light, r.k, GEO.cy, GEO.cx, r.ls, r.lsr);
+  if (r.view === "composite" || r.view === "moon") moonGlowPass(copy.data, r.PE);
+  if (r.view === "composite") cinePass(copy.data, r.PE);
   if (r.view === "moon") moonMask(copy.data, r.PE); else { promOverlay(copy.data); starOverlay(copy.data); }
   ringPass(copy.data, r.PE);
   octx.putImageData(copy, 0, 0); draw();
@@ -5356,7 +5688,7 @@ function solveWhite(x0, y0, x1, y1, pred, label){
 // Bright desaturated streamers: inner detail 1.25 (gain 7.5; 6-9 looked right, 2026-10-10).
 // Both take the final sharpening 0.35 / 0.20 / 0, gate 6 (full-res test 2026-10-10: half the extra sky grain of 0.29 / 0.20 / 0.31,
 // no bright line along the limb, ~70 % of the gain in the corona kept).
-const LOOKS = {"brightStreamers": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.15, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.2, "moonColour": 0.707, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.992, "moonHueG": 0.796, "moonHueR": 0.647, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 1.1, "skyHueB": 1, "skyHueG": 0.756, "skyHueR": 0.579, "skyLevel": 0.17, "smoothing": 0.25, "structure": 0, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.2, "warm": [0.934, 1.024], "innerDetail": 0, "bandDetail": 1.6}, "calmBlue": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.589, "radialFlatten": 0.0, "envGamma": 1.046, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.0, "clarity": 0.1, "smoothing": 0.25, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.0, "hillDenoise": 0, "hlCompress": 0.0, "fnMix": 0.4, "detailScale": 1, "fnCompress": 0.9, "structure": 0.4, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.21, "innerDenoise": 0.4, "innerDim": 0, "innerDetail": 0, "bandDetail": 2.2, "bandCoarse": 0.0, "finalMid": 0.35, "finalDark": 0.2, "finalLight": 0, "finalNoise": 6}, "sunset": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.545, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.09, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.439, "moonHueG": 0.635, "moonHueR": 1, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 0.9, "skyColour": 0.18, "skyHueB": 0.78, "skyHueG": 0.039, "skyHueR": 0.769, "skyLevel": 0.05, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.06, "discLevel": 0.16, "warm": [2.279, 1.067], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "expM4": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM5": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.58, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM6": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.4, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "silverRays": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.71, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.814, "moonHueR": 0.532, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.235, "satur": 0.085, "skyColour": 2.205, "skyHueB": 1.0, "skyHueG": 0.82, "skyHueR": 0.637, "skyLevel": 0.091, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.125, 1.002], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "nightNavy": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.533, "detailGain": 0.9, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.306, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.484, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.81, "moonHueR": 0.577, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.42, "satur": 0.0, "skyColour": 1.607, "skyHueB": 1.0, "skyHueG": 0.761, "skyHueR": 0.626, "skyLevel": 0.061, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.511], [0.5, 0.729], [0.75, 0.944], [1, 1]], "bgBlack": 0.1, "discLevel": 0.17, "warm": [1.051, 1.0], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "midnightSilver": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.647, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.521, "moonHueR": 0.2, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.95, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.315, "satur": 0.085, "skyColour": 2.056, "skyHueB": 1.0, "skyHueG": 0.823, "skyHueR": 0.659, "skyLevel": 0.142, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.2, 1.078], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "goldenHour": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.64, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.2, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.25, "hlDesat": 0.0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1.0, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.25, "moonHueG": 0.45, "moonHueR": 1.0, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 1.7, "skyColour": 1.786, "skyHueB": 0.376, "skyHueG": 0.584, "skyHueR": 1.0, "skyLevel": 0.074, "smoothing": 0.25, "structure": 0.2, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.088, "discLevel": 0.16, "warm": [1.729, 1.12], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "sunflower": {"baseLift": 0.33, "bgNeutral": 1.0, "clarity": 0.1, "containWhites": 1.0, "coronaLevel": 0.756, "detailGain": 1.01, "detailScale": 1.0, "discSoft": 12.0, "earthShine": 0.3, "envGamma": 1.009, "finalDark": 0.387, "finalLight": 0.0, "finalMid": 0.6, "finalNoise": 6.0, "fnCompress": 0.608, "fnMix": 0.22, "hillBase": 0.0, "hillDenoise": 0.0, "hillGain": 0.02, "hillLogK": 4.0, "hillMix": 0.253, "hillZone": 0.3, "hillZoneR": 2.0, "hlCompress": 0.75, "hlDesat": 0.0, "innerDenoise": 0.4, "innerDim": 0.0, "innerMix": 0.229, "mgnContrast": 0.024, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.077, "pelGain": 0.048, "promChroma": 0.0, "promDetail": 0.7, "promFade": 1.0, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1.0, "promLayer": 1.0, "promPeak": 1.0, "promRim": 1.0, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.49, "satur": 0.15, "skyColour": 0.0, "skyHueB": 0.585, "skyHueG": 0.617, "skyHueR": 0.684, "skyLevel": 0.042, "smoothing": 0.396, "structure": 0.2, "toneCurve": [[0, 0], [0.1, 0.241], [0.25, 0.617], [0.5, 0.838], [0.75, 0.943], [1, 1.0]], "bgBlack": 0.142, "discLevel": 0.0, "innerDetail": 0.0, "bandDetail": 1.703, "hill0": 0.0, "hill1": 1.319, "hill2": 1.382, "hill3": 0.761, "hill4": 0.213, "bandCoarse": 0.0, "colourMode": 2, "coronaHueR": 1.0, "coronaHueG": 0.608, "coronaHueB": 0.304, "skySub": 0.5, "warm": [1.399, 1.041]}, "nightNavySoft": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.63, "detailGain": 0.9, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.306, "finalDark": 0.12, "finalLight": 0, "finalMid": 0.25, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.484, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.81, "moonHueR": 0.577, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.37, "satur": 0.0, "skyColour": 1.607, "skyHueB": 1.0, "skyHueG": 0.761, "skyHueR": 0.626, "skyLevel": 0.061, "smoothing": 0.4, "structure": 0.25, "toneCurve": [[0, 0], [0.25, 0.511], [0.5, 0.729], [0.75, 0.944], [1, 1]], "bgBlack": 0.1, "discLevel": 0.17, "warm": [1.051, 1.0], "innerDetail": 0, "bandDetail": 1.4, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "sunflowerSoft": {"baseLift": 0.33, "bgNeutral": 1.0, "clarity": 0.1, "containWhites": 1.0, "coronaLevel": 0.88, "detailGain": 1.01, "detailScale": 1.0, "discSoft": 12.0, "earthShine": 0.3, "envGamma": 1.009, "finalDark": 0.28, "finalLight": 0.0, "finalMid": 0.45, "finalNoise": 6.0, "fnCompress": 0.608, "fnMix": 0.22, "hillBase": 0.0, "hillDenoise": 0.0, "hillGain": 0.02, "hillLogK": 4.0, "hillMix": 0.253, "hillZone": 0.3, "hillZoneR": 2.0, "hlCompress": 0.9, "hlDesat": 0.0, "innerDenoise": 0.8, "innerDim": 0.0, "innerMix": 0.0, "mgnContrast": 0.024, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.077, "pelGain": 0.048, "promChroma": 0.0, "promDetail": 0.7, "promFade": 1.0, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1.0, "promLayer": 1.0, "promPeak": 1.0, "promRim": 1.0, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.42, "satur": 0.15, "skyColour": 0.0, "skyHueB": 0.585, "skyHueG": 0.617, "skyHueR": 0.684, "skyLevel": 0.042, "smoothing": 0.5, "structure": 0.12, "toneCurve": [[0, 0], [0.1, 0.241], [0.25, 0.617], [0.5, 0.838], [0.75, 0.943], [1, 1.0]], "bgBlack": 0.142, "discLevel": 0.0, "innerDetail": 0.0, "bandDetail": 1.2, "hill0": 0.0, "hill1": 1.319, "hill2": 1.382, "hill3": 0.761, "hill4": 0.213, "bandCoarse": 0.0, "colourMode": 2, "coronaHueR": 1.0, "coronaHueG": 0.608, "coronaHueB": 0.304, "skySub": 0.5, "warm": [1.399, 1.041]}, "brightStreamersSoft": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.73, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.15, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.2, "moonColour": 0.707, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.992, "moonHueG": 0.796, "moonHueR": 0.647, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.26, "satur": 0.15, "skyColour": 1.1, "skyHueB": 1, "skyHueG": 0.756, "skyHueR": 0.579, "skyLevel": 0.17, "smoothing": 0.4, "structure": 0.0, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.2, "warm": [0.934, 1.024], "innerDetail": 0, "bandDetail": 1.04}, "calmBlueSoft": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.68, "radialFlatten": 0, "envGamma": 1.12, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.0, "clarity": 0.1, "smoothing": 0.4, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.0, "hillDenoise": 0, "hlCompress": 0.6, "fnMix": 0.4, "detailScale": 1, "fnCompress": 0.9, "structure": 0.24, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.0, "innerDenoise": 0.8, "innerDim": 0, "innerDetail": 0, "bandDetail": 1.43, "bandCoarse": 0.0, "finalMid": 0.252, "finalDark": 0.13, "finalLight": 0, "finalNoise": 6}, "sunsetSoft": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.595, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.09, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 1, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.439, "moonHueG": 0.635, "moonHueR": 1, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0, "satur": 0.9, "skyColour": 0.18, "skyHueB": 0.78, "skyHueG": 0.039, "skyHueR": 0.769, "skyLevel": 0.05, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.06, "discLevel": 0.16, "warm": [2.279, 1.067], "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "cleanSteelSoft": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.73, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.26, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "silverRaysSoft": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.79, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.814, "moonHueR": 0.532, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.205, "satur": 0.085, "skyColour": 2.205, "skyHueB": 1.0, "skyHueG": 0.82, "skyHueR": 0.637, "skyLevel": 0.091, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.125, 1.002], "innerDetail": 0, "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "midnightSilverSoft": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.727, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.521, "moonHueR": 0.2, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.95, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.255, "satur": 0.085, "skyColour": 2.056, "skyHueB": 1.0, "skyHueG": 0.823, "skyHueR": 0.659, "skyLevel": 0.142, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.2, 1.078], "innerDetail": 0, "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "goldenHourSoft": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.74, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.2, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.6, "hlDesat": 0.0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 1.0, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.25, "moonHueG": 0.45, "moonHueR": 1.0, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0, "satur": 1.7, "skyColour": 1.786, "skyHueB": 0.376, "skyHueG": 0.584, "skyHueR": 1.0, "skyLevel": 0.074, "smoothing": 0.4, "structure": 0.12, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.088, "discLevel": 0.16, "warm": [1.729, 1.12], "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}};
+const LOOKS = {"brightStreamers": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.15, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.2, "moonColour": 0.707, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.992, "moonHueG": 0.796, "moonHueR": 0.647, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 1.1, "skyHueB": 1, "skyHueG": 0.756, "skyHueR": 0.579, "skyLevel": 0.17, "smoothing": 0.25, "structure": 0, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.2, "warm": [0.934, 1.024], "innerDetail": 0, "bandDetail": 1.6}, "calmBlue": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.589, "radialFlatten": 0.0, "envGamma": 1.046, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.0, "clarity": 0.1, "smoothing": 0.25, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.0, "hillDenoise": 0, "hlCompress": 0.0, "fnMix": 0.4, "detailScale": 1, "fnCompress": 0.9, "structure": 0.4, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.21, "innerDenoise": 0.4, "innerDim": 0, "innerDetail": 0, "bandDetail": 2.2, "bandCoarse": 0.0, "finalMid": 0.35, "finalDark": 0.2, "finalLight": 0, "finalNoise": 6}, "sunset": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.545, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.09, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.439, "moonHueG": 0.635, "moonHueR": 1, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 0.9, "skyColour": 0.18, "skyHueB": 0.78, "skyHueG": 0.039, "skyHueR": 0.769, "skyLevel": 0.05, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.06, "discLevel": 0.16, "warm": [2.279, 1.067], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "expM4": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM5": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.58, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "expM6": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.4, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "silverRays": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.71, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.814, "moonHueR": 0.532, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.235, "satur": 0.085, "skyColour": 2.205, "skyHueB": 1.0, "skyHueG": 0.82, "skyHueR": 0.637, "skyLevel": 0.091, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.125, 1.002], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "nightNavy": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.533, "detailGain": 0.9, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.306, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.484, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.81, "moonHueR": 0.577, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.42, "satur": 0.0, "skyColour": 1.607, "skyHueB": 1.0, "skyHueG": 0.761, "skyHueR": 0.626, "skyLevel": 0.061, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.511], [0.5, 0.729], [0.75, 0.944], [1, 1]], "bgBlack": 0.1, "discLevel": 0.17, "warm": [1.051, 1.0], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "midnightSilver": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.647, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.8, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.521, "moonHueR": 0.2, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.95, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.315, "satur": 0.085, "skyColour": 2.056, "skyHueB": 1.0, "skyHueG": 0.823, "skyHueR": 0.659, "skyLevel": 0.142, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.2, 1.078], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "goldenHour": {"promDim": 0.3, "promDimWidth": 0.02, "baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.64, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.2, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.25, "hlDesat": 0.0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1.0, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.25, "moonHueG": 0.45, "moonHueR": 1.0, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.01, "satur": 1.7, "skyColour": 1.786, "skyHueB": 0.376, "skyHueG": 0.584, "skyHueR": 1.0, "skyLevel": 0.074, "smoothing": 0.25, "structure": 0.2, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.088, "discLevel": 0.16, "warm": [1.729, 1.12], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "sunflower": {"baseLift": 0.33, "bgNeutral": 1.0, "clarity": 0.1, "containWhites": 1.0, "coronaLevel": 0.756, "detailGain": 1.01, "detailScale": 1.0, "discSoft": 12.0, "earthShine": 0.3, "envGamma": 1.009, "finalDark": 0.387, "finalLight": 0.0, "finalMid": 0.6, "finalNoise": 6.0, "fnCompress": 0.608, "fnMix": 0.22, "hillBase": 0.0, "hillDenoise": 0.0, "hillGain": 0.02, "hillLogK": 4.0, "hillMix": 0.253, "hillZone": 0.3, "hillZoneR": 2.0, "hlCompress": 0.75, "hlDesat": 0.0, "innerDenoise": 0.4, "innerDim": 0.0, "innerMix": 0.229, "mgnContrast": 0.024, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.077, "pelGain": 0.048, "promChroma": 0.0, "promDetail": 0.7, "promFade": 1.0, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1.0, "promLayer": 1.0, "promPeak": 1.0, "promRim": 1.0, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.49, "satur": 0.15, "skyColour": 0.0, "skyHueB": 0.585, "skyHueG": 0.617, "skyHueR": 0.684, "skyLevel": 0.042, "smoothing": 0.396, "structure": 0.2, "toneCurve": [[0, 0], [0.1, 0.241], [0.25, 0.617], [0.5, 0.838], [0.75, 0.943], [1, 1.0]], "bgBlack": 0.142, "discLevel": 0.0, "innerDetail": 0.0, "bandDetail": 1.703, "hill0": 0.0, "hill1": 1.319, "hill2": 1.382, "hill3": 0.761, "hill4": 0.213, "bandCoarse": 0.0, "colourMode": 2, "coronaHueR": 1.0, "coronaHueG": 0.608, "coronaHueB": 0.304, "skySub": 0.5, "warm": [1.399, 1.041]}, "nightNavySoft": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.63, "detailGain": 0.9, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.306, "finalDark": 0.12, "finalLight": 0, "finalMid": 0.25, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.484, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.81, "moonHueR": 0.577, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.37, "satur": 0.0, "skyColour": 1.607, "skyHueB": 1.0, "skyHueG": 0.761, "skyHueR": 0.626, "skyLevel": 0.061, "smoothing": 0.4, "structure": 0.25, "toneCurve": [[0, 0], [0.25, 0.511], [0.5, 0.729], [0.75, 0.944], [1, 1]], "bgBlack": 0.1, "discLevel": 0.17, "warm": [1.051, 1.0], "innerDetail": 0, "bandDetail": 1.4, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "sunflowerSoft": {"baseLift": 0.33, "bgNeutral": 1.0, "clarity": 0.1, "containWhites": 1.0, "coronaLevel": 0.88, "detailGain": 1.01, "detailScale": 1.0, "discSoft": 12.0, "earthShine": 0.3, "envGamma": 1.009, "finalDark": 0.28, "finalLight": 0.0, "finalMid": 0.45, "finalNoise": 6.0, "fnCompress": 0.608, "fnMix": 0.22, "hillBase": 0.0, "hillDenoise": 0.0, "hillGain": 0.02, "hillLogK": 4.0, "hillMix": 0.253, "hillZone": 0.3, "hillZoneR": 2.0, "hlCompress": 0.9, "hlDesat": 0.0, "innerDenoise": 0.8, "innerDim": 0.0, "innerMix": 0.0, "mgnContrast": 0.024, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.077, "pelGain": 0.048, "promChroma": 0.0, "promDetail": 0.7, "promFade": 1.0, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1.0, "promLayer": 1.0, "promPeak": 1.0, "promRim": 1.0, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.42, "satur": 0.15, "skyColour": 0.0, "skyHueB": 0.585, "skyHueG": 0.617, "skyHueR": 0.684, "skyLevel": 0.042, "smoothing": 0.5, "structure": 0.12, "toneCurve": [[0, 0], [0.1, 0.241], [0.25, 0.617], [0.5, 0.838], [0.75, 0.943], [1, 1.0]], "bgBlack": 0.142, "discLevel": 0.0, "innerDetail": 0.0, "bandDetail": 1.2, "hill0": 0.0, "hill1": 1.319, "hill2": 1.382, "hill3": 0.761, "hill4": 0.213, "bandCoarse": 0.0, "colourMode": 2, "coronaHueR": 1.0, "coronaHueG": 0.608, "coronaHueB": 0.304, "skySub": 0.5, "warm": [1.399, 1.041]}, "brightStreamersSoft": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.73, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.15, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.2, "moonColour": 0.707, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.992, "moonHueG": 0.796, "moonHueR": 0.647, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.26, "satur": 0.15, "skyColour": 1.1, "skyHueB": 1, "skyHueG": 0.756, "skyHueR": 0.579, "skyLevel": 0.17, "smoothing": 0.4, "structure": 0.0, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.2, "warm": [0.934, 1.024], "innerDetail": 0, "bandDetail": 1.04}, "calmBlueSoft": {"bgNeutral": 1, "outGamma": 1.058, "bgBlack": 0.033, "toneCurve": [[0, 0], [0.25, 0.32], [0.5, 0.62], [0.75, 0.85], [1, 1]], "containWhites": 1, "coronaLevel": 0.68, "radialFlatten": 0, "envGamma": 1.12, "satur": 1.069, "skyLevel": 0.126, "skyColour": 0.682, "discLevel": 0.0, "moonColour": 0.0, "hillMix": 0.22, "hillLogK": 4, "hillGain": 0.02, "hillBase": 0, "hillZone": 0.3, "hillZoneR": 2, "earthShine": 0.0, "clarity": 0.1, "smoothing": 0.4, "baseLift": 0.4, "detailGain": 1.05, "mgnContrast": 0.0, "hillDenoise": 0, "hlCompress": 0.6, "fnMix": 0.4, "detailScale": 1, "fnCompress": 0.9, "structure": 0.24, "pelGain": 0, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerMix": 0.0, "innerDenoise": 0.8, "innerDim": 0, "innerDetail": 0, "bandDetail": 1.43, "bandCoarse": 0.0, "finalMid": 0.252, "finalDark": 0.13, "finalLight": 0, "finalNoise": 6}, "sunsetSoft": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.595, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.09, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 1, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.439, "moonHueG": 0.635, "moonHueR": 1, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0, "satur": 0.9, "skyColour": 0.18, "skyHueB": 0.78, "skyHueG": 0.039, "skyHueR": 0.769, "skyLevel": 0.05, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.06, "discLevel": 0.16, "warm": [2.279, 1.067], "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "cleanSteelSoft": {"baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.73, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.26, "satur": 0.15, "skyColour": 2.477, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.1, "discLevel": 0.209, "warm": [1.399, 1.041], "innerDetail": 0, "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "silverRaysSoft": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.79, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.814, "moonHueR": 0.532, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.205, "satur": 0.085, "skyColour": 2.205, "skyHueB": 1.0, "skyHueG": 0.82, "skyHueR": 0.637, "skyLevel": 0.091, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.125, 1.002], "innerDetail": 0, "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "midnightSilverSoft": {"baseLift": 0.4, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.727, "detailGain": 1.1, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.165, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.9, "hlDesat": 0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 0.292, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.521, "moonHueR": 0.2, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.95, "promHueG": 0.7, "promHueR": 1, "promLayer": 1.3, "promPeak": 1, "promRim": 1, "promSat": 1.2, "promStretch": 0.4, "radialFlatten": 0.255, "satur": 0.085, "skyColour": 2.056, "skyHueB": 1.0, "skyHueG": 0.823, "skyHueR": 0.659, "skyLevel": 0.142, "smoothing": 0.4, "structure": 0.24, "toneCurve": [[0, 0], [0.25, 0.459], [0.5, 0.678], [0.75, 0.85], [1, 1]], "bgBlack": 0.1, "discLevel": 0.138, "warm": [1.2, 1.078], "innerDetail": 0, "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0}, "goldenHourSoft": {"baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.74, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.1, "envGamma": 1.2, "finalDark": 0.13, "finalLight": 0, "finalMid": 0.252, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.6, "hlDesat": 0.0, "innerDenoise": 0.8, "innerDim": 0, "innerMix": 0.0, "mgnContrast": 0.0, "moonColour": 1.0, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.25, "moonHueG": 0.45, "moonHueR": 1.0, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0, "satur": 1.7, "skyColour": 1.786, "skyHueB": 0.376, "skyHueG": 0.584, "skyHueR": 1.0, "skyLevel": 0.074, "smoothing": 0.4, "structure": 0.12, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.088, "discLevel": 0.16, "warm": [1.729, 1.12], "bandDetail": 1.43, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0}, "cinematic": {"promDim": 0.5, "promDimWidth": 0.04, "baseLift": 0.45, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.62, "detailGain": 1.3, "detailScale": 1, "discSoft": 12, "earthShine": 0.3, "envGamma": 1.1, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 1, "hlDesat": 0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 0.305, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 1.0, "moonHueG": 0.766, "moonHueR": 0.696, "outGamma": 1.058, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 0.5, "promStretch": 0.5, "radialFlatten": 0.35, "satur": 0.15, "skyColour": 3.2, "skyHueB": 1.0, "skyHueG": 0.802, "skyHueR": 0.477, "skyLevel": 0.093, "smoothing": 0.25, "structure": 0.4, "toneCurve": [[0, 0], [0.25, 0.42], [0.5, 0.7], [0.75, 0.88], [1, 1]], "bgBlack": 0.13, "discLevel": 0.209, "warm": [0.985, 1.0], "innerDetail": 0, "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "bandCoarse": 0.0, "coronaGlow": 0.65, "vignette": 0.3, "moonSky": 0.8}, "cinematicSunset": {"promDim": 0.3, "promDimWidth": 0.02, "baseLift": 0.255, "bgNeutral": 1, "clarity": 0.1, "containWhites": 1, "coronaLevel": 0.64, "detailGain": 1, "detailScale": 1, "discSoft": 12, "earthShine": 0.45, "envGamma": 1.2, "finalDark": 0.2, "finalLight": 0, "finalMid": 0.35, "finalNoise": 6, "fnCompress": 0.9, "fnMix": 0.4, "hillBase": 0, "hillDenoise": 0, "hillGain": 0.02, "hillLogK": 4, "hillMix": 0.22, "hillZone": 0.3, "hillZoneR": 2, "hlCompress": 0.25, "hlDesat": 0.0, "innerDenoise": 0.4, "innerDim": 0, "innerMix": 0.21, "mgnContrast": 0.0, "moonColour": 1.0, "moonCurve": [[0, 0], [1, 1]], "moonHueB": 0.25, "moonHueG": 0.45, "moonHueR": 1.0, "outGamma": 1.09, "pelGain": 0, "promChroma": 0, "promDetail": 0.7, "promFade": 1, "promGain": 0.4, "promHueB": 0.75, "promHueG": 0.7, "promHueR": 1, "promLayer": 1, "promPeak": 1, "promRim": 1, "promSat": 1.3, "promStretch": 0.5, "radialFlatten": 0.3, "satur": 1.7, "skyColour": 2.2, "skyHueB": 0.1, "skyHueG": 0.55, "skyHueR": 1.0, "skyLevel": 0.07, "smoothing": 0.25, "structure": 0.2, "toneCurve": [[0, 0], [0.259, 0.395], [0.677, 0.802], [1, 1]], "bgBlack": 0.098, "discLevel": 0.14, "warm": [1.729, 1.12], "bandDetail": 2.2, "hill0": 0.0, "hill1": 1.0, "hill2": 1.0, "hill3": 0.7, "hill4": 0.4, "innerDetail": 0, "bandCoarse": 0.0, "coronaGlow": 0.65, "vignette": 0.4, "moonSky": 0.0}};
 // As loaded: every look control back to what the server sent after stacking
 // (the picture as it first appeared); a control whose layer was not built stays 0.
 function loadedParams(){
@@ -5472,7 +5804,8 @@ $("ringload").addEventListener("click", async () => {
       runStop("✕", "failed"); $("ringload").disabled = false; return; }
     if (p.done){ runStop("✓", "contact frame loaded");
       await fetchLayer("contact"); $("ringload").disabled = false;
-      $("status").textContent = "contact frame loaded — raise Ring blend"; renderNow(); return; }
+      try { const _cp = await (await fetch("/api/contact_peak")).json(); if (GEO) GEO.contact_peak = +_cp.peak || 1; } catch (e) {}
+      $("status").textContent = "contact frame loaded — raise Ring strength"; renderNow(); return; }
     pollAgain(poll, 600);
   };
   poll();
@@ -6260,8 +6593,8 @@ const BYPASS = {
   "Prominences": {promGain:0, promChroma:0, promLayer:0},
   "Stars": {starStrength:1},
   "Color": {temp:1, tint:1, satur:1, bgNeutral:0, hlCompress:0, hlDesat:0, skyLevel:0},
-  "Tone": {outGamma:1, bgBlack:0, toneCurve:[[0,0],[1,1]], containWhites:1, coronaLevel:0},
-  "Moon": {earthShine:0, moonColour:0, moonCurve:[[0,0],[1,1]]},
+  "Tone": {outGamma:1, bgBlack:0, toneCurve:[[0,0],[1,1]], containWhites:1, coronaLevel:0, coronaGlow:0, vignette:0},
+  "Moon": {earthShine:0, moonColour:0, moonCurve:[[0,0],[1,1]], moonSky:0},
   "Final sharpening": {finalMid:0, finalDark:0, finalLight:0},
   "Diamond ring": {ringBlend:0}
 };
@@ -6296,8 +6629,10 @@ document.querySelectorAll(".group .grouphead").forEach(h => {
 // where you last were for that kind, else the output folder of the loaded raw
 // folder for recipes and settings (the raw folder itself for images), else home.
 function pickStartFor(kind, targetId){
-  const own = $(targetId).value.trim(); if (own) return [own, ""];
   let last = ""; try { last = localStorage.getItem("efh.pickdir." + kind) || ""; } catch(e){}
+  // the field's own path first (the server opens a file's folder), then the
+  // last folder this kind of pick was in
+  const own = $(targetId).value.trim(); if (own) return [own, last || $("folder").value.trim()];
   const folder = $("folder").value.trim();
   const outdir = folder ? folder.replace(/[\/\\]+$/, "") + "/eclipseforge_output" : "";
   if (kind === "settings" || kind === "processing") return [last || outdir, folder];

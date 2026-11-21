@@ -438,7 +438,19 @@ class FitsFrame:
         # unknown" call for different behaviour downstream, and only the first
         # of those is safe to assume.
         self.black_level_reported = bool(reported)
-        data = np.maximum(data, 0.0)
+        # NO CLAMP AT ZERO AFTER A PEDESTAL (0.32.1). Below black, read noise
+        # swings both ways; raw.py keeps the negative half and so must this.
+        # Clamping it cut the measured read noise of a bias FITS from 5.51 to
+        # 2.92 ADU (the raw files of the same bias frames give 5.45 at that
+        # scale), lifted the master bias by 2.8 ADU and the shortest corona
+        # tier by 1.1 ADU over a quarter of its pixels. The two shortest
+        # photometric links then read 1.053 and 1.033 where the raws of the
+        # same frames give 1.015 and 0.998, and the run warned "links lean
+        # the same way"; without the clamp they read 1.006 and 1.013.
+        # Without a pedestal there is nothing below zero in unsigned data, and
+        # the old behaviour is kept for anything else.
+        if not ped:
+            data = np.maximum(data, 0.0)
 
         if data.ndim == 3:
             H, W = data.shape[:2]
